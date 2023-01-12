@@ -1,0 +1,18 @@
+{
+    "cSpell.words": [
+        "bytemuck",
+        "cpass",
+        "egui",
+        "imag",
+        "mandel",
+        "repr",
+        "struct",
+        "unorm",
+        "vulkan",
+        "wgpu",
+        "wgsl",
+        "winit",
+        "workgroups",
+        "Zeroable"
+    ]
+}
