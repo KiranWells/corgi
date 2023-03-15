@@ -7,6 +7,7 @@ This initializes the GPU and creates the buffers and shaders.
 
 use std::sync::{Arc, RwLock};
 
+use color_eyre::{eyre::eyre, Result};
 use wgpu::{
     BindGroup, BindGroupLayoutEntry, Buffer, ComputePipeline, Device, PipelineLayout, Queue,
     Texture, TextureView,
@@ -54,134 +55,8 @@ pub struct BindGroups {
     pub render_texture: BindGroup,
 }
 
-/// Setup the GPU and create the device and queue
-// pub async fn setup_gpu(use_high_precision_float: &mut bool) -> (Device, Queue) {
-//     let instance = wgpu::Instance::new(wgpu::Backends::all());
-//     let adapter = instance
-//         .request_adapter(&wgpu::RequestAdapterOptions {
-//             power_preference: wgpu::PowerPreference::HighPerformance,
-//             compatible_surface: None,
-//             force_fallback_adapter: false,
-//         })
-//         .await
-//         .expect("Failed to find an appropriate adapter");
-//     // hardcoded selection of adapter for testing
-//     // let adapter = instance
-//     //     .enumerate_adapters(wgpu::Backends::all())
-//     //     .find(|a| dbg!(a.get_info()).name.contains("Intel"))
-//     //     .unwrap();
-//     // *use_high_precision_float = adapter.features().contains(wgpu::Features::SHADER_FLOAT64);
-//     // println!("Adapter info: {:?}", adapter.get_info());
-
-//     if let Ok(r) = adapter
-//         .request_device(
-//             &wgpu::DeviceDescriptor {
-//                 label: None,
-//                 features: if dbg!(*use_high_precision_float) {
-//                     wgpu::Features::SHADER_FLOAT64
-//                 } else {
-//                     wgpu::Features::empty()
-//                 },
-//                 limits: wgpu::Limits::default(),
-//             },
-//             None,
-//         )
-//         .await
-//     {
-//         r
-//     } else {
-//         *use_high_precision_float = false;
-//         adapter
-//             .request_device(
-//                 &wgpu::DeviceDescriptor {
-//                     label: None,
-//                     features: wgpu::Features::empty(),
-//                     limits: wgpu::Limits::default(),
-//                 },
-//                 None,
-//             )
-//             .await
-//             .expect("Failed to create device")
-//     }
-// }
-
-// /// Create the GPU data for the image generation
-// /// This includes the buffers and the shaders
-// /// as well as the image texture, a pre-created command
-// /// buffer for the compute shader, and the encoder
-// pub fn create_gpu_data(device: wgpu::Device, queue: wgpu::Queue) -> GPUData {
-//     let encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-//     let compute_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-//         label: None,
-//         source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/calculate.wgsl").into()),
-//     });
-//     GPUData {
-//         device,
-//         queue,
-//         encoder,
-//         // buffers: Buffers {
-//         //     intermediate_step: device.create_buffer(&BufferDescriptor {
-//         //         label: None,
-//         //         size: 0,
-//         //         usage: todo!(),
-//         //         mapped_at_creation: false,
-//         //     }),
-//         // },
-//         compute_shader,
-//     }
-// }
-
 impl GPUData {
     pub async fn init(image: &Image, device: Arc<Device>, queue: Arc<Queue>) -> Self {
-        // The instance is a handle to our GPU
-        // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
-        // let instance = wgpu::Instance::new(wgpu::Backends::VULKAN);
-        // let adapter = instance
-        //     .request_adapter(&wgpu::RequestAdapterOptions {
-        //         power_preference: wgpu::PowerPreference::HighPerformance,
-        //         compatible_surface: None,
-        //         force_fallback_adapter: false,
-        //     })
-        //     .await
-        //     .expect("Failed to find an appropriate adapter");
-        // // hardcoded selection of adapter for testing
-        // // let adapter = instance
-        // //     .enumerate_adapters(wgpu::Backends::all())
-        // //     .find(|a| dbg!(a.get_info()).name.contains("Intel"))
-        // //     .unwrap();
-        // let use_high_precision_float = adapter.features().contains(wgpu::Features::SHADER_FLOAT64);
-        // println!("Adapter info: {:?}", adapter.get_info());
-
-        // let (device, queue) = if let Ok(r) = adapter
-        //     .request_device(
-        //         &wgpu::DeviceDescriptor {
-        //             label: None,
-        //             features: if use_high_precision_float {
-        //                 wgpu::Features::SHADER_FLOAT64
-        //             } else {
-        //                 wgpu::Features::empty()
-        //             },
-        //             limits: wgpu::Limits::default(),
-        //         },
-        //         None,
-        //     )
-        //     .await
-        // {
-        //     r
-        // } else {
-        //     adapter
-        //         .request_device(
-        //             &wgpu::DeviceDescriptor {
-        //                 label: None,
-        //                 features: wgpu::Features::empty(),
-        //                 limits: wgpu::Limits::default(),
-        //             },
-        //             None,
-        //         )
-        //         .await
-        //         .expect("Failed to create device")
-        // };
-
         let compute_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,
             source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/calculate.wgsl").into()),
@@ -216,7 +91,7 @@ impl GPUData {
         }
     }
 
-    pub fn resize(&mut self, new_view: &Viewport) {
+    pub fn resize(&mut self, new_view: &Viewport) -> Result<()> {
         // recreate the texture with the new size
         let rendered_image = Self::create_texture(&self.device, new_view);
         let texture_view = rendered_image.create_view(&wgpu::TextureViewDescriptor::default());
@@ -238,15 +113,14 @@ impl GPUData {
                 });
         self.render_pipeline_layout = render_pipeline_layout;
 
-        *self.rendered_image.write().unwrap() = rendered_image;
+        *self
+            .rendered_image
+            .write()
+            .map_err(|e| eyre!("Failed to lock image: {:?}", e))? = rendered_image;
+        Ok(())
     }
 
     fn create_texture(device: &Device, viewport: &Viewport) -> wgpu::Texture {
-        // let texture_size = wgpu::Extent3d {
-        //     width: viewport.width as u32,
-        //     height: viewport.height as u32,
-        //     depth_or_array_layers: 1,
-        // };
         let texture_size = Self::get_texture_size(viewport);
         device.create_texture(&wgpu::TextureDescriptor {
             // All textures are stored as 3D, we represent our 2D texture
@@ -255,7 +129,6 @@ impl GPUData {
             mip_level_count: 1, // We'll talk about this a little later
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            // Most images are stored using sRGB so we need to reflect that here.
             format: wgpu::TextureFormat::Rgba8Unorm,
             // TEXTURE_BINDING tells wgpu that we want to use this texture in shaders
             // COPY_DST means that we want to copy data to this texture
@@ -263,6 +136,7 @@ impl GPUData {
                 | wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::COPY_SRC,
             label: Some(format!("Texture at time {:?}", std::time::Instant::now()).as_str()),
+            view_formats: &[],
         })
     }
 

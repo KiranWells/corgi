@@ -51,7 +51,11 @@ full process, making it much faster.
 mod gpu_setup;
 mod probe;
 
+use color_eyre::{eyre::eyre, Result};
 use std::sync::{mpsc, Arc, Mutex};
+
+#[cfg(debug_assertions)]
+use tracing::debug;
 
 use crate::types::{ComputeParams, Image, Status, MAX_GPU_GROUP_ITER};
 use probe::probe;
@@ -59,18 +63,18 @@ use probe::probe;
 pub use gpu_setup::GPUData;
 use probe::generate_delta_grid;
 
-#[cfg(debug)]
+#[cfg(debug_assertions)]
 macro_rules! time {
     ($name:literal, $expression:expr) => {{
-        print!("{}...", $name);
         let start = std::time::Instant::now();
         let result = $expression;
         let elapsed = start.elapsed();
-        println!("done in {:?}", elapsed);
+        debug!("{} done in {:?}", $name, elapsed);
         result
     }};
 }
-#[cfg(not(debug))]
+
+#[cfg(not(debug_assertions))]
 macro_rules! time {
     ($name:literal, $expression:expr) => {{
         $expression
@@ -81,7 +85,7 @@ pub async fn render_thread(
     message_channel: mpsc::Receiver<Image>,
     status: Arc<Mutex<Status>>,
     mut gpu_data: GPUData,
-) {
+) -> Result<()> {
     let mut image_tmp = Image::default();
     image_tmp.viewport.width = 1024;
     image_tmp.viewport.height = 1024;
@@ -91,7 +95,7 @@ pub async fn render_thread(
     // values for determining whether to re-run steps
     let mut resize;
     let mut reprobe;
-    let mut regen_delta;
+    let mut regenerate_delta;
     let mut recompute;
     let mut recolor;
 
@@ -100,8 +104,15 @@ pub async fn render_thread(
         while let Ok(image_tmp) = message_channel.try_recv() {
             image = image_tmp;
         }
-        println!("Received image: {:?}", image);
-        let last_image = { status.lock().unwrap().rendered_image.clone() };
+        debug!("Received image: {:?}", image);
+
+        let last_image = {
+            status
+                .lock()
+                .map_err(|e| eyre!("Failed to lock image: {:?}", e))?
+                .rendered_image
+                .clone()
+        };
         if let Some(last_image) = &last_image {
             // if the image has not changed, skip the render
             if &image == last_image {
@@ -115,9 +126,9 @@ pub async fn render_thread(
                 || image.probe_location.0 != last_image.probe_location.0
                 || image.probe_location.1 != last_image.probe_location.1;
             // if the probe location has changed or the image viewport has changed, re-generate the delta grid
-            regen_delta = image.viewport != last_image.viewport || reprobe;
+            regenerate_delta = image.viewport != last_image.viewport || reprobe;
             // if the image generation parameters have changed, re-run the compute shader
-            recompute = image.max_iter != last_image.max_iter || regen_delta || reprobe;
+            recompute = image.max_iter != last_image.max_iter || regenerate_delta || reprobe;
             // if the image coloring parameters have changed, re-run the image render
             recolor =
                 image.coloring != last_image.coloring || recompute || image.misc != last_image.misc;
@@ -125,13 +136,13 @@ pub async fn render_thread(
             // if there is no last image, re-run everything
             resize = true;
             reprobe = true;
-            regen_delta = true;
+            regenerate_delta = true;
             recompute = true;
             recolor = true;
         }
 
         if resize {
-            gpu_data.resize(&image.viewport);
+            gpu_data.resize(&image.viewport)?;
         }
 
         if reprobe {
@@ -142,7 +153,7 @@ pub async fn render_thread(
             );
         }
 
-        if regen_delta {
+        if regenerate_delta {
             // generate the delta grid
             delta_grid = time!(
                 "Generating delta grid",
@@ -150,7 +161,7 @@ pub async fn render_thread(
             );
         }
 
-        if resize || regen_delta {
+        if resize || regenerate_delta {
             // if the image has been resized, but the probe location has not changed, copy the delta grid to the GPU
             gpu_data.queue.write_buffer(
                 &gpu_data.buffers.delta_0,
@@ -162,19 +173,23 @@ pub async fn render_thread(
         if recompute {
             time!(
                 "Running compute shader",
-                run_compute_step(&probed_data, &image, &gpu_data, status.clone())
+                run_compute_step(&probed_data, &image, &gpu_data, status.clone())?
             );
         }
 
         if recolor {
             time!("Running image render", run_render_step(&image, &gpu_data));
         }
-        // last_image = Some(image);
-        let mut status = status.lock().unwrap();
+
+        let mut status = status
+            .lock()
+            .map_err(|e| eyre!("Failed to lock status: {:?}", e))?;
         status.message = "Finished Rendering".to_string();
         status.progress = None;
         status.rendered_image = Some(image);
     }
+
+    Ok(())
 }
 
 fn run_compute_step(
@@ -182,7 +197,7 @@ fn run_compute_step(
     image: &Image,
     gpu_data: &GPUData,
     status: Arc<Mutex<Status>>,
-) {
+) -> Result<()> {
     let GPUData {
         device,
         queue,
@@ -255,7 +270,9 @@ fn run_compute_step(
 
         // submit the compute shader command buffer
         time!("queue submit", queue.submit(Some(command_buffer)));
-        let mut status = status.lock().unwrap();
+        let mut status = status
+            .lock()
+            .map_err(|e| eyre!("Failed to lock status: {:?}", e))?;
         status.message = format!(
             "Rendering {} of {}",
             i * MAX_GPU_GROUP_ITER + parameters.probe_len as usize,
@@ -265,7 +282,8 @@ fn run_compute_step(
             (i * MAX_GPU_GROUP_ITER + parameters.probe_len as usize) as f64 / probe_len as f64,
         );
     }
-    // device.poll(wgpu::Maintain::Wait);
+
+    Ok(())
 }
 
 fn run_render_step(image: &Image, gpu_data: &GPUData) {

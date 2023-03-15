@@ -4,7 +4,9 @@ mod ui;
 
 use std::sync::{mpsc::Sender, Arc, Mutex};
 
+use color_eyre::{Report, Result};
 use egui_wgpu::renderer::ScreenDescriptor;
+use tracing::{error, warn};
 use ui::CorgiUI;
 use winit::window::Window;
 use winit::{
@@ -12,7 +14,7 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
 };
 
-use types::{GPUData, Image, PreviewRenderResources, Status};
+use types::{GPUData, Image, PreviewRenderResources, RenderErr, Status};
 
 struct Debouncer {
     wait_time: std::time::Duration,
@@ -30,9 +32,7 @@ impl Debouncer {
     }
 
     fn trigger(&mut self) {
-        // println!("debouncer triggered");
         self.last_triggered = Some(std::time::Instant::now());
-        // self.cb = Some(Box::new(cb));
     }
 
     fn poll(&mut self) -> bool {
@@ -77,7 +77,7 @@ impl CorgiState {
         status: Arc<Mutex<Status>>,
         preview_resources: PreviewRenderResources,
         gpu_data: GPUData,
-    ) -> Self {
+    ) -> Result<Self> {
         let mut renderer =
             egui_wgpu::Renderer::new(&gpu_data.device, gpu_data.surface_config.format, None, 1);
         let ctx = egui::Context::default();
@@ -85,16 +85,13 @@ impl CorgiState {
         let mut state = egui_winit::State::new(event_loop);
         state.set_pixels_per_point(window.scale_factor() as f32);
 
-        // Because the graphics pipeline must have the same lifetime as the egui render pass,
-        // instead of storing the pipeline in our `Custom3D` struct, we insert it into the
-        // `paint_callback_resources` type map, which is stored alongside the render pass.
         renderer.paint_callback_resources.insert(preview_resources);
 
         let ui_state = CorgiUI::new(status);
 
-        sender.send(ui_state.image().clone()).unwrap();
+        sender.send(ui_state.image().clone())?;
 
-        Self {
+        Ok(Self {
             gpu_data,
             egui: EguiData {
                 state,
@@ -108,12 +105,11 @@ impl CorgiState {
             size: window.inner_size(),
             debouncer: Debouncer::new(std::time::Duration::from_millis(100)),
             window,
-        }
+        })
     }
 
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         self.size = new_size;
-        // println!("Resizing to {:?}", new_size);
         self.gpu_data.resize(new_size);
     }
 
@@ -126,7 +122,7 @@ impl CorgiState {
 
     fn update(&mut self) {}
 
-    fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+    fn render(&mut self) -> Result<(), RenderErr> {
         let window = &self.window;
 
         let image = self.ui_state.image().clone();
@@ -138,14 +134,18 @@ impl CorgiState {
         {
             if &self.last_rendered != self.ui_state.image() {
                 if image.viewport.zoom == self.last_rendered.viewport.zoom {
-                    self.sender.send(image.clone()).unwrap();
+                    self.sender
+                        .send(image.clone())
+                        .map_err(Into::<Report>::into)?;
                     self.debouncer.reset();
                 } else {
                     self.debouncer.trigger();
                 }
                 self.last_rendered = image;
             } else if self.debouncer.poll() {
-                self.sender.send(self.ui_state.image().clone()).unwrap();
+                self.sender
+                    .send(self.ui_state.image().clone())
+                    .map_err(Into::<Report>::into)?;
             }
         }
 
@@ -159,7 +159,7 @@ impl CorgiState {
         let input = self.egui.state.take_egui_input(window);
 
         self.egui.ctx.begin_frame(input);
-        self.ui_state.generate_ui(&self.egui.ctx);
+        self.ui_state.generate_ui(&self.egui.ctx)?;
 
         let egui_output = self.egui.ctx.end_frame();
         let paint_jobs = self.egui.ctx.tessellate(egui_output.shapes);
@@ -177,15 +177,15 @@ impl CorgiState {
             pixels_per_point: window.scale_factor() as f32,
         };
 
-        let egui_rpass = &mut self.egui.renderer;
+        let egui_r_pass = &mut self.egui.renderer;
 
         for (id, image_delta) in &egui_output.textures_delta.set {
-            egui_rpass.update_texture(device, queue, *id, image_delta);
+            egui_r_pass.update_texture(device, queue, *id, image_delta);
         }
         for id in &egui_output.textures_delta.free {
-            egui_rpass.free_texture(id);
+            egui_r_pass.free_texture(id);
         }
-        egui_rpass.update_buffers(device, queue, &mut encoder, &paint_jobs, &screen_descriptor);
+        egui_r_pass.update_buffers(device, queue, &mut encoder, &paint_jobs, &screen_descriptor);
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -200,7 +200,7 @@ impl CorgiState {
                 })],
                 depth_stencil_attachment: None,
             });
-            egui_rpass.render(&mut render_pass, &paint_jobs, &screen_descriptor);
+            egui_r_pass.render(&mut render_pass, &paint_jobs, &screen_descriptor);
         }
 
         // Submit the commands.
@@ -220,8 +220,7 @@ pub async fn run(
     event_loop: EventLoop<()>,
     preview_resources: PreviewRenderResources,
     gpu_data: GPUData,
-) {
-    env_logger::init();
+) -> Result<()> {
     let mut state = CorgiState::init(
         window,
         &event_loop,
@@ -230,7 +229,7 @@ pub async fn run(
         preview_resources,
         gpu_data,
     )
-    .await;
+    .await?;
 
     event_loop.run(move |event, _, control_flow| {
         match event {
@@ -254,7 +253,6 @@ pub async fn run(
                         WindowEvent::Resized(physical_size) => {
                             if physical_size.width == 0 || physical_size.height == 0 {
                                 *control_flow = ControlFlow::Wait;
-                                println!("Window minimized");
                                 return;
                             }
                             state.resize(*physical_size);
@@ -272,11 +270,15 @@ pub async fn run(
                 match state.render() {
                     Ok(_) => {}
                     // Reconfigure the surface if lost
-                    Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
+                    Err(RenderErr::Resize) => state.resize(state.size),
                     // The system is out of memory, we should probably quit
-                    Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
+                    Err(RenderErr::Quit(e)) => {
+                        // print error and exit
+                        error!("Error encountered while rendering: {:?}", e);
+                        *control_flow = ControlFlow::Exit
+                    }
                     // All other errors (Outdated, Timeout) should be resolved by the next frame
-                    Err(e) => eprintln!("{:?}", e),
+                    Err(e) => warn!("Error encountered redraw: {:?}", e),
                 }
             }
             Event::MainEventsCleared => {
@@ -287,5 +289,5 @@ pub async fn run(
             }
             _ => {}
         }
-    });
+    })
 }

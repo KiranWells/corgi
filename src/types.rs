@@ -1,10 +1,16 @@
 use std::{
+    error::Error,
+    fmt::Display,
     num::NonZeroU64,
     sync::{Arc, RwLock},
 };
 
+use color_eyre::{eyre::eyre, Report, Result};
 use rug::{ops::PowAssign, Float};
-use wgpu::{util::DeviceExt, Device, Queue, Surface, SurfaceConfiguration};
+use tracing::info;
+use wgpu::{
+    util::DeviceExt, AdapterInfo, Device, Dx12Compiler, Queue, Surface, SurfaceConfiguration,
+};
 use winit::{dpi::PhysicalSize, window::Window};
 
 pub const ESCAPE_RADIUS: f64 = 1e10;
@@ -158,13 +164,16 @@ impl Viewport {
 }
 
 impl GPUData {
-    pub async fn init(window: &Window) -> Self {
+    pub async fn init(window: &Window) -> Result<Self> {
         let size = window.inner_size();
 
         // The instance is a handle to our GPU
         // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
-        let instance = wgpu::Instance::new(wgpu::Backends::VULKAN);
-        let surface = unsafe { instance.create_surface(window) };
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::GL,
+            dx12_shader_compiler: Dx12Compiler::default(),
+        });
+        let surface = unsafe { instance.create_surface(window) }?;
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
@@ -172,14 +181,9 @@ impl GPUData {
                 force_fallback_adapter: false,
             })
             .await
-            .expect("Failed to find an appropriate adapter");
-        // hardcoded selection of adapter for testing
-        let adapter = instance
-            .enumerate_adapters(wgpu::Backends::all())
-            .find(|a| dbg!(a.get_info()).name.contains("Intel"))
-            .unwrap();
+            .ok_or(eyre!("Failed to find an appropriate adapter"))?;
+
         let use_high_precision_float = adapter.features().contains(wgpu::Features::SHADER_FLOAT64);
-        println!("Adapter info: {:?}", adapter.get_info());
 
         let (device, queue) = if let Ok(r) = adapter
             .request_device(
@@ -207,25 +211,25 @@ impl GPUData {
                     },
                     None,
                 )
-                .await
-                .expect("Failed to create device")
+                .await?
         };
-        let surface_config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface.get_supported_formats(&adapter)[0],
-            width: size.width,
-            height: size.height,
-            present_mode: wgpu::PresentMode::Fifo,
-            alpha_mode: wgpu::CompositeAlphaMode::Auto,
-        };
+
+        let surface_config = surface
+            .get_default_config(&adapter, size.width, size.height)
+            .ok_or(eyre!(
+                "Failed to get default surface config, is this surface supported?"
+            ))?;
         surface.configure(&device, &surface_config);
 
-        Self {
+        let AdapterInfo { name, backend, .. } = adapter.get_info();
+        info!("Running on {name} with the {backend:?} backend");
+
+        Ok(Self {
             device: Arc::new(device),
             queue: Arc::new(queue),
             surface,
             surface_config,
-        }
+        })
     }
 
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -233,7 +237,6 @@ impl GPUData {
         self.surface_config.width = new_size.width;
         self.surface_config.height = new_size.height;
         self.surface.configure(&self.device, &self.surface_config);
-        // println!("Resized to {:?}", new_size);
     }
 }
 
@@ -289,8 +292,7 @@ impl PreviewRenderResources {
         format: wgpu::TextureFormat,
         texture: Arc<RwLock<wgpu::Texture>>,
         size: (usize, usize),
-    ) -> Self {
-        println!("Initializing preview render resources");
+    ) -> Result<Self> {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("custom3d"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/preview.wgsl").into()),
@@ -311,7 +313,7 @@ impl PreviewRenderResources {
         });
         let diffuse_texture_view = texture
             .read()
-            .unwrap()
+            .map_err(|e| eyre!("Failed to read texture: {:?}", e))?
             .create_view(&wgpu::TextureViewDescriptor::default());
         let diffuse_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -393,9 +395,7 @@ impl PreviewRenderResources {
                 angle: 0.0,
                 scale: 0.0,
                 offset: [0.0; 2],
-            }]), // 16 bytes aligned!
-            // Mapping at creation (as done by the create_buffer_init utility) doesn't require us to to add the MAP_WRITE usage
-            // (this *happens* to workaround this bug )
+            }]),
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
         });
 
@@ -408,7 +408,7 @@ impl PreviewRenderResources {
             }],
         });
 
-        Self {
+        Ok(Self {
             format,
             pipeline,
             bind_group,
@@ -416,22 +416,19 @@ impl PreviewRenderResources {
             uniform_buffer,
             texture,
             size,
-        }
+        })
     }
 
-    pub fn resize(&mut self, device: &Device, new_size: (usize, usize)) {
-        // println!("resizing texture {:?}", self.texture.read().unwrap());
-        *self = Self::init(device, self.format, self.texture.clone(), new_size);
+    pub fn resize(&mut self, device: &Device, new_size: (usize, usize)) -> Result<()> {
+        *self = Self::init(device, self.format, self.texture.clone(), new_size)?;
+        Ok(())
     }
 
     pub fn prepare(&self, _device: &wgpu::Device, queue: &wgpu::Queue, transform: Transform) {
-        // Update our uniform buffer with the angle from the UI
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[transform]));
     }
 
     pub fn paint<'rp>(&'rp self, render_pass: &mut wgpu::RenderPass<'rp>) {
-        // println!("painting texture");
-        // Draw our triangle!
         render_pass.set_pipeline(&self.pipeline);
         render_pass.set_bind_group(0, &self.bind_group, &[]);
         render_pass.set_bind_group(1, &self.texture_bind_group, &[]);
@@ -442,3 +439,39 @@ impl PreviewRenderResources {
         &self.size
     }
 }
+
+#[derive(Debug)]
+pub enum RenderErr {
+    Resize,
+    Quit(Report),
+    Warn(Report),
+}
+
+impl From<wgpu::SurfaceError> for RenderErr {
+    fn from(e: wgpu::SurfaceError) -> Self {
+        match e {
+            wgpu::SurfaceError::Lost => Self::Resize,
+            wgpu::SurfaceError::OutOfMemory => Self::Quit(e.into()),
+            wgpu::SurfaceError::Timeout => Self::Warn(e.into()),
+            wgpu::SurfaceError::Outdated => Self::Warn(e.into()),
+        }
+    }
+}
+
+impl From<Report> for RenderErr {
+    fn from(e: Report) -> Self {
+        Self::Quit(e)
+    }
+}
+
+impl Display for RenderErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Resize => write!(f, "Resize"),
+            Self::Quit(e) => write!(f, "Quit: {}", e),
+            Self::Warn(e) => write!(f, "Warn: {}", e),
+        }
+    }
+}
+
+impl Error for RenderErr {}

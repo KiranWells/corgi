@@ -10,6 +10,7 @@ contains the code necessary to render the ui when it needs updating.
 
 use std::sync::{Arc, Mutex};
 
+use color_eyre::{eyre::eyre, Result};
 use egui::PointerButton;
 use rug::{ops::PowAssign, Float};
 
@@ -41,87 +42,101 @@ impl CorgiUI {
             mouse_down: false,
         }
     }
-    pub fn generate_ui(&mut self, ctx: &egui::Context) {
-        egui::SidePanel::right("settings_panel").show(ctx, |ui| {
-            ui.heading("Corgi");
-            ui.separator();
-            ui.label("Viewport");
-            ui.horizontal(|ui| {
-                ui.label("real offset");
-                ui.add(egui::TextEdit::singleline(&mut self.x_text_buff));
-            });
-            ui.horizontal(|ui| {
-                ui.label("imaginary offset");
-                ui.add(egui::TextEdit::singleline(&mut self.y_text_buff));
-            });
-            // probe location
-            ui.horizontal(|ui| {
-                ui.label("probe real");
-                ui.add(egui::TextEdit::singleline(&mut self.x_probe_buff));
-            });
-            ui.horizontal(|ui| {
-                ui.label("probe imaginary");
-                ui.add(egui::TextEdit::singleline(&mut self.y_probe_buff));
-            });
-            ui.button("Set probe")
-                .clicked()
-                .then(|| self.setting_probe = !self.setting_probe);
-            ui.add(
-                egui::Slider::new(&mut self.image_settings.viewport.zoom, -2.0..=500.0)
-                    .text("Zoom"),
-            );
-            ui.add(
-                egui::Slider::new(&mut self.image_settings.max_iter, 100..=100000)
-                    .text("Max iterations"),
-            );
-            ui.separator();
-            ui.label("Coloring");
-            ui.add(
-                egui::Slider::new(&mut self.image_settings.coloring.saturation, 0.0..=2.0)
-                    .text("Saturation"),
-            );
-            ui.add(
-                egui::Slider::new(
-                    &mut self.image_settings.coloring.color_frequency,
-                    0.0..=10.0,
-                )
-                .text("Color frequency"),
-            );
-            ui.add(
-                egui::Slider::new(&mut self.image_settings.coloring.color_offset, 0.0..=1.0)
-                    .text("Color offset"),
-            );
-            ui.add(
-                egui::Slider::new(&mut self.image_settings.coloring.glow_spread, -10.0..=10.0)
-                    .text("Glow spread"),
-            );
-            ui.add(
-                egui::Slider::new(&mut self.image_settings.coloring.glow_intensity, 0.0..=10.0)
-                    .text("Glow intensity"),
-            );
-            ui.add(
-                egui::Slider::new(&mut self.image_settings.coloring.brightness, 0.0..=2.0)
-                    .text("Brightness"),
-            );
-            ui.add(
-                egui::Slider::new(
-                    &mut self.image_settings.coloring.internal_brightness,
-                    0.0..=1000.0,
-                )
-                .text("Internal brightness"),
-            );
-            ui.separator();
-            ui.add(
-                egui::Slider::new(&mut self.image_settings.misc, -1000.0..=1000.0)
-                    .text("Debug parameter"),
-            );
-            ui.separator();
-            ui.label("Status");
-            ui.label(format!("Status: {:?}", self.status.lock().unwrap().message));
-            if let Some(progress) = self.status.lock().unwrap().progress {
-                ui.add(egui::ProgressBar::new(progress as f32));
-            }
-        });
+    pub fn generate_ui(&mut self, ctx: &egui::Context) -> Result<()> {
+        egui::SidePanel::right("settings_panel")
+            .show(ctx, |ui| -> Result<()> {
+                ui.heading("Corgi");
+                ui.separator();
+                ui.label("Viewport");
+                ui.horizontal(|ui| {
+                    ui.label("real offset");
+                    ui.add(egui::TextEdit::singleline(&mut self.x_text_buff));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("imaginary offset");
+                    ui.add(egui::TextEdit::singleline(&mut self.y_text_buff));
+                });
+                // probe location
+                ui.horizontal(|ui| {
+                    ui.label("probe real");
+                    ui.add(egui::TextEdit::singleline(&mut self.x_probe_buff));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("probe imaginary");
+                    ui.add(egui::TextEdit::singleline(&mut self.y_probe_buff));
+                });
+                ui.button("Set probe")
+                    .clicked()
+                    .then(|| self.setting_probe = !self.setting_probe);
+                ui.add(
+                    egui::Slider::new(&mut self.image_settings.viewport.zoom, -2.0..=500.0)
+                        .text("Zoom"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.image_settings.max_iter, 100..=100000)
+                        .text("Max iterations"),
+                );
+                ui.separator();
+                ui.label("Coloring");
+                ui.add(
+                    egui::Slider::new(&mut self.image_settings.coloring.saturation, 0.0..=2.0)
+                        .text("Saturation"),
+                );
+                ui.add(
+                    egui::Slider::new(
+                        &mut self.image_settings.coloring.color_frequency,
+                        0.0..=10.0,
+                    )
+                    .text("Color frequency"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.image_settings.coloring.color_offset, 0.0..=1.0)
+                        .text("Color offset"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.image_settings.coloring.glow_spread, -10.0..=10.0)
+                        .text("Glow spread"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.image_settings.coloring.glow_intensity, 0.0..=10.0)
+                        .text("Glow intensity"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.image_settings.coloring.brightness, 0.0..=2.0)
+                        .text("Brightness"),
+                );
+                ui.add(
+                    egui::Slider::new(
+                        &mut self.image_settings.coloring.internal_brightness,
+                        0.0..=1000.0,
+                    )
+                    .text("Internal brightness"),
+                );
+                ui.separator();
+                ui.add(
+                    egui::Slider::new(&mut self.image_settings.misc, -1000.0..=1000.0)
+                        .text("Debug parameter"),
+                );
+                ui.separator();
+                ui.label("Status");
+                ui.label(format!(
+                    "Status: {:?}",
+                    self.status
+                        .lock()
+                        .map_err(|e| eyre!("Failed to lock image: {:?}", e))?
+                        .message
+                ));
+                if let Some(progress) = self
+                    .status
+                    .lock()
+                    .map_err(|e| eyre!("Failed to lock image: {:?}", e))?
+                    .progress
+                {
+                    ui.add(egui::ProgressBar::new(progress as f32));
+                }
+                Ok(())
+            })
+            .inner?;
 
         let precision = get_precision(self.image().viewport.zoom);
         if let Ok(res) = Float::parse(&self.x_text_buff) {
@@ -145,13 +160,18 @@ impl CorgiUI {
                 let (_id, rect) = ui.allocate_space(size);
 
                 let pointer_in_rect = ui.rect_contains_pointer(rect);
+                let (primary_down, pointer_pos) = ctx.input(|i| {
+                    (
+                        i.pointer.button_down(PointerButton::Primary),
+                        i.pointer.interact_pos(),
+                    )
+                });
 
-                self.mouse_down =
-                    ctx.input().pointer.button_down(PointerButton::Primary) && pointer_in_rect;
+                self.mouse_down = primary_down && pointer_in_rect;
                 if pointer_in_rect {
                     if self.setting_probe {
-                        if ui.input().pointer.button_clicked(PointerButton::Primary) {
-                            if let Some(pos) = ui.input().pointer.interact_pos() {
+                        if primary_down {
+                            if let Some(pos) = pointer_pos {
                                 let (x, y) = self
                                     .image_settings
                                     .viewport
@@ -164,14 +184,14 @@ impl CorgiUI {
                         }
                     } else {
                         // get scroll and drag inputs to change the viewport
-                        let scroll = ui.input().scroll_delta;
-                        let pixel_scale = ui.input().pixels_per_point;
+                        let (scroll, pixel_scale) =
+                            ui.input(|i| (i.scroll_delta, i.pixels_per_point));
                         let mut drag = egui::Vec2::new(0.0, 0.0);
-                        if let Some(new_pos) = ui.input().pointer.interact_pos() {
+                        if let Some(new_pos) = pointer_pos {
                             if let Some(old_pos) = self.previous_cursor_pos {
                                 drag = new_pos - old_pos;
                             }
-                            if ui.input().pointer.button_down(PointerButton::Primary) {
+                            if primary_down {
                                 self.previous_cursor_pos = Some(new_pos)
                             } else {
                                 self.previous_cursor_pos = None;
@@ -211,19 +231,21 @@ impl CorgiUI {
                 let view_ref = self.image_settings.viewport.clone();
                 let cb = egui_wgpu::CallbackFn::new()
                     .prepare(move |device, queue, _encoder, type_map| {
-                        let res = type_map.get_mut::<PreviewRenderResources>().unwrap();
+                        let res = type_map
+                            .get_mut::<PreviewRenderResources>()
+                            .expect("Failed to get render resources");
 
                         let transforms = if let Some(viewport) = {
                             status
                                 .lock()
-                                .unwrap()
+                                .expect("Failed to lock status")
                                 .rendered_image
                                 .as_ref()
                                 .map(|x| &x.viewport)
                         } {
                             let size = (viewport.width, viewport.height);
                             if size != *res.size() {
-                                res.resize(device, size);
+                                res.resize(device, size).expect("Failed to resize");
                             }
                             viewport.transforms_from(&view_ref)
                         } else {
@@ -233,11 +255,11 @@ impl CorgiUI {
                         res.prepare(device, queue, transforms);
                         Vec::new()
                     })
-                    .paint(move |_info, rpass, type_map| {
+                    .paint(move |_info, render_pass, type_map| {
                         type_map
                             .get::<PreviewRenderResources>()
-                            .unwrap()
-                            .paint(rpass);
+                            .expect("Failed to get render resources")
+                            .paint(render_pass);
                     });
 
                 let callback = egui::PaintCallback {
@@ -248,6 +270,8 @@ impl CorgiUI {
                 ui.painter().add(callback);
             });
         });
+
+        Ok(())
     }
 
     pub fn image(&self) -> &Image {
