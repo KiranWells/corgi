@@ -51,8 +51,9 @@ full process, making it much faster.
 mod gpu_setup;
 mod probe;
 
-use color_eyre::{eyre::eyre, Result};
-use std::sync::{mpsc, Arc, Mutex};
+use color_eyre::Result;
+use std::sync::Arc;
+use tokio::sync::{mpsc, Mutex};
 
 #[cfg(debug_assertions)]
 use tracing::debug;
@@ -82,7 +83,7 @@ macro_rules! time {
 }
 
 pub async fn render_thread(
-    message_channel: mpsc::Receiver<Image>,
+    mut message_channel: mpsc::Receiver<Image>,
     status: Arc<Mutex<Status>>,
     mut gpu_data: GPUData,
 ) -> Result<()> {
@@ -99,20 +100,14 @@ pub async fn render_thread(
     let mut recompute;
     let mut recolor;
 
-    while let Ok(mut image) = message_channel.recv() {
+    while let Some(mut image) = message_channel.recv().await {
         // clear the message channel queue and only process the last message
         while let Ok(image_tmp) = message_channel.try_recv() {
             image = image_tmp;
         }
         debug!("Received image: {:?}", image);
 
-        let last_image = {
-            status
-                .lock()
-                .map_err(|e| eyre!("Failed to lock image: {:?}", e))?
-                .rendered_image
-                .clone()
-        };
+        let last_image = { status.lock().await.rendered_image.clone() };
         if let Some(last_image) = &last_image {
             // if the image has not changed, skip the render
             if &image == last_image {
@@ -142,7 +137,7 @@ pub async fn render_thread(
         }
 
         if resize {
-            gpu_data.resize(&image.viewport)?;
+            gpu_data.resize(&image.viewport).await?;
         }
 
         if reprobe {
@@ -173,7 +168,7 @@ pub async fn render_thread(
         if recompute {
             time!(
                 "Running compute shader",
-                run_compute_step(&probed_data, &image, &gpu_data, status.clone())?
+                run_compute_step(&probed_data, &image, &gpu_data, status.clone()).await?
             );
         }
 
@@ -181,9 +176,7 @@ pub async fn render_thread(
             time!("Running image render", run_render_step(&image, &gpu_data));
         }
 
-        let mut status = status
-            .lock()
-            .map_err(|e| eyre!("Failed to lock status: {:?}", e))?;
+        let mut status = status.lock().await;
         status.message = "Finished Rendering".to_string();
         status.progress = None;
         status.rendered_image = Some(image);
@@ -192,7 +185,7 @@ pub async fn render_thread(
     Ok(())
 }
 
-fn run_compute_step(
+async fn run_compute_step(
     probed_data: &(Vec<[f32; 2]>, Vec<[f32; 2]>),
     image: &Image,
     gpu_data: &GPUData,
@@ -270,9 +263,7 @@ fn run_compute_step(
 
         // submit the compute shader command buffer
         time!("queue submit", queue.submit(Some(command_buffer)));
-        let mut status = status
-            .lock()
-            .map_err(|e| eyre!("Failed to lock status: {:?}", e))?;
+        let mut status = status.lock().await;
         status.message = format!(
             "Rendering {} of {}",
             i * MAX_GPU_GROUP_ITER + parameters.probe_len as usize,

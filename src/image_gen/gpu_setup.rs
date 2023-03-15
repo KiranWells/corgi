@@ -5,9 +5,10 @@ This initializes the GPU and creates the buffers and shaders.
 
 */
 
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
-use color_eyre::{eyre::eyre, Result};
+use color_eyre::Result;
+use tokio::sync::RwLock;
 use wgpu::{
     BindGroup, BindGroupLayoutEntry, Buffer, ComputePipeline, Device, PipelineLayout, Queue,
     Texture, TextureView,
@@ -91,7 +92,7 @@ impl GPUData {
         }
     }
 
-    pub fn resize(&mut self, new_view: &Viewport) -> Result<()> {
+    pub async fn resize(&mut self, new_view: &Viewport) -> Result<()> {
         // recreate the texture with the new size
         let rendered_image = Self::create_texture(&self.device, new_view);
         let texture_view = rendered_image.create_view(&wgpu::TextureViewDescriptor::default());
@@ -113,10 +114,7 @@ impl GPUData {
                 });
         self.render_pipeline_layout = render_pipeline_layout;
 
-        *self
-            .rendered_image
-            .write()
-            .map_err(|e| eyre!("Failed to lock image: {:?}", e))? = rendered_image;
+        *self.rendered_image.write().await = rendered_image;
         Ok(())
     }
 

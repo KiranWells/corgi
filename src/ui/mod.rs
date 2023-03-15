@@ -8,11 +8,13 @@ contains the code necessary to render the ui when it needs updating.
 
  */
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use color_eyre::{eyre::eyre, Result};
+use color_eyre::Result;
 use egui::PointerButton;
 use rug::{ops::PowAssign, Float};
+use tokio::runtime::Handle;
+use tokio::{sync::Mutex, task::block_in_place};
 
 use crate::types::{get_precision, Image, PreviewRenderResources, Status, Transform};
 
@@ -42,7 +44,15 @@ impl CorgiUI {
             mouse_down: false,
         }
     }
-    pub fn generate_ui(&mut self, ctx: &egui::Context) -> Result<()> {
+    pub async fn generate_ui(&mut self, ctx: &egui::Context) -> Result<()> {
+        let Status {
+            progress,
+            message,
+            rendered_image,
+        } = {
+            let locked = self.status.lock().await;
+            (*locked).clone()
+        };
         egui::SidePanel::right("settings_panel")
             .show(ctx, |ui| -> Result<()> {
                 ui.heading("Corgi");
@@ -119,19 +129,8 @@ impl CorgiUI {
                 );
                 ui.separator();
                 ui.label("Status");
-                ui.label(format!(
-                    "Status: {:?}",
-                    self.status
-                        .lock()
-                        .map_err(|e| eyre!("Failed to lock image: {:?}", e))?
-                        .message
-                ));
-                if let Some(progress) = self
-                    .status
-                    .lock()
-                    .map_err(|e| eyre!("Failed to lock image: {:?}", e))?
-                    .progress
-                {
+                ui.label(format!("Status: {:?}", message));
+                if let Some(progress) = progress {
                     ui.add(egui::ProgressBar::new(progress as f32));
                 }
                 Ok(())
@@ -153,7 +152,6 @@ impl CorgiUI {
             self.image_settings.probe_location.1 = Float::with_val(precision, res)
         }
 
-        let status = self.status.clone();
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::Frame::canvas(ui.style()).show(ui, |ui| {
                 let size = ui.available_size();
@@ -220,6 +218,7 @@ impl CorgiUI {
 
                 self.image_settings.viewport.width = size.x as usize;
                 self.image_settings.viewport.height = size.y as usize;
+
                 // The callback function for WGPU is in two stages: prepare, and paint.
                 //
                 // The prepare callback is called every frame before paint and is given access to the wgpu
@@ -235,17 +234,15 @@ impl CorgiUI {
                             .get_mut::<PreviewRenderResources>()
                             .expect("Failed to get render resources");
 
-                        let transforms = if let Some(viewport) = {
-                            status
-                                .lock()
-                                .expect("Failed to lock status")
-                                .rendered_image
-                                .as_ref()
-                                .map(|x| &x.viewport)
-                        } {
+                        let transforms = if let Some(viewport) =
+                            { rendered_image.as_ref().map(|x| &x.viewport) }
+                        {
                             let size = (viewport.width, viewport.height);
                             if size != *res.size() {
-                                res.resize(device, size).expect("Failed to resize");
+                                block_in_place(|| {
+                                    Handle::current().block_on(res.resize(device, size))
+                                })
+                                .expect("Failed to resize render resources");
                             }
                             viewport.transforms_from(&view_ref)
                         } else {
