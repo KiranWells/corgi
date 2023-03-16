@@ -12,12 +12,12 @@ use winit::{event::*, event_loop::EventLoop};
 use winit::{event_loop::ControlFlow, window::Window};
 
 use crate::{
-    types::{Debouncer, EguiData, GPUData, Image, PreviewRenderResources, RenderErr, Status},
+    types::{Debouncer, EguiData, GPUHandles, Image, PreviewRenderResources, RenderErr, Status},
     ui::CorgiUI,
 };
 
 pub struct CorgiState {
-    gpu_data: GPUData,
+    gpu_data: GPUHandles,
     egui: EguiData,
     ui_state: CorgiUI,
     last_rendered: Image,
@@ -34,7 +34,7 @@ impl CorgiState {
         sender: mpsc::Sender<Image>,
         status: Arc<Mutex<Status>>,
         preview_resources: PreviewRenderResources,
-        gpu_data: GPUData,
+        gpu_data: GPUHandles,
     ) -> Result<Self> {
         let mut renderer =
             egui_wgpu::Renderer::new(&gpu_data.device, gpu_data.surface_config.format, None, 1);

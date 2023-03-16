@@ -12,7 +12,7 @@ use tokio::sync::Mutex;
 use winit::event_loop::EventLoop;
 use winit::{dpi::PhysicalSize, window::WindowBuilder};
 
-use types::{GPUData, Image, PreviewRenderResources, Status};
+use types::{GPUHandles, Image, PreviewRenderResources, Status};
 
 pub async fn run() -> Result<()> {
     // set up initial data
@@ -30,7 +30,7 @@ pub async fn run() -> Result<()> {
             height: 512,
         })
         .build(&event_loop)?;
-    let gpu_data = GPUData::init(&window).await?;
+    let gpu_data = GPUHandles::init(&window).await?;
     let initial_image = Image::default();
     let render_gpu_data = image_gen::GPUData::init(
         &initial_image,
