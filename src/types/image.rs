@@ -1,7 +1,9 @@
 use rug::{ops::PowAssign, Float};
+use wgpu::Extent3d;
 
 use super::get_precision;
 
+/// A representation of the current viewed portion of the fractal
 #[derive(Debug, Clone, PartialEq)]
 pub struct Viewport {
     pub width: usize,
@@ -11,6 +13,8 @@ pub struct Viewport {
     pub y: Float,
 }
 
+/// A representation of the current image being rendered, including
+/// the viewport, coloring, and other parameters
 #[derive(Debug, Clone, PartialEq)]
 pub struct Image {
     pub viewport: Viewport,
@@ -20,6 +24,7 @@ pub struct Image {
     pub misc: f32,
 }
 
+/// The coloring parameters for the image
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Coloring {
     pub saturation: f32,
@@ -31,6 +36,8 @@ pub struct Coloring {
     pub internal_brightness: f32,
 }
 
+/// The parameters for the compute shader. This is sent as a uniform
+/// to the compute shader.
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ComputeParams {
@@ -41,6 +48,8 @@ pub struct ComputeParams {
     pub iter_offset: u32,
 }
 
+/// The parameters for the render shader. This is sent as a uniform
+/// to the render shader.
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct RenderParams {
@@ -57,6 +66,8 @@ pub struct RenderParams {
     pub misc: f32,
 }
 
+/// The parameters for the preview shader. This is sent as a uniform
+/// to the preview shader.
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Transform {
@@ -90,6 +101,7 @@ impl Default for Coloring {
 }
 
 impl Viewport {
+    /// Derives the transforms from another viewport to this one
     pub fn transforms_from(&self, other: &Self) -> Transform {
         let scale = f32::powf(2.0, -(self.zoom - other.zoom) as f32);
         let mut this_scale = Float::with_val(get_precision(self.zoom), 2.0);
@@ -107,10 +119,12 @@ impl Viewport {
         }
     }
 
+    /// The aspect ratio of the viewport
     pub fn aspect_ratio(&self) -> f64 {
         self.width as f64 / self.height as f64
     }
 
+    /// Gets the fractal coordinates of a pixel from viewport coordinates
     pub fn get_real_coords(&self, x: f64, y: f64) -> (Float, Float) {
         let precision = get_precision(self.zoom);
         let mut scale = Float::with_val(precision, 2.0);
@@ -124,20 +138,30 @@ impl Viewport {
     }
 }
 
-impl Image {
-    pub fn to_render_params(&self) -> RenderParams {
+impl From<&Viewport> for Extent3d {
+    fn from(viewport: &Viewport) -> Self {
+        Self {
+            width: viewport.width as u32,
+            height: viewport.height as u32,
+            depth_or_array_layers: 1,
+        }
+    }
+}
+
+impl From<&Image> for RenderParams {
+    fn from(image: &Image) -> Self {
         RenderParams {
-            image_width: self.viewport.width as u32,
-            max_step: self.max_iter as u32,
-            zoom: self.viewport.zoom as f32,
-            saturation: self.coloring.saturation,
-            color_frequency: self.coloring.color_frequency,
-            color_offset: self.coloring.color_offset,
-            glow_spread: self.coloring.glow_spread,
-            glow_intensity: self.coloring.glow_intensity,
-            brightness: self.coloring.brightness,
-            internal_brightness: self.coloring.internal_brightness,
-            misc: self.misc,
+            image_width: image.viewport.width as u32,
+            max_step: image.max_iter as u32,
+            zoom: image.viewport.zoom as f32,
+            saturation: image.coloring.saturation,
+            color_frequency: image.coloring.color_frequency,
+            color_offset: image.coloring.color_offset,
+            glow_spread: image.coloring.glow_spread,
+            glow_intensity: image.coloring.glow_intensity,
+            brightness: image.coloring.brightness,
+            internal_brightness: image.coloring.internal_brightness,
+            misc: image.misc,
         }
     }
 }

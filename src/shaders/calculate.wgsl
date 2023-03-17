@@ -2,17 +2,16 @@
 
 // inputs
 @group(0) @binding(0) var<storage> probed_point : array<vec2<f32>>;
-// @group(0) @binding(1) var<storage> probed_point_prime : array<vec2<f32>>;
-@group(0) @binding(2) var<storage> delta_grid : array<vec2<f32>>;
+@group(0) @binding(1) var<storage> delta_grid : array<vec2<f32>>;
 // note: delta_grid_iter is used as both input and output, as it needs to be saved for each iteration
-@group(0) @binding(3) var<storage, read_write> delta_grid_iter : array<vec2<f32>>;
-@group(0) @binding(4) var<storage, read_write> delta_grid_prime : array<vec2<f32>>;
+@group(0) @binding(2) var<storage, read_write> delta_grid_iter : array<vec2<f32>>;
+@group(0) @binding(3) var<storage, read_write> delta_grid_prime : array<vec2<f32>>;
 
 // outputs
-@group(0) @binding(5) var<storage, read_write> intermediate_step : array<u32>;
-@group(0) @binding(6) var<storage, read_write> orbit_trap : array<f32>;
-@group(0) @binding(7) var<storage, read_write> intermediate_r : array<f32>;
-@group(0) @binding(8) var<storage, read_write> intermediate_dr : array<f32>;
+@group(0) @binding(4) var<storage, read_write> intermediate_step : array<u32>;
+@group(0) @binding(5) var<storage, read_write> orbit_trap : array<f32>;
+@group(0) @binding(6) var<storage, read_write> intermediate_r : array<f32>;
+@group(0) @binding(7) var<storage, read_write> intermediate_dr : array<f32>;
 
 struct Params {
     width: u32,
@@ -29,6 +28,8 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let i = global_id.x;
     let j = global_id.y;
 
+    // skip if the point is outside the image 
+    // (this is caused by the workgroup size not being a factor of the image size)
     if i >= params.width || j >= params.height {
         return;
     }
@@ -89,6 +90,8 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // orbit trap around origin
         orbit = min(orbit, radius_squared);
     }
+
+    // update the output values
     orbit_trap[i + j * params.width] = sqrt(orbit);
     intermediate_step[i + j * params.width] = params.max_iter;
     let x_n = probed_point[params.probe_len - 1u];

@@ -29,16 +29,23 @@ impl GPUHandles {
     ///
     /// This function will return an error if it is unable to create any of the
     /// GPU handles, usually because there is no compatible GPU.
-    pub async fn init(window: &Window) -> Result<Self> {
+    pub async fn init(window: Window) -> Result<(Self, &'static mut Window)> {
         let size = window.inner_size();
 
-        // The instance is a handle to our GPU
-        // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::GL,
+            // this should work on all backends, so long as there is an adapter
+            // with a compatible surface
+            backends: wgpu::Backends::all(),
             dx12_shader_compiler: Dx12Compiler::default(),
         });
+
+        let window: &'static mut Window = Box::leak(Box::new(window));
+        // Safety: The window is now a static reference, so it will not be
+        // dropped until the end of the program
         let surface = unsafe { instance.create_surface(window) }?;
+
+        // we prefer high-performance adapters because this
+        // program does not focus on power efficiency
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
@@ -48,6 +55,7 @@ impl GPUHandles {
             .await
             .ok_or(eyre!("Failed to find an appropriate adapter"))?;
 
+        // we want to use high precision floats if possible (currently unused)
         let use_high_precision_float = adapter.features().contains(wgpu::Features::SHADER_FLOAT64);
 
         let (device, queue) = if let Ok(r) = adapter
@@ -89,12 +97,15 @@ impl GPUHandles {
         let AdapterInfo { name, backend, .. } = adapter.get_info();
         info!("Running on {name} with the {backend:?} backend");
 
-        Ok(Self {
-            device: Arc::new(device),
-            queue: Arc::new(queue),
-            surface,
-            surface_config,
-        })
+        Ok((
+            Self {
+                device: Arc::new(device),
+                queue: Arc::new(queue),
+                surface,
+                surface_config,
+            },
+            window,
+        ))
     }
 
     /// Resizes the surface to the new size

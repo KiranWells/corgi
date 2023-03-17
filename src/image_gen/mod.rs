@@ -3,68 +3,26 @@
 
 This module contains all logic for creating images of the mandelbrot set to display on screen.
 
-## Render Process
-
-- set the initial probe to the center of the image (if not already set)
-- Probe the given point, and store the resulting iterations
-
-    ```
-    probe::probe(x, y, max_iter)
-    ```
-
-- Generate a grid of initial values for the perturbation formula
-
-    ```
-    probe::generate_delta_grid(x, y, image)
-    ```
-
-- Run a computer render for the perturbation formula (either on the CPU or GPU)
-
-    ```
-    gpu_render::run_compute_stage(...)
-    ```
-
-    **GPU Render**
-
-    - Initial setup needs to be completed when the program starts
-        - device, queue, encoder, buffers, shaders, etc.
-    - copy the probe data and delta grid to the GPU in buffers
-    - Run the compute shader on the GPU
-        - This shader is pre-compiled and stored in the binary, as it will not change
-        - The compute shader will store the results in a buffer
-    - make the buffers available to bake the image (TODO)
-
-- Recalculate the probe as the point in the grid with the greatest iteration and smallest orbit (TODO)
-    - Repeat the compute process with the new probe
-- Run an image render for the coloring step (ideally on the GPU)
-    - Use the buffers saved in the compute step
-    - select the coloring shader (TODO)
-    - Run the compute shader on the GPU
-    - return the image texture for use in the GUI or saving to disk
-
-The compute shader is the most complex part of the render process, and the result can be cached as long as
-the viewport and max_iteration does not change. This means coloring can be changed without re-running the
-full process, making it much faster.
-
+The [`render_thread`] function is the main entry point for the image generation process.
+It is responsible for receiving messages from the main thread, and sending the resulting
+images back to the main thread.
  */
 
 mod gpu_setup;
 mod probe;
 
-use color_eyre::Result;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
-
-#[cfg(debug_assertions)]
 use tracing::debug;
+use wgpu::Extent3d;
 
-use crate::types::{ComputeParams, Image, Status, MAX_GPU_GROUP_ITER};
+use crate::types::{ComputeParams, Image, RenderParams, Status, Viewport, MAX_GPU_GROUP_ITER};
 use probe::probe;
 
 pub use gpu_setup::GPUData;
 use probe::generate_delta_grid;
 
-#[cfg(debug_assertions)]
+// #[cfg(debug_assertions)]
 macro_rules! time {
     ($name:literal, $expression:expr) => {{
         let start = std::time::Instant::now();
@@ -75,18 +33,21 @@ macro_rules! time {
     }};
 }
 
-#[cfg(not(debug_assertions))]
-macro_rules! time {
-    ($name:literal, $expression:expr) => {{
-        $expression
-    }};
-}
+// #[cfg(not(debug_assertions))]
+// macro_rules! time {
+//     ($name:literal, $expression:expr) => {{
+//         $expression
+//     }};
+// }
 
+/// Main entry point for the image generation process. This should be called in a separate thread,
+/// and will run until the given message channel is closed. `status` is used to communicate the
+/// current status of the render process to the main thread.
 pub async fn render_thread(
     mut message_channel: mpsc::Receiver<Image>,
     status: Arc<Mutex<Status>>,
     mut gpu_data: GPUData,
-) -> Result<()> {
+) {
     let mut image_tmp = Image::default();
     image_tmp.viewport.width = 1024;
     image_tmp.viewport.height = 1024;
@@ -136,8 +97,15 @@ pub async fn render_thread(
             recolor = true;
         }
 
+        // the actual image generation process
+        // - resize the GPU data
+        // - probe the point
+        // - generate the delta grid
+        // - run the compute shader
+        // - run the image render
+
         if resize {
-            gpu_data.resize(&image.viewport).await?;
+            gpu_data.resize(&image.viewport).await;
         }
 
         if reprobe {
@@ -168,7 +136,7 @@ pub async fn render_thread(
         if recompute {
             time!(
                 "Running compute shader",
-                run_compute_step(&probed_data, &image, &gpu_data, status.clone()).await?
+                run_compute_step(&probed_data, &image.viewport, &gpu_data, status.clone()).await
             );
         }
 
@@ -181,16 +149,17 @@ pub async fn render_thread(
         status.progress = None;
         status.rendered_image = Some(image);
     }
-
-    Ok(())
 }
 
+/// Runs the compute shader on the GPU. This is the most expensive step, so the output
+/// should be cached as much as possible. This step only needs to be run if the probe
+/// location, max iteration, or image viewport has changed.
 async fn run_compute_step(
     probed_data: &(Vec<[f32; 2]>, Vec<[f32; 2]>),
-    image: &Image,
+    viewport: &Viewport,
     gpu_data: &GPUData,
     status: Arc<Mutex<Status>>,
-) -> Result<()> {
+) {
     let GPUData {
         device,
         queue,
@@ -199,9 +168,12 @@ async fn run_compute_step(
         buffers,
         ..
     } = gpu_data;
-    let texture_size = GPUData::get_texture_size(&image.viewport);
+    let texture_size: Extent3d = viewport.into();
     let probe_len = probed_data.0.len();
     debug_assert!(probe_len == probed_data.1.len());
+
+    // Compute passes have encountered timeouts on some GPUs, so we split the compute passes into
+    // multiple smaller passes.
     for i in 0..=(probe_len / MAX_GPU_GROUP_ITER) {
         // Create encoder for CPU - GPU communication
         let mut encoder =
@@ -224,7 +196,7 @@ async fn run_compute_step(
         let command_buffer = encoder.finish();
         // Update the parameters
         let parameters = ComputeParams {
-            width: image.viewport.width as u32,
+            width: texture_size.width,
             height: texture_size.height,
             max_iter: probe_len as u32,
             probe_len: if probe_len >= (i + 1) * MAX_GPU_GROUP_ITER {
@@ -265,7 +237,7 @@ async fn run_compute_step(
         time!("queue submit", queue.submit(Some(command_buffer)));
         let mut status = status.lock().await;
         status.message = format!(
-            "Rendering {} of {}",
+            "Rendering {} of {} iterations",
             i * MAX_GPU_GROUP_ITER + parameters.probe_len as usize,
             probe_len
         );
@@ -273,10 +245,9 @@ async fn run_compute_step(
             (i * MAX_GPU_GROUP_ITER + parameters.probe_len as usize) as f64 / probe_len as f64,
         );
     }
-
-    Ok(())
 }
 
+/// Runs the render shader on the GPU
 fn run_render_step(image: &Image, gpu_data: &GPUData) {
     let GPUData {
         device,
@@ -286,8 +257,7 @@ fn run_render_step(image: &Image, gpu_data: &GPUData) {
         render_pipeline_layout,
         ..
     } = gpu_data;
-    let texture_size = GPUData::get_texture_size(&image.viewport);
-    let color_params = image.to_render_params();
+    let color_params: RenderParams = image.into();
     queue.write_buffer(
         &buffers.render_parameters,
         0,
@@ -308,13 +278,11 @@ fn run_render_step(image: &Image, gpu_data: &GPUData) {
         entry_point: "main_color",
     });
 
-    // create a render command queue
-
-    // Create encoder for CPU - GPU communication
+    // create encoder for CPU - GPU communication
     let mut encoder =
         device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-    // Begin render dispatch
+    // begin render dispatch
     {
         let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
         cpass.set_bind_group(0, &bind_groups.render_buffers, &[]);
@@ -322,8 +290,8 @@ fn run_render_step(image: &Image, gpu_data: &GPUData) {
         cpass.set_bind_group(2, &bind_groups.render_parameters, &[]);
         cpass.set_pipeline(&render_pipeline);
         cpass.dispatch_workgroups(
-            (texture_size.width as f64 / 16.0).ceil() as u32,
-            (texture_size.height as f64 / 16.0).ceil() as u32,
+            (image.viewport.width as f64 / 16.0).ceil() as u32,
+            (image.viewport.height as f64 / 16.0).ceil() as u32,
             1,
         );
     }

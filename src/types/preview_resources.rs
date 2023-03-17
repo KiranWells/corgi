@@ -6,6 +6,7 @@ use wgpu::{include_wgsl, util::DeviceExt, Device};
 
 use super::Transform;
 
+/// Resources necessary for rendering the preview image
 pub struct PreviewRenderResources {
     format: wgpu::TextureFormat,
     pipeline: wgpu::RenderPipeline,
@@ -17,6 +18,7 @@ pub struct PreviewRenderResources {
 }
 
 impl PreviewRenderResources {
+    /// Create a new set of preview render resources
     pub async fn init(
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
@@ -39,11 +41,11 @@ impl PreviewRenderResources {
             }],
         });
 
-        let diffuse_texture_view = texture
+        let fractal_texture_view = texture
             .read()
             .await
             .create_view(&wgpu::TextureViewDescriptor::default());
-        let diffuse_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        let fractal_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
@@ -75,21 +77,21 @@ impl PreviewRenderResources {
                         count: None,
                     },
                 ],
-                label: Some("texture_bind_group_layout"),
+                label: Some("Fractal Texture Bind Group Layout"),
             });
         let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &texture_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&diffuse_texture_view),
+                    resource: wgpu::BindingResource::TextureView(&fractal_texture_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&diffuse_sampler),
+                    resource: wgpu::BindingResource::Sampler(&fractal_sampler),
                 },
             ],
-            label: Some("diffuse_bind_group"),
+            label: Some("Fractal Texture Bind Group"),
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -147,15 +149,19 @@ impl PreviewRenderResources {
         })
     }
 
+    /// Resize the render resources. This must be called when the render thread resizes,
+    /// and will refresh the texture view and the uniform buffer.
     pub async fn resize(&mut self, device: &Device, new_size: (usize, usize)) -> Result<()> {
         *self = Self::init(device, self.format, self.texture.clone(), new_size).await?;
         Ok(())
     }
 
+    /// Prepare the render resources for a new frame; for use in a callback
     pub fn prepare(&self, _device: &wgpu::Device, queue: &wgpu::Queue, transform: Transform) {
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[transform]));
     }
 
+    /// Render the preview to the given render pass; for use in a callback
     pub fn paint<'rp>(&'rp self, render_pass: &mut wgpu::RenderPass<'rp>) {
         render_pass.set_pipeline(&self.pipeline);
         render_pass.set_bind_group(0, &self.bind_group, &[]);
@@ -163,6 +169,7 @@ impl PreviewRenderResources {
         render_pass.draw(0..6, 0..1);
     }
 
+    /// Get the size of the preview
     pub fn size(&self) -> &(usize, usize) {
         &self.size
     }
