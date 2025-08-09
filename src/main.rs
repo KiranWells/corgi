@@ -1,13 +1,12 @@
 use std::{env, str::FromStr};
 
-use color_eyre::{eyre::eyre, Result};
+use color_eyre::{Result, eyre::eyre};
 use corgi::app::CorgiApp;
 use eframe::{egui, egui_wgpu, wgpu};
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     // set up logging
     let subscriber = FmtSubscriber::builder()
         .with_max_level(
