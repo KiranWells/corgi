@@ -1,7 +1,8 @@
 use std::{env, str::FromStr};
 
-use color_eyre::Result;
-use corgi::run;
+use color_eyre::{eyre::eyre, Result};
+use corgi::app::CorgiApp;
+use eframe::{egui, egui_wgpu, wgpu};
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
@@ -21,5 +22,19 @@ async fn main() -> Result<()> {
     color_eyre::install()?;
 
     // start app
-    run().await
+    let eframe_options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default().with_title("Corgi Fractal Renderer"),
+        vsync: true,
+        hardware_acceleration: eframe::HardwareAcceleration::Preferred,
+        renderer: eframe::Renderer::Wgpu,
+        wgpu_options: egui_wgpu::WgpuConfiguration {
+            present_mode: wgpu::PresentMode::AutoVsync,
+            desired_maximum_frame_latency: None,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    eframe::run_native("Corgi", eframe_options, Box::new(CorgiApp::new_dyn))
+        .or(Err(eyre!("Error in eframe application")))?;
+    Ok(())
 }

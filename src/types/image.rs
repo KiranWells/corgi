@@ -1,5 +1,5 @@
+use eframe::wgpu::Extent3d;
 use rug::{ops::PowAssign, Float};
-use wgpu::Extent3d;
 
 use super::get_precision;
 

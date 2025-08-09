@@ -6,12 +6,12 @@ This module contains the main UI state struct and its implementation, which
 contains the code necessary to update internal state and render the ui.
  */
 
+use eframe::egui::mutex::Mutex;
 use std::sync::Arc;
 
-use egui::PointerButton;
+use eframe::egui_wgpu::CallbackTrait;
+use eframe::{egui, egui_wgpu};
 use rug::{ops::PowAssign, Float};
-use tokio::runtime::Handle;
-use tokio::{sync::Mutex, task::block_in_place};
 
 use crate::types::{get_precision, Image, PreviewRenderResources, Status, Transform};
 
@@ -46,13 +46,13 @@ impl CorgiUI {
 
     /// Generate the UI and handle any events. This function will do some blocking
     /// to access shared data
-    pub async fn generate_ui(&mut self, ctx: &egui::Context) {
+    pub fn generate_ui(&mut self, ctx: &egui::Context) {
         let Status {
             progress,
             message,
             rendered_image,
         } = {
-            let locked = self.status.lock().await;
+            let locked = self.status.lock();
             (*locked).clone()
         };
 
@@ -148,7 +148,7 @@ impl CorgiUI {
             );
             ui.separator();
             ui.label("Status");
-            ui.label(format!("Status: {:?}", message));
+            ui.label(format!("Status: {message:?}"));
             if let Some(progress) = progress {
                 ui.add(egui::ProgressBar::new(progress as f32));
             }
@@ -166,7 +166,7 @@ impl CorgiUI {
                 let pointer_in_rect = ui.rect_contains_pointer(rect);
                 let (primary_down, pointer_pos) = ctx.input(|i| {
                     (
-                        i.pointer.button_down(PointerButton::Primary),
+                        i.pointer.button_down(egui::PointerButton::Primary),
                         i.pointer.interact_pos(),
                     )
                 });
@@ -192,7 +192,7 @@ impl CorgiUI {
                     } else {
                         // get scroll and drag inputs to change the viewport
                         let (scroll, pixel_scale) =
-                            ui.input(|i| (i.scroll_delta, i.pixels_per_point));
+                            ui.input(|i| (i.smooth_scroll_delta, i.pixels_per_point));
                         let mut drag = egui::Vec2::new(0.0, 0.0);
 
                         // drag
@@ -242,44 +242,12 @@ impl CorgiUI {
                 //
                 // The paint callback is called after prepare and is given access to the render pass, which
                 // can be used to issue draw commands.
-                let view_ref = self.image_settings.viewport.clone();
-                let cb = egui_wgpu::CallbackFn::new()
-                    .prepare(move |device, queue, _encoder, type_map| {
-                        let res = type_map
-                            .get_mut::<PreviewRenderResources>()
-                            .expect("Failed to get render resources");
-
-                        let transforms = if let Some(viewport) =
-                            { rendered_image.as_ref().map(|x| &x.viewport) }
-                        {
-                            let size = (viewport.width, viewport.height);
-                            if size != *res.size() {
-                                // resize the render resources, refreshing the texture reference
-                                // this must block because the callback is not async
-                                block_in_place(|| {
-                                    Handle::current().block_on(res.resize(device, size))
-                                })
-                                .expect("Failed to resize render resources");
-                            }
-                            viewport.transforms_from(&view_ref)
-                        } else {
-                            Transform::default()
-                        };
-
-                        res.prepare(device, queue, transforms);
-                        Vec::new()
-                    })
-                    .paint(move |_info, render_pass, type_map| {
-                        type_map
-                            .get::<PreviewRenderResources>()
-                            .expect("Failed to get render resources")
-                            .paint(render_pass);
-                    });
-
-                let callback = egui::PaintCallback {
-                    rect,
-                    callback: Arc::new(cb),
+                let cb = PaintCallback {
+                    rendered_image: rendered_image.clone(),
+                    view: self.image_settings.viewport.clone(),
                 };
+
+                let callback = egui_wgpu::Callback::new_paint_callback(rect, cb);
 
                 ui.painter().add(callback);
             });
@@ -294,5 +262,54 @@ impl CorgiUI {
     /// Get the mouse down state
     pub fn mouse_down(&self) -> bool {
         self.mouse_down
+    }
+}
+
+struct PaintCallback {
+    rendered_image: Option<Image>,
+    view: crate::types::Viewport,
+}
+
+impl CallbackTrait for PaintCallback {
+    fn prepare(
+        &self,
+        device: &eframe::wgpu::Device,
+        queue: &eframe::wgpu::Queue,
+        _screen_descriptor: &egui_wgpu::ScreenDescriptor,
+        _egui_encoder: &mut eframe::wgpu::CommandEncoder,
+        callback_resources: &mut egui_wgpu::CallbackResources,
+    ) -> Vec<eframe::wgpu::CommandBuffer> {
+        let res = callback_resources
+            .get_mut::<PreviewRenderResources>()
+            .expect("Failed to get render resources");
+
+        let transforms =
+            if let Some(viewport) = { self.rendered_image.as_ref().map(|x| &x.viewport) } {
+                let size = (viewport.width, viewport.height);
+                if size != *res.size() {
+                    // resize the render resources, refreshing the texture reference
+                    // this must block because the callback is not async
+                    res.resize(device, size)
+                        .expect("Failed to resize render resources");
+                }
+                viewport.transforms_from(&self.view)
+            } else {
+                Transform::default()
+            };
+
+        res.prepare(device, queue, transforms);
+        Vec::new()
+    }
+
+    fn paint(
+        &self,
+        _info: egui::PaintCallbackInfo,
+        render_pass: &mut eframe::wgpu::RenderPass<'static>,
+        callback_resources: &egui_wgpu::CallbackResources,
+    ) {
+        callback_resources
+            .get::<PreviewRenderResources>()
+            .expect("Failed to get render resources")
+            .paint(render_pass);
     }
 }

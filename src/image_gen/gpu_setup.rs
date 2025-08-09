@@ -10,10 +10,12 @@ the same GPU.
 
 use std::sync::Arc;
 
-use tokio::sync::RwLock;
-use wgpu::{
-    include_wgsl, BindGroup, BindGroupLayoutEntry, Buffer, ComputePipeline, Device, PipelineLayout,
-    Queue, Texture, TextureView,
+use eframe::{
+    egui::mutex::RwLock,
+    egui_wgpu::RenderState,
+    wgpu::{
+        self, include_wgsl, BindGroup, BindGroupLayoutEntry, Buffer, ComputePipeline, Device, PipelineLayout, Queue, Texture, TextureView,
+    },
 };
 
 use crate::types::{ComputeParams, Image, RenderParams, Viewport, MAX_GPU_GROUP_ITER};
@@ -24,9 +26,9 @@ use crate::types::{ComputeParams, Image, RenderParams, Viewport, MAX_GPU_GROUP_I
 pub struct GPUData {
     // general GPU Handles
     /// An Arc to the device
-    pub device: Arc<Device>,
+    pub device: Device,
     /// An Arc to the queue
-    pub queue: Arc<Queue>,
+    pub queue: Queue,
     // Rendering data
     /// The shader module for the compute shader
     pub compute_shader: wgpu::ShaderModule,
@@ -75,7 +77,9 @@ pub struct BindGroups {
 
 impl GPUData {
     /// Initializes the GPU handles for use in rendering an image.
-    pub async fn init(image: &Image, device: Arc<Device>, queue: Arc<Queue>) -> Self {
+    pub fn init(image: &Image, wgpu: &RenderState) -> Self {
+        let device = wgpu.device.clone();
+        let queue = wgpu.queue.clone();
         let compute_shader =
             device.create_shader_module(include_wgsl!("../shaders/calculate.wgsl"));
 
@@ -91,7 +95,12 @@ impl GPUData {
             label: Some("Compute Pipeline"),
             layout: Some(&compute_pipeline_layout),
             module: &compute_shader,
-            entry_point: "main_mandel",
+            entry_point: Some("main_mandel"),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &[],
+                zero_initialize_workgroup_memory: false,
+            },
+            cache: None,
         });
 
         Self {
@@ -103,12 +112,13 @@ impl GPUData {
             rendered_image: Arc::new(RwLock::new(rendered_image)),
             buffers,
             bind_groups,
+            // pipeline_cache,
         }
     }
 
     /// Resizes the image to the new viewport and recreates necessary handles.
     /// Any objects which created a texture view of the image will need to recreate it.
-    pub async fn resize(&mut self, new_view: &Viewport) {
+    pub fn resize(&mut self, new_view: &Viewport) {
         // recreate the texture with the new size
         let rendered_image = Self::create_texture(&self.device, new_view);
         let texture_view = rendered_image.create_view(&wgpu::TextureViewDescriptor::default());
@@ -126,11 +136,16 @@ impl GPUData {
                     label: Some("Compute Pipeline"),
                     layout: Some(&compute_pipeline_layout),
                     module: &self.compute_shader,
-                    entry_point: "main_mandel",
+                    entry_point: Some("main_mandel"),
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants: &[],
+                        zero_initialize_workgroup_memory: false,
+                    },
+                    cache: None,
                 });
         self.render_pipeline_layout = render_pipeline_layout;
 
-        *self.rendered_image.write().await = rendered_image;
+        *self.rendered_image.write() = rendered_image;
     }
 
     /// Creates a texture for the image to be rendered to.

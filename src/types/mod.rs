@@ -8,6 +8,8 @@ mod gpu;
 mod image;
 mod preview_resources;
 
+use eframe::wgpu;
+use std::time::Duration;
 use std::{error::Error, fmt::Display};
 
 use color_eyre::Report;
@@ -50,6 +52,7 @@ impl From<wgpu::SurfaceError> for RenderErr {
             wgpu::SurfaceError::OutOfMemory => Self::Quit(e.into()),
             wgpu::SurfaceError::Timeout => Self::Warn(e.into()),
             wgpu::SurfaceError::Outdated => Self::Warn(e.into()),
+            wgpu::SurfaceError::Other => Self::Warn(e.into()),
         }
     }
 }
@@ -64,8 +67,8 @@ impl Display for RenderErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Resize => write!(f, "Resize"),
-            Self::Quit(e) => write!(f, "Quit: {}", e),
-            Self::Warn(e) => write!(f, "Warn: {}", e),
+            Self::Quit(e) => write!(f, "Quit: {e}"),
+            Self::Warn(e) => write!(f, "Warn: {e}"),
         }
     }
 }
@@ -139,12 +142,33 @@ impl Debouncer {
     pub fn reset(&mut self) {
         self.last_triggered = None;
     }
+
+    /// Returns whether the debouncer has a valid last_triggered time.
+    /// This will be true if the debouncer is still waiting or if
+    /// it is already complete, but has not been polled.
+    pub fn active(&self) -> bool {
+        self.last_triggered.is_some()
+    }
+
+    /// Returns a duration representing the time until poll will return true,
+    /// or None if there is no more time to wait (even if poll has not yet been called).
+    pub fn remaining(&self) -> Option<Duration> {
+        if let Some(v) = self.last_triggered {
+            let now = std::time::Instant::now();
+            if now - v >= self.wait_time {
+                None
+            } else {
+                Some(self.wait_time - (now - v))
+            }
+        } else {
+            None
+        }
+    }
 }
 
 /// A container for the egui-related state
 pub struct EguiData {
-    pub state: egui_winit::State,
-    pub ctx: egui::Context,
-    pub renderer: egui_wgpu::Renderer,
+    pub ctx: eframe::egui::Context,
+    pub renderer: eframe::egui_wgpu::Renderer,
     pub needs_rerender: bool,
 }

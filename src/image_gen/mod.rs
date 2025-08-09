@@ -11,10 +11,12 @@ images back to the main thread.
 mod gpu_setup;
 mod probe;
 
+use eframe::egui;
+use eframe::egui::mutex::Mutex;
+use eframe::wgpu::{self, Extent3d};
+use std::sync::mpsc;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
 use tracing::debug;
-use wgpu::Extent3d;
 
 use crate::types::{ComputeParams, Image, RenderParams, Status, Viewport, MAX_GPU_GROUP_ITER};
 use probe::probe;
@@ -43,10 +45,11 @@ macro_rules! time {
 /// Main entry point for the image generation process. This should be called in a separate thread,
 /// and will run until the given message channel is closed. `status` is used to communicate the
 /// current status of the render process to the main thread.
-pub async fn render_thread(
-    mut message_channel: mpsc::Receiver<Image>,
+pub fn render_thread(
+    message_channel: mpsc::Receiver<Image>,
     status: Arc<Mutex<Status>>,
     mut gpu_data: GPUData,
+    ctx: egui::Context,
 ) {
     let mut image_tmp = Image::default();
     image_tmp.viewport.width = 1024;
@@ -61,14 +64,14 @@ pub async fn render_thread(
     let mut recompute;
     let mut recolor;
 
-    while let Some(mut image) = message_channel.recv().await {
+    while let Ok(mut image) = message_channel.recv() {
         // clear the message channel queue and only process the last message
         while let Ok(image_tmp) = message_channel.try_recv() {
             image = image_tmp;
         }
         debug!("Received image: {:?}", image);
 
-        let last_image = { status.lock().await.rendered_image.clone() };
+        let last_image = { status.lock().rendered_image.clone() };
         if let Some(last_image) = &last_image {
             // if the image has not changed, skip the render
             if &image == last_image {
@@ -105,7 +108,7 @@ pub async fn render_thread(
         // - run the image render
 
         if resize {
-            gpu_data.resize(&image.viewport).await;
+            gpu_data.resize(&image.viewport);
         }
 
         if reprobe {
@@ -136,7 +139,13 @@ pub async fn render_thread(
         if recompute {
             time!(
                 "Running compute shader",
-                run_compute_step(&probed_data, &image.viewport, &gpu_data, status.clone()).await
+                run_compute_step(
+                    &probed_data,
+                    &image.viewport,
+                    &gpu_data,
+                    status.clone(),
+                    &ctx
+                )
             );
         }
 
@@ -144,21 +153,23 @@ pub async fn render_thread(
             time!("Running image render", run_render_step(&image, &gpu_data));
         }
 
-        let mut status = status.lock().await;
+        let mut status = status.lock();
         status.message = "Finished Rendering".to_string();
         status.progress = None;
         status.rendered_image = Some(image);
+        ctx.request_repaint();
     }
 }
 
 /// Runs the compute shader on the GPU. This is the most expensive step, so the output
 /// should be cached as much as possible. This step only needs to be run if the probe
 /// location, max iteration, or image viewport has changed.
-async fn run_compute_step(
+fn run_compute_step(
     probed_data: &(Vec<[f32; 2]>, Vec<[f32; 2]>),
     viewport: &Viewport,
     gpu_data: &GPUData,
     status: Arc<Mutex<Status>>,
+    ctx: &egui::Context,
 ) {
     let GPUData {
         device,
@@ -181,8 +192,10 @@ async fn run_compute_step(
 
         // Begin compute dispatch
         {
-            let mut cpass =
-                encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: None,
+                timestamp_writes: None,
+            });
             cpass.set_bind_group(0, &bind_groups.compute_buffers, &[]);
             cpass.set_bind_group(1, &bind_groups.compute_parameters, &[]);
             cpass.set_pipeline(compute_pipeline);
@@ -235,7 +248,7 @@ async fn run_compute_step(
 
         // submit the compute shader command buffer
         time!("queue submit", queue.submit(Some(command_buffer)));
-        let mut status = status.lock().await;
+        let mut status = status.lock();
         status.message = format!(
             "Rendering {} of {} iterations",
             i * MAX_GPU_GROUP_ITER + parameters.probe_len as usize,
@@ -244,6 +257,7 @@ async fn run_compute_step(
         status.progress = Some(
             (i * MAX_GPU_GROUP_ITER + parameters.probe_len as usize) as f64 / probe_len as f64,
         );
+        ctx.request_repaint();
     }
 }
 
@@ -275,7 +289,12 @@ fn run_render_step(image: &Image, gpu_data: &GPUData) {
         label: Some("Render Pipeline"),
         layout: Some(render_pipeline_layout),
         module: &render_shader,
-        entry_point: "main_color",
+        entry_point: Some("main_color"),
+        compilation_options: wgpu::PipelineCompilationOptions {
+            constants: &[],
+            zero_initialize_workgroup_memory: false,
+        },
+        cache: None,
     });
 
     // create encoder for CPU - GPU communication
@@ -284,7 +303,10 @@ fn run_render_step(image: &Image, gpu_data: &GPUData) {
 
     // begin render dispatch
     {
-        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
+        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: None,
+            timestamp_writes: None,
+        });
         cpass.set_bind_group(0, &bind_groups.render_buffers, &[]);
         cpass.set_bind_group(1, &bind_groups.render_texture, &[]);
         cpass.set_bind_group(2, &bind_groups.render_parameters, &[]);

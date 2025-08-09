@@ -1,8 +1,10 @@
 use std::{num::NonZeroU64, sync::Arc};
 
 use color_eyre::Result;
-use tokio::sync::RwLock;
-use wgpu::{include_wgsl, util::DeviceExt, Device};
+use eframe::{
+    egui::mutex::RwLock,
+    wgpu::{self, include_wgsl, util::DeviceExt, Device},
+};
 
 use super::Transform;
 
@@ -19,7 +21,7 @@ pub struct PreviewRenderResources {
 
 impl PreviewRenderResources {
     /// Create a new set of preview render resources
-    pub async fn init(
+    pub fn init(
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
         texture: Arc<RwLock<wgpu::Texture>>,
@@ -43,7 +45,6 @@ impl PreviewRenderResources {
 
         let fractal_texture_view = texture
             .read()
-            .await
             .create_view(&wgpu::TextureViewDescriptor::default());
         let fractal_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -105,18 +106,27 @@ impl PreviewRenderResources {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs_main",
+                entry_point: Some("vs_main"),
                 buffers: &[],
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &[],
+                    zero_initialize_workgroup_memory: false,
+                },
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs_main",
+                entry_point: Some("fs_main"),
                 targets: &[Some(format.into())],
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &[],
+                    zero_initialize_workgroup_memory: false,
+                },
             }),
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
+            cache: None,
         });
 
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -151,8 +161,8 @@ impl PreviewRenderResources {
 
     /// Resize the render resources. This must be called when the render thread resizes,
     /// and will refresh the texture view and the uniform buffer.
-    pub async fn resize(&mut self, device: &Device, new_size: (usize, usize)) -> Result<()> {
-        *self = Self::init(device, self.format, self.texture.clone(), new_size).await?;
+    pub fn resize(&mut self, device: &Device, new_size: (usize, usize)) -> Result<()> {
+        *self = Self::init(device, self.format, self.texture.clone(), new_size)?;
         Ok(())
     }
 
@@ -162,7 +172,7 @@ impl PreviewRenderResources {
     }
 
     /// Render the preview to the given render pass; for use in a callback
-    pub fn paint<'rp>(&'rp self, render_pass: &mut wgpu::RenderPass<'rp>) {
+    pub fn paint(&self, render_pass: &mut wgpu::RenderPass) {
         render_pass.set_pipeline(&self.pipeline);
         render_pass.set_bind_group(0, &self.bind_group, &[]);
         render_pass.set_bind_group(1, &self.texture_bind_group, &[]);
