@@ -14,5 +14,9 @@ rayon = "1.10"
 rug = "1.27"
 tracing = "0.1"
 tracing-subscriber = "0.3"
+wesl = "0.2.0"
 wgpu = "25"
+
+[build-dependencies]
+wesl = "0.2.0"
 

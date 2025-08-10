@@ -15,7 +15,7 @@ use eframe::{
     egui_wgpu::RenderState,
     wgpu::{
         self, BindGroup, BindGroupLayoutEntry, Buffer, ComputePipeline, Device, PipelineLayout,
-        Queue, Texture, TextureView, include_wgsl,
+        Queue, Texture, TextureView,
     },
 };
 
@@ -81,8 +81,10 @@ impl GPUData {
     pub fn init(image: &Image, wgpu: &RenderState) -> Self {
         let device = wgpu.device.clone();
         let queue = wgpu.queue.clone();
-        let compute_shader =
-            device.create_shader_module(include_wgsl!("../shaders/calculate.wgsl"));
+        let compute_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("calculate"),
+            source: wgpu::ShaderSource::Wgsl(wesl::include_wesl!("calculate").into()),
+        });
 
         let rendered_image = Self::create_texture(&device, &image.viewport);
         let final_texture_view =

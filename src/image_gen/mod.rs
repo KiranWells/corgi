@@ -285,7 +285,7 @@ fn run_render_step(image: &Image, gpu_data: &GPUData) {
     // select the render shader
     let render_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Render Shader"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/color.wgsl").into()),
+        source: wgpu::ShaderSource::Wgsl(wesl::include_wesl!("color").into()),
     });
 
     // create the render pipeline

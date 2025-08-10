@@ -225,7 +225,8 @@ impl CorgiUI {
                             * scale;
                         self.x_text_buff = self.image_settings.viewport.x.to_string_radix(10, None);
                         self.y_text_buff = self.image_settings.viewport.y.to_string_radix(10, None);
-                        self.image_settings.viewport.zoom += scroll.y as f64 * pixel_scale as f64 * 0.005;
+                        self.image_settings.viewport.zoom +=
+                            scroll.y as f64 * pixel_scale as f64 * 0.005;
                     }
                 }
 
