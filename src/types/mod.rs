@@ -4,7 +4,6 @@
 A Collection of types used throughout the application, and their associated functions.
  */
 
-mod gpu;
 mod image;
 mod preview_resources;
 
@@ -14,7 +13,6 @@ use std::{error::Error, fmt::Display};
 
 use color_eyre::Report;
 
-pub use self::gpu::*;
 pub use self::image::*;
 pub use self::preview_resources::*;
 
