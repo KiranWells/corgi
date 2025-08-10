@@ -14,11 +14,12 @@ use eframe::{
     egui::mutex::RwLock,
     egui_wgpu::RenderState,
     wgpu::{
-        self, include_wgsl, BindGroup, BindGroupLayoutEntry, Buffer, ComputePipeline, Device, PipelineLayout, Queue, Texture, TextureView,
+        self, BindGroup, BindGroupLayoutEntry, Buffer, ComputePipeline, Device, PipelineLayout,
+        Queue, Texture, TextureView, include_wgsl,
     },
 };
 
-use crate::types::{ComputeParams, Image, RenderParams, Viewport, MAX_GPU_GROUP_ITER};
+use crate::types::{ComputeParams, Image, MAX_GPU_GROUP_ITER, RenderParams, Viewport};
 
 /// A struct containing all of the GPU handles for the application
 /// and the data needed to render an image. Use the `init` function

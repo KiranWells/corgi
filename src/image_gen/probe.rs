@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use crate::types::{get_precision, Viewport, ESCAPE_RADIUS};
+use crate::types::{ESCAPE_RADIUS, Viewport, get_precision};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use rug::Float;
 

@@ -1,5 +1,5 @@
 use eframe::wgpu::Extent3d;
-use rug::{ops::PowAssign, Float};
+use rug::{Float, ops::PowAssign};
 
 use super::get_precision;
 
@@ -177,7 +177,7 @@ impl Default for Image {
                 y: Float::with_val(53, 0.0),
             },
             probe_location: (Float::with_val(53, -0.5), Float::with_val(53, 0.0)),
-            max_iter: 1000,
+            max_iter: 10000,
             coloring: Coloring::default(),
             misc: 1.0,
         }

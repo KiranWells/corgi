@@ -3,7 +3,7 @@ use std::{num::NonZeroU64, sync::Arc};
 use color_eyre::Result;
 use eframe::{
     egui::mutex::RwLock,
-    wgpu::{self, include_wgsl, util::DeviceExt, Device},
+    wgpu::{self, Device, include_wgsl, util::DeviceExt},
 };
 
 use super::Transform;

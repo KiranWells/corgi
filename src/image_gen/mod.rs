@@ -14,11 +14,11 @@ mod probe;
 use eframe::egui;
 use eframe::egui::mutex::Mutex;
 use eframe::wgpu::{self, Extent3d};
-use std::sync::mpsc;
 use std::sync::Arc;
+use std::sync::mpsc;
 use tracing::debug;
 
-use crate::types::{ComputeParams, Image, RenderParams, Status, Viewport, MAX_GPU_GROUP_ITER};
+use crate::types::{ComputeParams, Image, MAX_GPU_GROUP_ITER, RenderParams, Status, Viewport};
 use probe::probe;
 
 pub use gpu_setup::GPUData;
@@ -149,11 +149,15 @@ pub fn render_thread(
             );
         }
 
+        // This holds the lock until the render finishes.
+        // This is suboptimal, as it might freeze the render thread, but
+        // the color step should always complete with a low-enough time budget to
+        // avoid dropped frames.
+        let mut status = status.lock();
         if recolor {
             time!("Running image render", run_render_step(&image, &gpu_data));
         }
 
-        let mut status = status.lock();
         status.message = "Finished Rendering".to_string();
         status.progress = None;
         status.rendered_image = Some(image);

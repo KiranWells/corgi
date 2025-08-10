@@ -1,5 +1,5 @@
-use std::sync::mpsc;
 use std::sync::Arc;
+use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
@@ -47,7 +47,7 @@ impl CorgiApp {
         let ui_state = CorgiUI::new(status);
         Ok(Box::new(CorgiApp {
             sender,
-            debouncer: Debouncer::new(std::time::Duration::from_millis(30)),
+            debouncer: Debouncer::new(std::time::Duration::from_millis(16)),
             last_rendered: ui_state.image().clone(),
             ui_state,
         }))

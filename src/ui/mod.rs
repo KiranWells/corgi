@@ -11,9 +11,9 @@ use std::sync::Arc;
 
 use eframe::egui_wgpu::CallbackTrait;
 use eframe::{egui, egui_wgpu};
-use rug::{ops::PowAssign, Float};
+use rug::{Float, ops::PowAssign};
 
-use crate::types::{get_precision, Image, PreviewRenderResources, Status, Transform};
+use crate::types::{Image, PreviewRenderResources, Status, Transform, get_precision};
 
 /// The main UI state struct.
 pub struct CorgiUI {
@@ -102,7 +102,7 @@ impl CorgiUI {
                     .text("Zoom"),
             );
             ui.add(
-                egui::Slider::new(&mut self.image_settings.max_iter, 100..=100000)
+                egui::Slider::new(&mut self.image_settings.max_iter, 100..=1000000)
                     .text("Max iterations"),
             );
             ui.separator();
@@ -225,7 +225,7 @@ impl CorgiUI {
                             * scale;
                         self.x_text_buff = self.image_settings.viewport.x.to_string_radix(10, None);
                         self.y_text_buff = self.image_settings.viewport.y.to_string_radix(10, None);
-                        self.image_settings.viewport.zoom += scroll.y as f64 * 0.002;
+                        self.image_settings.viewport.zoom += scroll.y as f64 * pixel_scale as f64 * 0.005;
                     }
                 }
 

@@ -1,5 +1,4 @@
-
-use color_eyre::{eyre::eyre, Result};
+use color_eyre::{Result, eyre::eyre};
 
 use eframe::{
     egui_wgpu::WgpuSetupExisting,

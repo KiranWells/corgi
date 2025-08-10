@@ -19,7 +19,7 @@ pub use self::image::*;
 pub use self::preview_resources::*;
 
 pub const ESCAPE_RADIUS: f64 = 1e10;
-pub const MAX_GPU_GROUP_ITER: usize = 500;
+pub const MAX_GPU_GROUP_ITER: usize = 10000;
 
 /// Get the precision for a given zoom level
 pub fn get_precision(zoom: f64) -> u32 {
