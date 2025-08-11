@@ -99,6 +99,9 @@ https://gbillotey.github.io/Fractalshades-doc/math.html
             - zoom < 1000 (scale ~= 1^-308) - f64 probed (if compatible)
             - zoom < 10000 (scale ~= 1^-4900) - f128 probed
             - else - extended range fp probed
+- [ ] dynamic debounce delay based on render time
+- [x] make sure render thread is not blocking other threads
+    - cannot create separate queues in wgpu yet: https://github.com/gfx-rs/wgpu/discussions/6268
 
 ## UI
 

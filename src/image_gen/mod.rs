@@ -17,6 +17,7 @@ use eframe::wgpu::{self, Extent3d};
 use std::sync::Arc;
 use std::sync::mpsc;
 use tracing::debug;
+use wgpu::PollType;
 
 use crate::types::{ComputeParams, Image, MAX_GPU_GROUP_ITER, RenderParams, Status, Viewport};
 use probe::probe;
@@ -265,6 +266,8 @@ fn run_compute_step(
         );
         ctx.request_repaint();
     }
+    // ensure the queue is complete
+    let _ = gpu_data.device.poll(PollType::Wait);
 }
 
 /// Runs the render shader on the GPU
