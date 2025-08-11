@@ -1,3 +1,5 @@
+import super::utils::{hsl2rgb, isnan, isinf};
+
 // inputs
 @group(0) @binding(0) var<storage> intermediate_step : array<u32>;
 @group(0) @binding(1) var<storage> orbit_trap : array<f32>;
@@ -19,30 +21,10 @@ struct ColoringParams {
     brightness: f32,
     internal_brightness: f32,
     misc: f32,
+    debug_shutter: f32,
 };
 @group(2) @binding(0) var<uniform> params : ColoringParams;
 
-fn hsl2rgb(hsv: vec3<f32>) -> vec3<f32> {
-    var rgb: vec3<f32>;
-
-    let i = floor(hsv.x * 6.);
-    let f = hsv.x * 6. - i;
-    let p = hsv.z * (1. - hsv.y);
-    let q = hsv.z * (1. - f * hsv.y);
-    let t = hsv.z * (1. - (1. - f) * hsv.y);
-
-    switch(i32((i % 6.0))){
-        case 0: {rgb = vec3<f32>(hsv.z, t, p);}
-        case 1: {rgb = vec3<f32>(q, hsv.z, p);}
-        case 2: {rgb = vec3<f32>(p, hsv.z, t);}
-        case 3: {rgb = vec3<f32>(p, q, hsv.z);}
-        case 4: {rgb = vec3<f32>(t, p, hsv.z);}
-        case 5: {rgb = vec3<f32>(hsv.z, p, q);}
-        default: {rgb = vec3<f32>(0.0, 0.0, 0.0);}
-    }
-
-    return rgb;
-}
 
 @compute @workgroup_size(16, 16, 1)
 fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -50,18 +32,17 @@ fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let step = intermediate_step[global_id.x + global_id.y * params.image_width];
     let orbit = orbit_trap[global_id.x + global_id.y * params.image_width];
     let r = intermediate_r[global_id.x + global_id.y * params.image_width];
-    let dr = intermediate_dr[global_id.x + global_id.y * params.image_width];
+    var dr = intermediate_dr[global_id.x + global_id.y * params.image_width];
 
     if global_id.x >= params.image_width {
         return;
     }
-    // let dr = dr / r / r;
 
-    // distance estimation: 0.5 * ln(r) * r/dr
-    let distance_estimate = 0.5 * log(r) * r * r / dr;
+    // distance estimation: 2 * ln(r) * r/dr
+    let distance_estimate = 2.0 * log(r) * r * r / dr;
     // a glow effect based on distance estimation
-    var glow = (-log(distance_estimate) - params.zoom + params.glow_spread) * params.glow_intensity * 0.08;
-    if params.glow_intensity == 0.0 {
+    var glow = (-log(distance_estimate) + params.glow_spread * 2.5 - params.zoom * 0.5) * params.glow_intensity * 0.1;
+    if params.glow_intensity == 0.0 || isinf(glow) || isnan(glow) {
         glow = 0.5;
     }
     // a smoothed version of the iteration count: step + (1 - ln(ln(r)) / ln(2))
@@ -71,24 +52,32 @@ fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
         hsl_color = vec3<f32>(
             0.0,
             0.0,
-            orbit * params.brightness * params.internal_brightness
+            orbit * params.brightness * pow(2.0, params.internal_brightness)
         );
     } else {
         hsl_color = vec3<f32>(
-            sin(log(smoothed_step) * params.color_frequency - params.color_offset * 2.0 * PI) * 0.5 + 0.5,
+            fract(log(smoothed_step) * log(smoothed_step) * params.color_frequency * 0.1 - params.color_offset),
             (params.saturation * (1.0 - (glow * glow))),
-            glow * params.brightness + params.misc
+            glow * params.brightness
         );
     }
-    // hsl_color = vec3<f32>(1.0, sin(smoothed_step / 30.0) * 0.5 + 0.5, 0.0);
-    // hsl_color = vec3<f32>(1.0, smoothed_step / f32(params.max_step), 0.0);
-    // hsl_color = vec3<f32>(1.0, smoothed_step / f32(params.max_step), 0.0);
-    textureStore(final_texture, vec2<i32>(i32(global_id.x), i32(global_id.y)), vec4<f32>(hsl2rgb(hsl_color), 1.0));
-    // if global_id.x < params.image_width / 3u {
-    //     textureStore(final_texture, vec2<i32>(i32(global_id.x), i32(global_id.y)), vec4<f32>(vec3<f32>(clamp(0.001 * dr * 0.001 * params.misc, 0.0, 1.0)), 1.0));
-    // } else if global_id.x < params.image_width / 3u * 2u {
-    //     textureStore(final_texture, vec2<i32>(i32(global_id.x), i32(global_id.y)), vec4<f32>(vec3<f32>(clamp(0.001 * r * params.misc, 0.0, 1.0)), 1.0));
-    // } else {
-    //     textureStore(final_texture, vec2<i32>(i32(global_id.x), i32(global_id.y)), vec4<f32>(hsl2rgb(hsl_color), 1.0));
-    // }
+    if global_id.x < u32(f32(params.image_width) * params.debug_shutter) {
+        textureStore(
+            final_texture,
+            vec2<i32>(i32(global_id.x), i32(global_id.y)),
+            vec4<f32>(
+                vec3<f32>(1.0 - distance_estimate * 1000 * params.misc * params.zoom, f32(isnan(distance_estimate)), f32(isinf(distance_estimate))),
+                1.0
+            )
+        );
+    } else {
+        textureStore(
+            final_texture,
+            vec2<i32>(i32(global_id.x), i32(global_id.y)),
+            vec4<f32>(
+                hsl2rgb(hsl_color),
+                1.0
+            )
+        );
+    }
 }

@@ -89,8 +89,10 @@ pub fn render_thread(
             // if the image generation parameters have changed, re-run the compute shader
             recompute = image.max_iter != last_image.max_iter || regenerate_delta || reprobe;
             // if the image coloring parameters have changed, re-run the image render
-            recolor =
-                image.coloring != last_image.coloring || recompute || image.misc != last_image.misc;
+            recolor = image.coloring != last_image.coloring
+                || recompute
+                || image.misc != last_image.misc
+                || image.debug_shutter != last_image.debug_shutter;
         } else {
             // if there is no last image, re-run everything
             resize = true;

@@ -42,9 +42,9 @@ where
     let mut z_real = Float::with_val(precision, 0.0);
     let mut z_imag = Float::with_val(precision, 0.0);
 
-    // z' = 1 + 1i
+    // z' = 1 + 0i
     let mut z_prime_real = Float::with_val(precision, 1.0);
-    let mut z_prime_imag = Float::with_val(precision, 1.0);
+    let mut z_prime_imag = Float::with_val(precision, 0.0);
 
     // z^2 (temp values for optimized computation)
     let mut z_squared_real = Float::with_val(precision, 0.0);
@@ -60,6 +60,9 @@ where
         //   i2 := z.i × z.i
 
         // compute z'
+        // z' = 2 × z × z' + 1
+        // z'.r = 2 × (z.r × z'.r - z.i × z.r) + 1
+        // z'.i = 2 × (z.r × z'.i + z.i × z'.r)
         let ac_bd = z_real.clone() * z_prime_real.clone() - z_imag.clone() * z_prime_imag.clone();
         let bc_ad = z_imag.clone() * z_prime_real.clone() + z_real.clone() * z_prime_imag.clone();
         z_prime_real = ac_bd.clone() + ac_bd.clone() + 1.0;

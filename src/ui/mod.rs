@@ -98,7 +98,7 @@ impl CorgiUI {
                 .clicked()
                 .then(|| self.setting_probe = !self.setting_probe);
             ui.add(
-                egui::Slider::new(&mut self.image_settings.viewport.zoom, -2.0..=500.0)
+                egui::Slider::new(&mut self.image_settings.viewport.zoom, -2.0..=150.0)
                     .text("Zoom"),
             );
             ui.add(
@@ -112,11 +112,8 @@ impl CorgiUI {
                     .text("Saturation"),
             );
             ui.add(
-                egui::Slider::new(
-                    &mut self.image_settings.coloring.color_frequency,
-                    0.0..=10.0,
-                )
-                .text("Color frequency"),
+                egui::Slider::new(&mut self.image_settings.coloring.color_frequency, 0.0..=5.0)
+                    .text("Color frequency"),
             );
             ui.add(
                 egui::Slider::new(&mut self.image_settings.coloring.color_offset, 0.0..=1.0)
@@ -127,7 +124,7 @@ impl CorgiUI {
                     .text("Glow spread"),
             );
             ui.add(
-                egui::Slider::new(&mut self.image_settings.coloring.glow_intensity, 0.0..=10.0)
+                egui::Slider::new(&mut self.image_settings.coloring.glow_intensity, 0.0..=2.0)
                     .text("Glow intensity"),
             );
             ui.add(
@@ -137,7 +134,7 @@ impl CorgiUI {
             ui.add(
                 egui::Slider::new(
                     &mut self.image_settings.coloring.internal_brightness,
-                    0.0..=1000.0,
+                    0.0..=25.0,
                 )
                 .text("Internal brightness"),
             );
@@ -145,6 +142,10 @@ impl CorgiUI {
             ui.add(
                 egui::Slider::new(&mut self.image_settings.misc, -1000.0..=1000.0)
                     .text("Debug parameter"),
+            );
+            ui.add(
+                egui::Slider::new(&mut self.image_settings.debug_shutter, 0.0..=1.0)
+                    .text("Debug shutter"),
             );
             ui.separator();
             ui.label("Status");

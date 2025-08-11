@@ -22,6 +22,7 @@ pub struct Image {
     pub probe_location: (Float, Float),
     pub coloring: Coloring,
     pub misc: f32,
+    pub debug_shutter: f32,
 }
 
 /// The coloring parameters for the image
@@ -64,6 +65,7 @@ pub struct RenderParams {
     pub brightness: f32,
     pub internal_brightness: f32,
     pub misc: f32,
+    pub debug_shutter: f32,
 }
 
 /// The parameters for the preview shader. This is sent as a uniform
@@ -94,7 +96,7 @@ impl Default for Coloring {
             glow_spread: 1.0,
             glow_intensity: 1.0,
             brightness: 2.0,
-            internal_brightness: 1.0,
+            internal_brightness: 0.5,
             saturation: 1.0,
         }
     }
@@ -162,6 +164,7 @@ impl From<&Image> for RenderParams {
             brightness: image.coloring.brightness,
             internal_brightness: image.coloring.internal_brightness,
             misc: image.misc,
+            debug_shutter: image.debug_shutter,
         }
     }
 }
@@ -180,6 +183,7 @@ impl Default for Image {
             max_iter: 10000,
             coloring: Coloring::default(),
             misc: 1.0,
+            debug_shutter: 0.0,
         }
     }
 }
