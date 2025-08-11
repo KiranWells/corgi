@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use crate::types::{ESCAPE_RADIUS, Viewport, get_precision};
+use crate::types::{ESCAPE_RADIUS, ProbeLocation, Viewport, get_precision};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use rug::Float;
 
@@ -26,7 +26,11 @@ impl FromFloat for f32 {
 
 /// Generates a vector of iterated points for a given complex number in the mandelbrot set.
 /// The resulting vector will be of length `max_iter` or less if the point escapes.
-pub fn probe<T>((x, y): &(Float, Float), max_iter: usize, zoom: f64) -> (Vec<[T; 2]>, Vec<[T; 2]>)
+pub fn probe<T>(
+    ProbeLocation { x, y }: &ProbeLocation,
+    max_iter: usize,
+    zoom: f64,
+) -> (Vec<[T; 2]>, Vec<[T; 2]>)
 where
     T: FromFloat + Debug,
 {
@@ -95,13 +99,13 @@ where
 /// The delta values represent the difference between the `probe_point` and the complex number
 /// at the corresponding pixel in the image.
 pub fn generate_delta_grid<T: FromFloat + Send>(
-    probe_point: &(Float, Float),
+    probe_point: &ProbeLocation,
     image: &Viewport,
 ) -> Vec<[T; 2]> {
     let precision = get_precision(image.zoom) * 2;
 
-    let probe_real = Float::with_val(precision, &probe_point.0);
-    let probe_imag = Float::with_val(precision, &probe_point.1);
+    let probe_real = Float::with_val(precision, &probe_point.x);
+    let probe_imag = Float::with_val(precision, &probe_point.y);
 
     (0..(image.width * image.height))
         .into_par_iter()

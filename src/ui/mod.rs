@@ -7,13 +7,18 @@ contains the code necessary to update internal state and render the ui.
  */
 
 use eframe::egui::mutex::Mutex;
+use nanoserde::{DeJson, SerJson};
+use std::fs::{OpenOptions, read_to_string};
+use std::io::Write;
 use std::sync::Arc;
 
 use eframe::egui_wgpu::CallbackTrait;
 use eframe::{egui, egui_wgpu};
 use rug::{Float, ops::PowAssign};
 
-use crate::types::{Image, PreviewRenderResources, Status, Transform, get_precision};
+use crate::types::{
+    Image, PreviewRenderResources, ProbeLocation, Status, Transform, get_precision,
+};
 
 /// The main UI state struct.
 pub struct CorgiUI {
@@ -30,14 +35,14 @@ pub struct CorgiUI {
 
 impl CorgiUI {
     /// Create a new state struct; status should be shared with the render thread.
-    pub fn new(status: Arc<Mutex<Status>>) -> Self {
+    pub fn new(status: Arc<Mutex<Status>>, image: Image) -> Self {
         Self {
-            image_settings: Image::default(),
             status,
-            x_text_buff: String::from("-0.5"),
-            y_text_buff: String::from("0.0"),
-            x_probe_buff: String::from("-0.5"),
-            y_probe_buff: String::from("0.0"),
+            x_text_buff: image.viewport.x.to_string_radix(10, None),
+            y_text_buff: image.viewport.y.to_string_radix(10, None),
+            x_probe_buff: image.probe_location.x.to_string_radix(10, None),
+            y_probe_buff: image.probe_location.y.to_string_radix(10, None),
+            image_settings: image,
             previous_cursor_pos: None,
             setting_probe: false,
             mouse_down: false,
@@ -66,10 +71,10 @@ impl CorgiUI {
         }
         // probe
         if let Ok(res) = Float::parse(&self.x_probe_buff) {
-            self.image_settings.probe_location.0 = Float::with_val(precision, res)
+            self.image_settings.probe_location.x = Float::with_val(precision, res)
         }
         if let Ok(res) = Float::parse(&self.y_probe_buff) {
-            self.image_settings.probe_location.1 = Float::with_val(precision, res)
+            self.image_settings.probe_location.y = Float::with_val(precision, res)
         }
 
         // create the right side settings panel
@@ -148,6 +153,65 @@ impl CorgiUI {
                     .text("Debug shutter"),
             );
             ui.separator();
+            if ui.button("Save Image Settings").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_file_name("saved_fractal.corg")
+                    .add_filter("corg", &["corg"])
+                    .save_file()
+                {
+                    // write to file
+                    let file = OpenOptions::new()
+                        .create(true)
+                        .truncate(true)
+                        .write(true)
+                        .open(path);
+                    match file {
+                        Err(err) => {
+                            self.status.lock().message =
+                                format!("Failed to save image settings: {err:?}")
+                        }
+                        Ok(mut file) => {
+                            if let Err(err) =
+                                file.write(self.image_settings.serialize_json().as_bytes())
+                            {
+                                self.status.lock().message =
+                                    format!("Failed to write image settings: {err:?}")
+                            }
+                        }
+                    }
+                }
+            }
+            if ui.button("Load Image Settings").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("corg", &["corg"])
+                    .pick_file()
+                {
+                    // write to file
+                    let contents = read_to_string(path);
+                    match contents {
+                        Err(err) => {
+                            self.status.lock().message =
+                                format!("Failed to load image settings: {err:?}")
+                        }
+                        Ok(file) => match Image::deserialize_json(file.as_ref()) {
+                            Ok(image) => {
+                                self.x_text_buff = image.viewport.x.to_string_radix(10, None);
+                                self.y_text_buff = image.viewport.y.to_string_radix(10, None);
+                                self.x_probe_buff =
+                                    image.probe_location.x.to_string_radix(10, None);
+                                self.y_probe_buff =
+                                    image.probe_location.y.to_string_radix(10, None);
+                                self.image_settings = image;
+                            }
+                            Err(err) => {
+                                self.status.lock().message =
+                                    format!("Failed to parse image settings: {err:?}")
+                            }
+                        },
+                    }
+                }
+            }
+            ui.separator();
             ui.label("Status");
             ui.label(format!("Status: {message:?}"));
             if let Some(progress) = progress {
@@ -184,9 +248,9 @@ impl CorgiUI {
                                     .image_settings
                                     .viewport
                                     .get_real_coords((pos.x) as f64, (size.y - pos.y) as f64);
-                                self.image_settings.probe_location = (x.clone(), y.clone());
                                 self.x_probe_buff = x.to_string_radix(10, None);
                                 self.y_probe_buff = y.to_string_radix(10, None);
+                                self.image_settings.probe_location = ProbeLocation { x, y };
                                 self.setting_probe = false;
                             }
                         }

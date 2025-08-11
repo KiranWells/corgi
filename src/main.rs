@@ -1,12 +1,14 @@
 use std::{env, str::FromStr};
 
+use clap::Parser;
 use color_eyre::{Result, eyre::eyre};
-use corgi::app::CorgiApp;
+use corgi::app::{CorgiApp, CorgiCliOptions};
 use eframe::{egui, egui_wgpu, wgpu};
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
 fn main() -> Result<()> {
+    let cli_options = CorgiCliOptions::parse();
     // set up logging
     let subscriber = FmtSubscriber::builder()
         .with_max_level(
@@ -33,7 +35,11 @@ fn main() -> Result<()> {
         },
         ..Default::default()
     };
-    eframe::run_native("Corgi", eframe_options, Box::new(CorgiApp::new_dyn))
-        .or(Err(eyre!("Error in eframe application")))?;
+    eframe::run_native(
+        "Corgi",
+        eframe_options,
+        Box::new(|cc| CorgiApp::new_dyn(cc, cli_options)),
+    )
+    .or(Err(eyre!("Error in eframe application")))?;
     Ok(())
 }

@@ -119,9 +119,13 @@ https://gbillotey.github.io/Fractalshades-doc/math.html
         rendered_image: Image,
     }
     ```
-- [ ] Add save/load capability
+- [x] Add save/load capability
     - decide on settings format (likely JSON or similar)
-    - import/export text
+        - json for now, until ron is possible
+        - `.corg` format specifier
+    - [x] import/export text
+    - [x] CLI import
+    - [ ] drag and drop
 - [ ] Add rendering controls
     - width, height, msaa, output location, format
 - [ ] Add custom controls

@@ -1,9 +1,12 @@
+use clap::Parser;
+use eframe::egui::mutex::Mutex;
+use nanoserde::DeJson;
+use std::fs::read_to_string;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
-
-use eframe::egui::mutex::Mutex;
 
 use crate::image_gen;
 use crate::types::Debouncer;
@@ -11,6 +14,14 @@ use crate::{
     types::{Image, PreviewRenderResources, Status},
     ui::CorgiUI,
 };
+
+#[derive(Parser)]
+#[command(version, about, long_about = "../README.md")]
+pub struct CorgiCliOptions {
+    /// Optional image settings file to start with
+    #[arg(short, long, value_name = "FILE")]
+    image_file: Option<PathBuf>,
+}
 
 /// The App State management struct
 pub struct CorgiApp {
@@ -23,6 +34,7 @@ pub struct CorgiApp {
 impl CorgiApp {
     pub fn new_dyn(
         cc: &eframe::CreationContext<'_>,
+        cli_options: CorgiCliOptions,
     ) -> std::result::Result<Box<dyn eframe::App>, Box<dyn std::error::Error + Send + Sync>> {
         let wgpu = cc
             .wgpu_render_state
@@ -30,7 +42,10 @@ impl CorgiApp {
             .expect("Eframe must be launched with the wgpu backend");
         let status = Arc::new(Mutex::new(Status::default()));
         let (sender, receiver) = mpsc::channel::<Image>();
-        let initial_image = Image::default();
+        let mut initial_image = Image::default();
+        if let Some(image_file) = &cli_options.image_file {
+            initial_image = Image::deserialize_json(read_to_string(image_file)?.as_str())?
+        }
         let render_gpu_data = image_gen::GPUData::init(&initial_image, wgpu);
         let render_thread_status = status.clone();
         let resources = PreviewRenderResources::init(
@@ -44,7 +59,7 @@ impl CorgiApp {
         thread::spawn(move || {
             image_gen::render_thread(receiver, render_thread_status, render_gpu_data, ctx)
         });
-        let ui_state = CorgiUI::new(status);
+        let ui_state = CorgiUI::new(status, initial_image);
         Ok(Box::new(CorgiApp {
             sender,
             debouncer: Debouncer::new(std::time::Duration::from_millis(16)),

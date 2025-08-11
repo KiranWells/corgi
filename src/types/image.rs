@@ -1,32 +1,69 @@
 use eframe::wgpu::Extent3d;
-use rug::{Float, ops::PowAssign};
+use nanoserde::{DeJson, SerJson};
+use rug::{
+    Float,
+    ops::{CompleteRound, PowAssign},
+};
 
 use super::get_precision;
 
+#[derive(DeJson, SerJson)]
+struct FloatParser {
+    value: String,
+    precision: u32,
+}
+
+impl From<&FloatParser> for Float {
+    fn from(value: &FloatParser) -> Self {
+        Float::parse(value.value.clone())
+            .map(|val| val.complete(value.precision))
+            .unwrap_or(Float::new(53))
+    }
+}
+
+impl From<&Float> for FloatParser {
+    fn from(val: &Float) -> Self {
+        FloatParser {
+            value: val.to_string_radix(10, None),
+            precision: val.prec(),
+        }
+    }
+}
+
 /// A representation of the current viewed portion of the fractal
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, DeJson, SerJson)]
 pub struct Viewport {
     pub width: usize,
     pub height: usize,
     pub zoom: f64,
+    #[nserde(proxy = "FloatParser")]
     pub x: Float,
+    #[nserde(proxy = "FloatParser")]
+    pub y: Float,
+}
+
+#[derive(Debug, Clone, PartialEq, DeJson, SerJson)]
+pub struct ProbeLocation {
+    #[nserde(proxy = "FloatParser")]
+    pub x: Float,
+    #[nserde(proxy = "FloatParser")]
     pub y: Float,
 }
 
 /// A representation of the current image being rendered, including
 /// the viewport, coloring, and other parameters
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, DeJson, SerJson)]
 pub struct Image {
     pub viewport: Viewport,
     pub max_iter: usize,
-    pub probe_location: (Float, Float),
+    pub probe_location: ProbeLocation,
     pub coloring: Coloring,
     pub misc: f32,
     pub debug_shutter: f32,
 }
 
 /// The coloring parameters for the image
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, DeJson, SerJson)]
 pub struct Coloring {
     pub saturation: f32,
     pub color_frequency: f32,
@@ -179,7 +216,10 @@ impl Default for Image {
                 x: Float::with_val(53, -0.5),
                 y: Float::with_val(53, 0.0),
             },
-            probe_location: (Float::with_val(53, -0.5), Float::with_val(53, 0.0)),
+            probe_location: ProbeLocation {
+                x: Float::with_val(53, -0.5),
+                y: Float::with_val(53, 0.0),
+            },
             max_iter: 10000,
             coloring: Coloring::default(),
             misc: 1.0,

@@ -7,10 +7,13 @@ edition = "2024"
 
 [dependencies]
 bytemuck = { version = "1.23", features = ["derive"] }
+clap = { version = "4.5.43", features = ["derive"] }
 color-eyre = "0.6"
 eframe = { version = "0.32.0", default-features = false, features = ["default_fonts","wayland","wgpu","x11"] }
 image = "0.25"
+nanoserde = { version = "0.2.1", default-features = false, features = ["std", "json"] }
 rayon = "1.10"
+rfd = { version = "0.15.4", features = ["xdg-portal"] }
 rug = "1.27"
 tracing = "0.1"
 tracing-subscriber = "0.3"

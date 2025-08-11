@@ -82,8 +82,8 @@ pub fn render_thread(
                 || image.viewport.height != last_image.viewport.height;
             // if the max iteration or probe location has changed, re-run the probe
             reprobe = image.max_iter != last_image.max_iter
-                || image.probe_location.0 != last_image.probe_location.0
-                || image.probe_location.1 != last_image.probe_location.1;
+                || image.probe_location.x != last_image.probe_location.x
+                || image.probe_location.y != last_image.probe_location.y;
             // if the probe location has changed or the image viewport has changed, re-generate the delta grid
             regenerate_delta = image.viewport != last_image.viewport || reprobe;
             // if the image generation parameters have changed, re-run the compute shader
