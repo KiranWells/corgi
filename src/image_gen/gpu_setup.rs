@@ -18,13 +18,16 @@ use eframe::{
         Queue, Texture, TextureView,
     },
 };
+use wgpu::ShaderModule;
 
-use crate::types::{ComputeParams, Image, MAX_GPU_GROUP_ITER, RenderParams, Viewport};
+use crate::types::{ComputeParams, MAX_GPU_GROUP_ITER, RenderParams, Viewport};
 
 /// A struct containing all of the GPU handles for the application
 /// and the data needed to render an image. Use the `init` function
 /// to create a new instance.
 pub struct GPUData {
+    /// The name for this Data object
+    pub label: String,
     // general GPU Handles
     /// An Arc to the device
     pub device: Device,
@@ -32,14 +35,14 @@ pub struct GPUData {
     pub queue: Queue,
     // Rendering data
     /// The shader module for the compute shader
-    pub compute_shader: wgpu::ShaderModule,
+    pub compute_shader: ShaderModule,
     /// The compute pipeline for the compute shader
     pub compute_pipeline: ComputePipeline,
     /// The pipeline layout for the render pipeline
     pub render_pipeline_layout: PipelineLayout,
     /// The texture that the image will be rendered to.
-    /// This is shared between the compute and render pipelines.
-    pub rendered_image: Arc<RwLock<Texture>>,
+    /// This is shared between the renderer and caller.
+    pub texture: Arc<RwLock<Texture>>,
     // Data
     /// A struct containing all of the buffers used by the GPU
     pub buffers: Buffers,
@@ -78,24 +81,24 @@ pub struct BindGroups {
 
 impl GPUData {
     /// Initializes the GPU handles for use in rendering an image.
-    pub fn init(image: &Image, wgpu: &RenderState) -> Self {
+    pub fn init(
+        viewport: &Viewport,
+        wgpu: &RenderState,
+        compute_shader: ShaderModule,
+        label: &str,
+    ) -> Self {
         let device = wgpu.device.clone();
         let queue = wgpu.queue.clone();
-        let compute_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("calculate"),
-            source: wgpu::ShaderSource::Wgsl(wesl::include_wesl!("calculate").into()),
-        });
 
-        let rendered_image = Self::create_texture(&device, &image.viewport);
-        let final_texture_view =
-            rendered_image.create_view(&wgpu::TextureViewDescriptor::default());
+        let texture = Self::create_texture(&device, viewport);
+        let final_texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let buffers = Buffers::init(&device, &image.viewport);
+        let buffers = Buffers::init(&device, viewport);
         let (bind_groups, compute_pipeline_layout, render_pipeline_layout) =
             BindGroups::init(&device, &buffers, &final_texture_view);
 
         let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Compute Pipeline"),
+            label: Some(format!("{label} Compute Pipeline").as_str()),
             layout: Some(&compute_pipeline_layout),
             module: &compute_shader,
             entry_point: Some("main_mandel"),
@@ -107,12 +110,13 @@ impl GPUData {
         });
 
         Self {
+            label: label.into(),
             device,
             queue,
             compute_shader,
             compute_pipeline,
             render_pipeline_layout,
-            rendered_image: Arc::new(RwLock::new(rendered_image)),
+            texture: Arc::new(RwLock::new(texture)),
             buffers,
             bind_groups,
             // pipeline_cache,
@@ -123,8 +127,8 @@ impl GPUData {
     /// Any objects which created a texture view of the image will need to recreate it.
     pub fn resize(&mut self, new_view: &Viewport) {
         // recreate the texture with the new size
-        let rendered_image = Self::create_texture(&self.device, new_view);
-        let texture_view = rendered_image.create_view(&wgpu::TextureViewDescriptor::default());
+        let texture = Self::create_texture(&self.device, new_view);
+        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         self.buffers.resize(new_view, &self.device);
 
@@ -136,7 +140,7 @@ impl GPUData {
         self.compute_pipeline =
             self.device
                 .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("Compute Pipeline"),
+                    label: Some(format!("{} Compute Pipeline", self.label).as_str()),
                     layout: Some(&compute_pipeline_layout),
                     module: &self.compute_shader,
                     entry_point: Some("main_mandel"),
@@ -148,7 +152,7 @@ impl GPUData {
                 });
         self.render_pipeline_layout = render_pipeline_layout;
 
-        *self.rendered_image.write() = rendered_image;
+        *self.texture.write() = texture;
     }
 
     /// Creates a texture for the image to be rendered to.

@@ -5,6 +5,7 @@ use eframe::{
     egui::mutex::RwLock,
     wgpu::{self, Device, include_wgsl, util::DeviceExt},
 };
+use wgpu::{Extent3d, Queue};
 
 use super::Transform;
 
@@ -15,7 +16,9 @@ pub struct PreviewRenderResources {
     bind_group: wgpu::BindGroup,
     texture_bind_group: wgpu::BindGroup,
     uniform_buffer: wgpu::Buffer,
-    texture: Arc<RwLock<wgpu::Texture>>,
+    texture: wgpu::Texture,
+    preview_texture: Arc<RwLock<wgpu::Texture>>,
+    output_texture: Arc<RwLock<wgpu::Texture>>,
     size: (usize, usize),
 }
 
@@ -24,10 +27,26 @@ impl PreviewRenderResources {
     pub fn init(
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
-        texture: Arc<RwLock<wgpu::Texture>>,
+        preview_texture: Arc<RwLock<wgpu::Texture>>,
+        output_texture: Arc<RwLock<wgpu::Texture>>,
         size: (usize, usize),
     ) -> Result<Self> {
         let shader = device.create_shader_module(include_wgsl!("../shaders/preview.wgsl"));
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            size: Extent3d {
+                width: size.0 as u32,
+                height: size.1 as u32,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            label: Some(format!("Texture at time {:?}", std::time::Instant::now()).as_str()),
+            view_formats: &[],
+        });
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Preview Bind Group Layout"),
@@ -43,9 +62,7 @@ impl PreviewRenderResources {
             }],
         });
 
-        let fractal_texture_view = texture
-            .read()
-            .create_view(&wgpu::TextureViewDescriptor::default());
+        let fractal_texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let fractal_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
@@ -155,19 +172,47 @@ impl PreviewRenderResources {
             texture_bind_group,
             uniform_buffer,
             texture,
+            preview_texture,
+            output_texture,
             size,
         })
     }
 
     /// Resize the render resources. This must be called when the render thread resizes,
     /// and will refresh the texture view and the uniform buffer.
-    pub fn resize(&mut self, device: &Device, new_size: (usize, usize)) -> Result<()> {
-        *self = Self::init(device, self.format, self.texture.clone(), new_size)?;
+    pub fn resize(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        new_size: (usize, usize),
+    ) -> Result<()> {
+        *self = Self::init(
+            device,
+            self.format,
+            self.preview_texture.clone(),
+            self.output_texture.clone(),
+            new_size,
+        )?;
+        self.swap(device, queue);
         Ok(())
     }
 
+    pub fn swap(&self, device: &Device, queue: &Queue) {
+        if self.texture.size() != self.preview_texture.read().size() {
+            return;
+        }
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        encoder.copy_texture_to_texture(
+            self.preview_texture.read().as_image_copy(),
+            self.texture.as_image_copy(),
+            self.texture.size(),
+        );
+        queue.submit([encoder.finish()]);
+    }
+
     /// Prepare the render resources for a new frame; for use in a callback
-    pub fn prepare(&self, _device: &wgpu::Device, queue: &wgpu::Queue, transform: Transform) {
+    pub fn prepare(&self, _device: &Device, queue: &Queue, transform: Transform) {
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[transform]));
     }
 

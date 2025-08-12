@@ -6,24 +6,21 @@ This module contains the main UI state struct and its implementation, which
 contains the code necessary to update internal state and render the ui.
  */
 
-use eframe::egui::mutex::Mutex;
 use nanoserde::{DeJson, SerJson};
 use std::fs::{OpenOptions, read_to_string};
 use std::io::Write;
-use std::sync::Arc;
 
 use eframe::egui_wgpu::CallbackTrait;
 use eframe::{egui, egui_wgpu};
 use rug::{Float, ops::PowAssign};
 
-use crate::types::{
-    Image, PreviewRenderResources, ProbeLocation, Status, Transform, get_precision,
-};
+use crate::types::{Image, PreviewRenderResources, ProbeLocation, Status, Viewport, get_precision};
 
 /// The main UI state struct.
 pub struct CorgiUI {
     image_settings: Image,
-    status: Arc<Mutex<Status>>,
+    pub status: Status,
+    pub rendered_viewport: Viewport,
     x_text_buff: String,
     y_text_buff: String,
     x_probe_buff: String,
@@ -31,13 +28,15 @@ pub struct CorgiUI {
     previous_cursor_pos: Option<egui::Pos2>,
     setting_probe: bool,
     mouse_down: bool,
+    pub swap: bool,
 }
 
 impl CorgiUI {
     /// Create a new state struct; status should be shared with the render thread.
-    pub fn new(status: Arc<Mutex<Status>>, image: Image) -> Self {
+    pub fn new(image: Image) -> Self {
         Self {
-            status,
+            status: Status::default(),
+            rendered_viewport: image.viewport.clone(),
             x_text_buff: image.viewport.x.to_string_radix(10, None),
             y_text_buff: image.viewport.y.to_string_radix(10, None),
             x_probe_buff: image.probe_location.x.to_string_radix(10, None),
@@ -46,21 +45,13 @@ impl CorgiUI {
             previous_cursor_pos: None,
             setting_probe: false,
             mouse_down: false,
+            swap: false,
         }
     }
 
     /// Generate the UI and handle any events. This function will do some blocking
     /// to access shared data
     pub fn generate_ui(&mut self, ctx: &egui::Context) {
-        let Status {
-            progress,
-            message,
-            rendered_image,
-        } = {
-            let locked = self.status.lock();
-            (*locked).clone()
-        };
-
         // update the image settings from the text buffers
         let precision = get_precision(self.image().viewport.zoom);
         if let Ok(res) = Float::parse(&self.x_text_buff) {
@@ -167,14 +158,13 @@ impl CorgiUI {
                         .open(path);
                     match file {
                         Err(err) => {
-                            self.status.lock().message =
-                                format!("Failed to save image settings: {err:?}")
+                            self.status.message = format!("Failed to save image settings: {err:?}")
                         }
                         Ok(mut file) => {
                             if let Err(err) =
                                 file.write(self.image_settings.serialize_json().as_bytes())
                             {
-                                self.status.lock().message =
+                                self.status.message =
                                     format!("Failed to write image settings: {err:?}")
                             }
                         }
@@ -190,8 +180,7 @@ impl CorgiUI {
                     let contents = read_to_string(path);
                     match contents {
                         Err(err) => {
-                            self.status.lock().message =
-                                format!("Failed to load image settings: {err:?}")
+                            self.status.message = format!("Failed to load image settings: {err:?}")
                         }
                         Ok(file) => match Image::deserialize_json(file.as_ref()) {
                             Ok(image) => {
@@ -204,7 +193,7 @@ impl CorgiUI {
                                 self.image_settings = image;
                             }
                             Err(err) => {
-                                self.status.lock().message =
+                                self.status.message =
                                     format!("Failed to parse image settings: {err:?}")
                             }
                         },
@@ -213,8 +202,8 @@ impl CorgiUI {
             }
             ui.separator();
             ui.label("Status");
-            ui.label(format!("Status: {message:?}"));
-            if let Some(progress) = progress {
+            ui.label(format!("Status: {:?}", self.status.message));
+            if let Some(progress) = self.status.progress {
                 ui.add(egui::ProgressBar::new(progress as f32));
             }
         });
@@ -309,9 +298,11 @@ impl CorgiUI {
                 // The paint callback is called after prepare and is given access to the render pass, which
                 // can be used to issue draw commands.
                 let cb = PaintCallback {
-                    rendered_image: rendered_image.clone(),
+                    rendered_viewport: self.rendered_viewport.clone(),
                     view: self.image_settings.viewport.clone(),
+                    swap: self.swap,
                 };
+                self.swap = false;
 
                 let callback = egui_wgpu::Callback::new_paint_callback(rect, cb);
 
@@ -332,8 +323,9 @@ impl CorgiUI {
 }
 
 struct PaintCallback {
-    rendered_image: Option<Image>,
+    rendered_viewport: crate::types::Viewport,
     view: crate::types::Viewport,
+    swap: bool,
 }
 
 impl CallbackTrait for PaintCallback {
@@ -348,20 +340,18 @@ impl CallbackTrait for PaintCallback {
         let res = callback_resources
             .get_mut::<PreviewRenderResources>()
             .expect("Failed to get render resources");
+        if self.swap {
+            // copy the preview texture to the used texture
+            res.swap(device, queue);
+        }
 
-        let transforms =
-            if let Some(viewport) = { self.rendered_image.as_ref().map(|x| &x.viewport) } {
-                let size = (viewport.width, viewport.height);
-                if size != *res.size() {
-                    // resize the render resources, refreshing the texture reference
-                    // this must block because the callback is not async
-                    res.resize(device, size)
-                        .expect("Failed to resize render resources");
-                }
-                viewport.transforms_from(&self.view)
-            } else {
-                Transform::default()
-            };
+        let size = (self.rendered_viewport.width, self.rendered_viewport.height);
+        if size != *res.size() {
+            // resize the render resources, refreshing the texture reference
+            res.resize(device, queue, size)
+                .expect("Failed to resize render resources");
+        }
+        let transforms = self.rendered_viewport.transforms_from(&self.view);
 
         res.prepare(device, queue, transforms);
         Vec::new()

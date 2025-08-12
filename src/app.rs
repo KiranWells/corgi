@@ -1,17 +1,17 @@
 use clap::Parser;
-use eframe::egui::mutex::Mutex;
 use nanoserde::DeJson;
 use std::fs::read_to_string;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
 
-use crate::image_gen;
-use crate::types::Debouncer;
+use crate::image_gen::WorkerState;
+use crate::types::Message;
+use crate::types::StatusMessage;
 use crate::{
-    types::{Image, PreviewRenderResources, Status},
+    types::{Image, PreviewRenderResources},
     ui::CorgiUI,
 };
 
@@ -26,9 +26,13 @@ pub struct CorgiCliOptions {
 /// The App State management struct
 pub struct CorgiApp {
     ui_state: CorgiUI,
-    sender: mpsc::Sender<Image>,
+    send: mpsc::Sender<Message>,
+    recv: mpsc::Receiver<StatusMessage>,
     last_rendered: Image,
-    debouncer: Debouncer,
+    previous_frame: Image,
+    // TODO: add debouncing on all 'recalculate' functions
+    // with a dynamic delay based on recalculate cost
+    // debouncer: Debouncer,
 }
 
 impl CorgiApp {
@@ -40,30 +44,42 @@ impl CorgiApp {
             .wgpu_render_state
             .as_ref()
             .expect("Eframe must be launched with the wgpu backend");
-        let status = Arc::new(Mutex::new(Status::default()));
-        let (sender, receiver) = mpsc::channel::<Image>();
+        let (ui_send, worker_recv) = mpsc::channel::<Message>();
+        let (worker_send, ui_recv) = mpsc::channel::<StatusMessage>();
+        let cancelled = Arc::new(AtomicBool::new(false));
         let mut initial_image = Image::default();
+        let output_image = Image::default();
         if let Some(image_file) = &cli_options.image_file {
             initial_image = Image::deserialize_json(read_to_string(image_file)?.as_str())?
         }
-        let render_gpu_data = image_gen::GPUData::init(&initial_image, wgpu);
-        let render_thread_status = status.clone();
+        let ctx = cc.egui_ctx.clone();
+        let mut worker_state = WorkerState::new(
+            wgpu,
+            initial_image.clone(),
+            output_image,
+            worker_recv,
+            worker_send,
+            cancelled,
+            ctx,
+        );
         let resources = PreviewRenderResources::init(
             &wgpu.device,
             wgpu.target_format,
-            render_gpu_data.rendered_image.clone(),
-            (0, 0),
+            worker_state.preview_texture(),
+            worker_state.output_texture(),
+            (initial_image.viewport.width, initial_image.viewport.height),
         )?;
         wgpu.renderer.write().callback_resources.insert(resources);
-        let ctx = cc.egui_ctx.clone();
         thread::spawn(move || {
-            image_gen::render_thread(receiver, render_thread_status, render_gpu_data, ctx)
+            worker_state.run();
         });
-        let ui_state = CorgiUI::new(status, initial_image);
+        let ui_state = CorgiUI::new(initial_image);
         Ok(Box::new(CorgiApp {
-            sender,
-            debouncer: Debouncer::new(std::time::Duration::from_millis(16)),
+            send: ui_send,
+            recv: ui_recv,
+            // debouncer: Debouncer::new(std::time::Duration::from_millis(16)),
             last_rendered: ui_state.image().clone(),
+            previous_frame: ui_state.image().clone(),
             ui_state,
         }))
     }
@@ -71,42 +87,46 @@ impl CorgiApp {
 
 impl eframe::App for CorgiApp {
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
-        self.ui_state.generate_ui(ctx);
         let image = self.ui_state.image().clone();
+        for msg in self.recv.try_iter() {
+            match msg {
+                StatusMessage::Progress(message, progress) => {
+                    self.ui_state.status.message = message;
+                    self.ui_state.status.progress = Some(progress);
+                }
+                StatusMessage::NewPreviewViewport(viewport) => {
+                    self.ui_state.status.message = "Finished rendering".into();
+                    self.ui_state.status.progress = None;
+                    self.ui_state.rendered_viewport = viewport;
+                    self.ui_state.swap = true;
+                }
+            }
+        }
+        self.ui_state.generate_ui(ctx);
         //  sanity check on image size
         if !(image.viewport.width < 10
             || image.viewport.height < 10
-            || image.viewport.width * image.viewport.height > 20_000_000
-            || self.ui_state.mouse_down())
+            || image.viewport.width * image.viewport.height > 20_000_000)
         {
             // send the new image to the render thread, but only if
-            // - the zoom level has not changed OR
-            // - the image zoom level did change in the past and the debouncer delay has passed
-            //   (meaning the user has stopped zooming)
+            // - the image is different
+            // - the image has not changed for a full frame
             if &self.last_rendered != self.ui_state.image() {
-                if image.viewport.zoom == self.last_rendered.viewport.zoom {
-                    if self.sender.send(image.clone()).is_ok() {
-                        self.debouncer.reset();
+                if self.ui_state.image() == &self.previous_frame && !self.ui_state.mouse_down() {
+                    if self
+                        .send
+                        .send(Message::NewPreviewSettings(image.clone()))
+                        .is_ok()
+                    {
+                        self.last_rendered = image;
                     } else {
                         tracing::warn!("Failed to send image update")
                     }
                 } else {
-                    // if the zoom level changed, we need to debounce the input
-                    self.debouncer.trigger();
-                    ctx.request_repaint_after(self.debouncer.remaining().unwrap());
+                    self.previous_frame = self.ui_state.image().clone();
+                    // we need to force a re-check next frame
+                    ctx.request_repaint();
                 }
-                self.last_rendered = image;
-            } else if self.debouncer.poll() {
-                // the zoom level previously changed, and the debouncer delay has passed
-                if self.sender.send(self.ui_state.image().clone()).is_err() {
-                    tracing::warn!("Failed to send image update")
-                }
-            } else if self.debouncer.active() {
-                ctx.request_repaint_after(
-                    self.debouncer
-                        .remaining()
-                        .unwrap_or(Duration::from_millis(16)),
-                );
             }
         }
     }

@@ -27,6 +27,17 @@ pub fn get_precision(zoom: f64) -> u32 {
     ((zoom * 1.5) as u32).max(53)
 }
 
+#[derive(Debug)]
+pub enum Message {
+    NewPreviewSettings(Image),
+    NewOutputSettings(Image),
+}
+
+pub enum StatusMessage {
+    Progress(String, f64),
+    NewPreviewViewport(Viewport),
+}
+
 /// Shared status between the main thread and the render thread
 #[derive(Default, Debug, Clone)]
 pub struct Status {
