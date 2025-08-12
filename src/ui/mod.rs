@@ -6,6 +6,7 @@ This module contains the main UI state struct and its implementation, which
 contains the code necessary to update internal state and render the ui.
  */
 
+use eframe::egui::{Button, Color32, Stroke, Vec2};
 use nanoserde::{DeJson, SerJson};
 use std::fs::{OpenOptions, read_to_string};
 use std::io::Write;
@@ -16,11 +17,22 @@ use rug::{Float, ops::PowAssign};
 
 use crate::types::{Image, PreviewRenderResources, ProbeLocation, Status, Viewport, get_precision};
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ViewState {
+    Viewport,
+    OutputView,
+    OutputLock,
+    Output,
+}
+
 /// The main UI state struct.
 pub struct CorgiUI {
     image_settings: Image,
     pub status: Status,
     pub rendered_viewport: Viewport,
+    pub output_viewport: Viewport,
+    view_state: ViewState,
+    render_zoom_offset: f64,
     x_text_buff: String,
     y_text_buff: String,
     x_probe_buff: String,
@@ -37,6 +49,15 @@ impl CorgiUI {
         Self {
             status: Status::default(),
             rendered_viewport: image.viewport.clone(),
+            output_viewport: Viewport {
+                width: 1920,
+                height: 1080,
+                zoom: 2.0,
+                x: Float::new(53),
+                y: Float::new(53),
+            },
+            view_state: ViewState::Viewport,
+            render_zoom_offset: -1.0,
             x_text_buff: image.viewport.x.to_string_radix(10, None),
             y_text_buff: image.viewport.y.to_string_radix(10, None),
             x_probe_buff: image.probe_location.x.to_string_radix(10, None),
@@ -73,6 +94,49 @@ impl CorgiUI {
             ui.heading("Corgi");
             ui.separator();
             ui.label("Viewport");
+            if ui
+                .add_enabled(
+                    self.view_state == ViewState::Viewport,
+                    Button::new("Set Camera to View"),
+                )
+                .clicked()
+            {
+                self.output_viewport.x = self.image_settings.viewport.x.clone();
+                self.output_viewport.y = self.image_settings.viewport.y.clone();
+                self.output_viewport.zoom = self.image_settings.viewport.zoom + 0.5;
+                self.render_zoom_offset = -0.5;
+                if self.view_state == ViewState::Viewport {
+                    self.view_state = ViewState::OutputView;
+                }
+            }
+            if ui
+                .button(if self.view_state == ViewState::Viewport {
+                    "Preview Camera"
+                } else {
+                    "Exit Preview"
+                })
+                .clicked()
+            {
+                if self.view_state == ViewState::Viewport {
+                    self.view_state = ViewState::OutputView;
+                } else {
+                    self.view_state = ViewState::Viewport;
+                }
+            }
+            if ui
+                .button(if self.view_state != ViewState::OutputLock {
+                    "Lock Camera to View"
+                } else {
+                    "Unlock Camera"
+                })
+                .clicked()
+            {
+                if self.view_state == ViewState::OutputLock {
+                    self.view_state = ViewState::OutputView;
+                } else {
+                    self.view_state = ViewState::OutputLock;
+                }
+            }
             ui.horizontal(|ui| {
                 ui.label("real offset");
                 ui.add(egui::TextEdit::singleline(&mut self.x_text_buff));
@@ -213,6 +277,20 @@ impl CorgiUI {
             egui::Frame::canvas(ui.style()).show(ui, |ui| {
                 let size = ui.available_size();
                 let (_id, rect) = ui.allocate_space(size);
+                // rect.is_negative()
+                let view_image = self.image();
+                let mut render_rect = rect.scale_from_center2(
+                    egui::Vec2::splat(1.0) / view_image.viewport.aspect_scale(),
+                );
+                let (x, y) = view_image
+                    .viewport
+                    .coords_to_px_offset(&self.output_viewport.x, &self.output_viewport.y);
+                render_rect = render_rect.translate(Vec2::new(x as f32, -y as f32));
+                render_rect = render_rect.scale_from_center(f32::powf(
+                    2.0,
+                    -(self.output_viewport.zoom - view_image.viewport.zoom) as f32,
+                ));
+                render_rect = render_rect.scale_from_center2(self.output_viewport.aspect_scale());
 
                 // handle mouse events
 
@@ -264,23 +342,53 @@ impl CorgiUI {
                         }
 
                         // scroll
-                        let precision = get_precision(self.image_settings.viewport.zoom);
+                        let precision = get_precision(view_image.viewport.zoom);
                         let mut scale = Float::with_val(precision, 2.0);
-                        scale.pow_assign(-self.image_settings.viewport.zoom);
-                        self.image_settings.viewport.x -= (drag.x as f64
-                            / self.image_settings.viewport.width as f64
+                        scale.pow_assign(-view_image.viewport.zoom);
+                        let aspect_scale = view_image.viewport.aspect_scale();
+                        let x_offset = -(drag.x as f64
+                            / view_image.viewport.width as f64
+                            * aspect_scale.x as f64
                             * pixel_scale as f64
-                            * 2.0)
+                            * 1.715) // TODO: why this value? and does this work on other screens?
                             * scale.clone();
-                        self.image_settings.viewport.y += (drag.y as f64
-                            / self.image_settings.viewport.height as f64
+                        let y_offset = (drag.y as f64 / view_image.viewport.height as f64
+                            * aspect_scale.y as f64
                             * pixel_scale as f64
-                            * 2.0)
+                            * 1.715)
                             * scale;
+                        match self.view_state {
+                            ViewState::Viewport => {
+                                self.image_settings.viewport.x += x_offset;
+                                self.image_settings.viewport.y += y_offset;
+                                self.image_settings.viewport.zoom +=
+                                    scroll.y as f64 * pixel_scale as f64 * 0.005;
+                            }
+                            ViewState::OutputView => {
+                                if drag.x != 0.0 || drag.y != 0.0 {
+                                    self.image_settings.viewport.x =
+                                        self.output_viewport.x.clone() + x_offset;
+                                    self.image_settings.viewport.y =
+                                        self.output_viewport.y.clone() + y_offset;
+                                    self.image_settings.viewport.zoom = view_image.viewport.zoom;
+                                    self.view_state = ViewState::Viewport;
+                                }
+                                self.render_zoom_offset +=
+                                    scroll.y as f64 * pixel_scale as f64 * 0.005;
+                            }
+                            ViewState::OutputLock => {
+                                self.output_viewport.x += x_offset;
+                                self.output_viewport.y += y_offset;
+                                self.output_viewport.zoom +=
+                                    scroll.y as f64 * pixel_scale as f64 * 0.005;
+                            }
+                            ViewState::Output => {
+                                self.render_zoom_offset +=
+                                    scroll.y as f64 * pixel_scale as f64 * 0.005;
+                            }
+                        }
                         self.x_text_buff = self.image_settings.viewport.x.to_string_radix(10, None);
                         self.y_text_buff = self.image_settings.viewport.y.to_string_radix(10, None);
-                        self.image_settings.viewport.zoom +=
-                            scroll.y as f64 * pixel_scale as f64 * 0.005;
                     }
                 }
 
@@ -299,7 +407,7 @@ impl CorgiUI {
                 // can be used to issue draw commands.
                 let cb = PaintCallback {
                     rendered_viewport: self.rendered_viewport.clone(),
-                    view: self.image_settings.viewport.clone(),
+                    view: view_image.viewport,
                     swap: self.swap,
                 };
                 self.swap = false;
@@ -307,13 +415,28 @@ impl CorgiUI {
                 let callback = egui_wgpu::Callback::new_paint_callback(rect, cb);
 
                 ui.painter().add(callback);
+                ui.painter().rect_stroke(
+                    render_rect.intersect(rect),
+                    0.0,
+                    Stroke::new(2.0, Color32::from_gray(255)),
+                    egui::StrokeKind::Outside,
+                );
             });
         });
     }
 
     /// Get the image settings
-    pub fn image(&self) -> &Image {
-        &self.image_settings
+    pub fn image(&self) -> Image {
+        match self.view_state {
+            ViewState::Viewport => self.image_settings.clone(),
+            ViewState::OutputView | ViewState::OutputLock | ViewState::Output => {
+                let mut output = self.image_settings.clone();
+                output.viewport.x = self.output_viewport.x.clone();
+                output.viewport.y = self.output_viewport.y.clone();
+                output.viewport.zoom = self.output_viewport.zoom + self.render_zoom_offset;
+                output
+            }
+        }
     }
 
     /// Get the mouse down state

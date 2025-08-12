@@ -1,4 +1,4 @@
-use eframe::wgpu::Extent3d;
+use eframe::{egui::Vec2, wgpu::Extent3d};
 use nanoserde::{DeJson, SerJson};
 use rug::{
     Float,
@@ -145,11 +145,10 @@ impl Viewport {
         let scale = f32::powf(2.0, -(self.zoom - other.zoom) as f32);
         let mut this_scale = Float::with_val(get_precision(self.zoom), 2.0);
         this_scale.pow_assign(-self.zoom);
+        let aspect_scale = self.aspect_scale();
         let offset: [Float; 2] = [
-            (self.x.clone() - other.x.clone()) / this_scale.clone(),
-            (self.y.clone() - other.y.clone())
-                / this_scale
-                / (self.height as f32 / self.width as f32),
+            (self.x.clone() - other.x.clone()) / this_scale.clone() / aspect_scale.x,
+            (self.y.clone() - other.y.clone()) / this_scale / aspect_scale.y,
         ];
         Transform {
             angle: 0.0,
@@ -163,17 +162,40 @@ impl Viewport {
         self.width as f64 / self.height as f64
     }
 
+    pub fn aspect_scale(&self) -> Vec2 {
+        let aspect = self.aspect_ratio() as f32;
+        if aspect < 1.0 {
+            Vec2::new(aspect, 1.0)
+        } else {
+            Vec2::new(1.0, 1.0 / aspect)
+        }
+    }
+
     /// Gets the fractal coordinates of a pixel from viewport coordinates
     pub fn get_real_coords(&self, x: f64, y: f64) -> (Float, Float) {
         let precision = get_precision(self.zoom);
         let mut scale = Float::with_val(precision, 2.0);
         scale.pow_assign(-self.zoom);
+        let aspect_scale = self.aspect_scale();
 
-        let r = ((x / self.width as f64) * 2.0 - 1.0) * scale.clone()
+        let r = ((x / self.width as f64) * 2.0 - 1.0) * scale.clone() * aspect_scale.x
             + Float::with_val(precision, &self.x);
-        let i = ((y / self.height as f64) * 2.0 - 1.0) * scale.clone() / self.aspect_ratio()
+        let i = ((y / self.height as f64) * 2.0 - 1.0) * scale.clone() * aspect_scale.y
             + Float::with_val(precision, &self.y);
         (r, i)
+    }
+
+    /// Returns the offset in pixels from the center of this viewport to
+    /// the given location in fractal coordinates
+    pub fn coords_to_px_offset(&self, r: &Float, i: &Float) -> (f64, f64) {
+        let precision = get_precision(self.zoom);
+        let mut scale = Float::with_val(precision, 2.0);
+        scale.pow_assign(-self.zoom);
+        let aspect_scale = self.aspect_scale();
+
+        let x = ((r.clone() - self.x.clone()) / scale.clone()).to_f64() / aspect_scale.x as f64;
+        let y = ((i.clone() - self.y.clone()) / scale).to_f64() / aspect_scale.y as f64;
+        (x * 0.5 * self.width as f64, y * 0.5 * self.height as f64)
     }
 }
 

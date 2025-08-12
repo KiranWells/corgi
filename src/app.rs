@@ -111,8 +111,9 @@ impl eframe::App for CorgiApp {
             // send the new image to the render thread, but only if
             // - the image is different
             // - the image has not changed for a full frame
-            if &self.last_rendered != self.ui_state.image() {
-                if self.ui_state.image() == &self.previous_frame && !self.ui_state.mouse_down() {
+            let view_image = self.ui_state.image();
+            if self.last_rendered != view_image {
+                if view_image == self.previous_frame && !self.ui_state.mouse_down() {
                     if self
                         .send
                         .send(Message::NewPreviewSettings(image.clone()))
