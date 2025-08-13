@@ -53,6 +53,9 @@ impl CorgiApp {
             initial_image = Image::deserialize_json(read_to_string(image_file)?.as_str())?
         }
         let ctx = cc.egui_ctx.clone();
+        ctx.options_mut(|options| {
+            options.max_passes = std::num::NonZeroUsize::new(1).unwrap();
+        });
         let mut worker_state = WorkerState::new(
             wgpu,
             initial_image.clone(),
@@ -87,7 +90,6 @@ impl CorgiApp {
 
 impl eframe::App for CorgiApp {
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
-        let image = self.ui_state.image().clone();
         for msg in self.recv.try_iter() {
             match msg {
                 StatusMessage::Progress(message, progress) => {
@@ -104,6 +106,7 @@ impl eframe::App for CorgiApp {
         }
         self.ui_state.generate_ui(ctx);
         //  sanity check on image size
+        let image = self.ui_state.image();
         if !(image.viewport.width < 10
             || image.viewport.height < 10
             || image.viewport.width * image.viewport.height > 20_000_000)
@@ -111,9 +114,8 @@ impl eframe::App for CorgiApp {
             // send the new image to the render thread, but only if
             // - the image is different
             // - the image has not changed for a full frame
-            let view_image = self.ui_state.image();
-            if self.last_rendered != view_image {
-                if view_image == self.previous_frame && !self.ui_state.mouse_down() {
+            if self.last_rendered != image {
+                if image == self.previous_frame && !self.ui_state.mouse_down() {
                     if self
                         .send
                         .send(Message::NewPreviewSettings(image.clone()))
