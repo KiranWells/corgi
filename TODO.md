@@ -81,12 +81,13 @@ https://gbillotey.github.io/Fractalshades-doc/math.html
     - [ ] extended range floating point
         - https://andrewthall.org/papers/df64_qf128.pdf
             - could be used for f64 polyfill as well
+- [?] hdr
 
 
 ### Performance
 
 - [x] test using rayon for delta grid generation
-- [ ] switch to GPU calculations for initial deltas, if possible
+- [x] switch to GPU calculations for initial deltas, if possible
 - [ ] dynamically select the work group size
 - [ ] dynamic precision selection
     - use zoom level to conservatively decide on necessary precision
@@ -129,9 +130,10 @@ https://gbillotey.github.io/Fractalshades-doc/math.html
     - [x] import/export text
     - [x] CLI import
     - [ ] drag and drop
-- [ ] Add rendering controls
-    - width, height, msaa, output location, format
-- [ ] Add custom controls
+- [x] Add rendering controls
+    - width, height, output location, format
+    - [ ] anti-aliasing
+- [x] ~Add custom controls~ - egui has a native drag input
     - unbounded inputs - drag up or down for adjusting (or scroll), shift for higher precision
 - [?] animation support
     - allow controls to be animated from start to finish (mostly, zoom)

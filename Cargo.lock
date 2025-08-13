@@ -864,7 +864,6 @@ dependencies = [
  "egui_taffy",
  "image",
  "nanoserde",
- "rayon",
  "rfd",
  "rug",
  "taffy",

@@ -13,7 +13,6 @@ eframe = { version = "0.32.0", default-features = false, features = ["default_fo
 egui_taffy = "0.8.0"
 image = "0.25"
 nanoserde = { version = "0.2.1", default-features = false, features = ["std", "json"] }
-rayon = "1.10"
 rfd = { version = "0.15.4", features = ["xdg-portal"] }
 rug = "1.27"
 taffy = "0.7.7"

@@ -1,7 +1,6 @@
 use std::fmt::Debug;
 
-use crate::types::{ESCAPE_RADIUS, ProbeLocation, Viewport, get_precision};
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+use crate::types::{ESCAPE_RADIUS, ProbeLocation, get_precision};
 use rug::Float;
 
 /// # FromFloat
@@ -91,33 +90,4 @@ where
     }
 
     (probed_point, probed_point_derivative)
-}
-
-/// Generates a grid of complex delta values for a given complex number in the mandelbrot set.
-/// The resulting vector will be of length `image.width * image.height`.
-///
-/// The delta values represent the difference between the `probe_point` and the complex number
-/// at the corresponding pixel in the image.
-pub fn generate_delta_grid<T: FromFloat + Send>(
-    probe_point: &ProbeLocation,
-    image: &Viewport,
-) -> Vec<[T; 2]> {
-    let precision = get_precision(image.zoom) * 2;
-
-    let probe_real = Float::with_val(precision, &probe_point.x);
-    let probe_imag = Float::with_val(precision, &probe_point.y);
-
-    (0..(image.width * image.height))
-        .into_par_iter()
-        .map(move |n| {
-            let i = n % image.width;
-            let j = n / image.width;
-
-            let (z_real, z_imag) = image.get_real_coords(i as f64, j as f64);
-
-            let delta_n_r = z_real - probe_real.clone();
-            let delta_n_i = z_imag - probe_imag.clone();
-            [T::from_float(&delta_n_r), T::from_float(&delta_n_i)]
-        })
-        .collect()
 }

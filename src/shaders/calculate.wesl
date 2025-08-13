@@ -19,6 +19,9 @@ struct Params {
     max_iter: u32,
     probe_len: u32,
     iter_offset: u32,
+    x: f32,
+    y: f32,
+    zoom: f32,
 };
 @group(1) @binding(0) var<uniform> params : Params;
 
@@ -41,8 +44,17 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if params.iter_offset != 0u && delta_grid_iter[i + j * params.width].x < -ESCAPE_RADIUS {
         return;
     }
+    let scale = pow(2.0, -params.zoom);
+    var aspect_scale = vec2<f32>(1.0, 1.0);
+    let aspect = f32(params.width) / f32(params.height);
+    if aspect< 1.0 {
+        aspect_scale.x = aspect;
+    } else {
+        aspect_scale.y = 1.0 / aspect;
+    }
+    let offset = vec2<f32>(f32(i) / f32(params.width), f32(j) / f32(params.height));
 
-    let delta_0 = delta_grid[i + j * params.width];
+    let delta_0 = vec2<f32>(params.x, params.y) + (offset - 0.5) * 2.0 * scale * aspect_scale;
     var delta_n: vec2<f32>;
     var delta_n_prime: vec2<f32>;
     if params.iter_offset == 0u {

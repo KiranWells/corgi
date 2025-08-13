@@ -18,15 +18,14 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use tracing::debug;
-use wgpu::PollType;
 
 use crate::types::{
-    ComputeParams, Image, MAX_GPU_GROUP_ITER, Message, RenderParams, StatusMessage, Viewport,
+    ComputeParams, Image, MAX_GPU_GROUP_ITER, Message, ProbeLocation, RenderParams, StatusMessage,
+    Viewport,
 };
 use probe::probe;
 
 pub use gpu_setup::GPUData;
-use probe::generate_delta_grid;
 
 // #[cfg(debug_assertions)]
 macro_rules! time {
@@ -215,10 +214,8 @@ fn render_image(
 ) {
     let resize;
     let reprobe;
-    let regenerate_delta;
     let recompute;
     let recolor;
-    let mut delta_grid = vec![];
     if let Some(last_image) = last_image {
         // if the image has not changed, skip the render
         if image == last_image {
@@ -232,9 +229,10 @@ fn render_image(
             || image.probe_location.x != last_image.probe_location.x
             || image.probe_location.y != last_image.probe_location.y;
         // if the probe location has changed or the image viewport has changed, re-generate the delta grid
-        regenerate_delta = image.viewport != last_image.viewport || reprobe;
         // if the image generation parameters have changed, re-run the compute shader
-        recompute = image.max_iter != last_image.max_iter || regenerate_delta || reprobe;
+        recompute = image.max_iter != last_image.max_iter
+            || image.viewport != last_image.viewport
+            || reprobe;
         // if the image coloring parameters have changed, re-run the image render
         recolor = image.coloring != last_image.coloring
             || recompute
@@ -244,7 +242,6 @@ fn render_image(
         // if there is no last image, re-run everything
         resize = true;
         reprobe = true;
-        regenerate_delta = true;
         recompute = true;
         recolor = true;
     }
@@ -270,27 +267,6 @@ fn render_image(
         );
     }
 
-    if regenerate_delta {
-        let _ = send.send(StatusMessage::Progress("Generating Delta Grid".into(), 0.0));
-        ctx.request_repaint();
-        // generate the delta grid
-        delta_grid = time!(
-            "Generating delta grid",
-            generate_delta_grid::<f32>(&image.probe_location, &image.viewport)
-        );
-    }
-
-    if resize || regenerate_delta {
-        let _ = send.send(StatusMessage::Progress("Updating buffers".into(), 0.0));
-        ctx.request_repaint();
-        // if the image has been resized, but the probe location has not changed, copy the delta grid to the GPU
-        gpu_data.queue.write_buffer(
-            &gpu_data.buffers.delta_0,
-            0,
-            bytemuck::cast_slice(&delta_grid),
-        );
-    }
-
     if recompute {
         let _ = send.send(StatusMessage::Progress(
             format!("Computing iteration 1 of {}", image.max_iter),
@@ -302,6 +278,7 @@ fn render_image(
             run_compute_step(
                 probed_data,
                 &image.viewport,
+                &image.probe_location,
                 gpu_data,
                 &send,
                 cancelled,
@@ -327,6 +304,7 @@ fn render_image(
 fn run_compute_step(
     probed_data: &(Vec<[f32; 2]>, Vec<[f32; 2]>),
     viewport: &Viewport,
+    probe_location: &ProbeLocation,
     gpu_data: &GPUData,
     send: &mpsc::Sender<StatusMessage>,
     _cancelled: Arc<AtomicBool>,
@@ -382,6 +360,9 @@ fn run_compute_step(
                 (probe_len % MAX_GPU_GROUP_ITER) as u32
             },
             iter_offset: (i * MAX_GPU_GROUP_ITER) as u32,
+            x: (viewport.x.clone() - probe_location.x.clone()).to_f32(),
+            y: (viewport.y.clone() - probe_location.y.clone()).to_f32(),
+            zoom: viewport.zoom as f32,
         };
         if parameters.probe_len == 0 {
             break;
@@ -413,6 +394,8 @@ fn run_compute_step(
         // submit the compute shader command buffer
         queue.submit(Some(command_buffer));
         };
+        time! {
+            "status update",
         let _ = send.send(StatusMessage::Progress(
             format!(
                 "Computing iteration {} of {}",
@@ -422,9 +405,8 @@ fn run_compute_step(
             (i * MAX_GPU_GROUP_ITER + parameters.probe_len as usize) as f64 / probe_len as f64,
         ));
         ctx.request_repaint();
+        }
     }
-    // ensure the queue is complete
-    let _ = gpu_data.device.poll(PollType::Wait);
 }
 
 /// Runs the render shader on the GPU

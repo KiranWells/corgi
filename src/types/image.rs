@@ -84,6 +84,9 @@ pub struct ComputeParams {
     pub max_iter: u32,
     pub probe_len: u32,
     pub iter_offset: u32,
+    pub x: f32,
+    pub y: f32,
+    pub zoom: f32,
 }
 
 /// The parameters for the render shader. This is sent as a uniform
