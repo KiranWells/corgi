@@ -168,10 +168,12 @@ impl WorkerState {
                 let _ = self
                     .send
                     .send(StatusMessage::Progress("Fetching image data".into(), 0.0));
+                self.ctx.request_repaint();
                 if let Some(data) = self.output_state.get_texture_data() {
                     let _ = self
                         .send
                         .send(StatusMessage::Progress("Saving image".into(), 0.0));
+                    self.ctx.request_repaint();
                     if let Err(err) = image::save_buffer(
                         path,
                         data.as_slice(),
@@ -184,10 +186,12 @@ impl WorkerState {
                             format!("Failed to save image: {err}"),
                             0.0,
                         ));
+                        self.ctx.request_repaint();
                     } else {
                         let _ = self
                             .send
                             .send(StatusMessage::Progress("Image save complete".into(), 100.0));
+                        self.ctx.request_repaint();
                     }
                 }
                 // write to file
