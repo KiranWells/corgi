@@ -100,12 +100,16 @@ impl WorkerState {
         while let Ok(msg) = self.recv.recv() {
             let mut new_preview = None;
             let mut new_output = None;
+            let mut file_save = None;
             match msg {
                 Message::NewPreviewSettings(image) => {
                     new_preview = Some(image);
                 }
                 Message::NewOutputSettings(image) => {
                     new_output = Some(image);
+                }
+                Message::SaveToFile(path) => {
+                    file_save = Some(path);
                 }
             }
             loop {
@@ -116,6 +120,9 @@ impl WorkerState {
                     }
                     Ok(Message::NewOutputSettings(image)) => {
                         new_output = Some(image);
+                    }
+                    Ok(Message::SaveToFile(path)) => {
+                        file_save = Some(path);
                     }
                     Err(mpsc::TryRecvError::Empty) => break,
                     Err(mpsc::TryRecvError::Disconnected) => return,
@@ -131,7 +138,11 @@ impl WorkerState {
                     self.cancelled.clone(), // TODO: should this be the same cancel??
                     self.ctx.clone(),
                 );
+                let _ = self
+                    .send
+                    .send(StatusMessage::NewPreviewViewport(image.viewport.clone()));
                 self.preview_settings = Some(image);
+                self.ctx.request_repaint();
             }
             if let Some(image) = new_output {
                 // TODO: move to separate thread
@@ -145,6 +156,42 @@ impl WorkerState {
                     self.ctx.clone(),
                 );
                 self.output_settings = Some(image);
+                // let _ = self.send.send(StatusMessage::New(image.viewport.clone()));
+                let _ = self.send.send(StatusMessage::Progress(
+                    "Finished rendering output".into(),
+                    100.0,
+                ));
+                self.ctx.request_repaint();
+            }
+            if let Some(path) = file_save {
+                // copy output buffer to CPU
+                let output_settings = self.output_settings.as_ref().unwrap();
+                let _ = self
+                    .send
+                    .send(StatusMessage::Progress("Fetching image data".into(), 0.0));
+                if let Some(data) = self.output_state.get_texture_data() {
+                    let _ = self
+                        .send
+                        .send(StatusMessage::Progress("Saving image".into(), 0.0));
+                    if let Err(err) = image::save_buffer(
+                        path,
+                        data.as_slice(),
+                        output_settings.viewport.width as u32,
+                        output_settings.viewport.height as u32,
+                        image::ColorType::Rgba8,
+                    ) {
+                        tracing::error!("Failed to save image: {err}");
+                        let _ = self.send.send(StatusMessage::Progress(
+                            format!("Failed to save image: {err}"),
+                            0.0,
+                        ));
+                    } else {
+                        let _ = self
+                            .send
+                            .send(StatusMessage::Progress("Image save complete".into(), 100.0));
+                    }
+                }
+                // write to file
             }
         }
     }
@@ -272,9 +319,6 @@ fn render_image(
         ctx.request_repaint();
         time!("Running image render", run_render_step(image, gpu_data));
     }
-
-    let _ = send.send(StatusMessage::NewPreviewViewport(image.viewport.clone()));
-    ctx.request_repaint();
 }
 
 /// Runs the compute shader on the GPU. This is the most expensive step, so the output

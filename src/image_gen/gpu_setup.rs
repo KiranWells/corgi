@@ -8,7 +8,7 @@ the same GPU.
 
 */
 
-use std::sync::Arc;
+use std::sync::{Arc, mpsc};
 
 use eframe::{
     egui::mutex::RwLock,
@@ -169,6 +169,61 @@ impl GPUData {
             label: Some(format!("Texture at time {:?}", std::time::Instant::now()).as_str()),
             view_formats: &[],
         })
+    }
+
+    pub fn get_texture_data(&self) -> Option<Vec<u8>> {
+        let ext = self.texture.read().size();
+        // let padded_width = ext.width * 4;
+        let padded_width = ((ext.width * 4) as f32 / 256.0).ceil() as u32 * 256;
+        let tmp_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: padded_width as u64 * ext.height as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        encoder.copy_texture_to_buffer(
+            self.texture.read().as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &tmp_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_width),
+                    rows_per_image: None,
+                },
+            },
+            self.texture.read().size(),
+        );
+        self.queue.submit([encoder.finish()]);
+        let slice = tmp_buffer.slice(..);
+        let (send, recv) = mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |res| {
+            let _ = send.send(res);
+        });
+        let _ = self.device.poll(wgpu::PollType::Wait);
+        match recv.recv() {
+            Ok(Ok(())) => {
+                let mut out = Vec::new();
+                for chunk in tmp_buffer
+                    .slice(..)
+                    .get_mapped_range()
+                    .chunks(padded_width as usize)
+                {
+                    out.extend_from_slice(&chunk[..(ext.width * 4) as usize]);
+                }
+                Some(out)
+            }
+            Ok(Err(err)) => {
+                tracing::error!("Error: {err:?}");
+                None
+            }
+            Err(err) => {
+                tracing::error!("Error: {err:?}");
+                None
+            }
+        }
     }
 }
 

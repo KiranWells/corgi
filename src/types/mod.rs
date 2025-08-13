@@ -8,6 +8,7 @@ mod image;
 mod preview_resources;
 
 use eframe::wgpu;
+use std::path::PathBuf;
 use std::time::Duration;
 use std::{error::Error, fmt::Display};
 
@@ -31,6 +32,7 @@ pub fn get_precision(zoom: f64) -> u32 {
 pub enum Message {
     NewPreviewSettings(Image),
     NewOutputSettings(Image),
+    SaveToFile(PathBuf),
 }
 
 pub enum StatusMessage {

@@ -76,7 +76,7 @@ impl CorgiApp {
         thread::spawn(move || {
             worker_state.run();
         });
-        let ui_state = CorgiUI::new(initial_image);
+        let ui_state = CorgiUI::new(initial_image, ui_send.clone());
         Ok(Box::new(CorgiApp {
             send: ui_send,
             recv: ui_recv,

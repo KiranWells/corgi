@@ -11,13 +11,16 @@ use egui_taffy::{TuiBuilderLogic, TuiWidget, tui};
 use nanoserde::{DeJson, SerJson};
 use std::fs::{OpenOptions, read_to_string};
 use std::io::Write;
+use std::sync::mpsc;
 use taffy::prelude::*;
 
 use eframe::egui_wgpu::CallbackTrait;
 use eframe::{egui, egui_wgpu};
 use rug::{Float, ops::PowAssign};
 
-use crate::types::{Image, PreviewRenderResources, ProbeLocation, Status, Viewport, get_precision};
+use crate::types::{
+    Image, Message, PreviewRenderResources, ProbeLocation, Status, Viewport, get_precision,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ViewState {
@@ -42,6 +45,7 @@ pub struct CorgiUI {
     setting_probe: bool,
     mouse_down: bool,
     pub swap: bool,
+    send: mpsc::Sender<Message>,
 }
 
 fn input_with_label(tui: &mut egui_taffy::Tui, label: &str, widget: impl TuiWidget) {
@@ -63,7 +67,7 @@ fn input_with_label(tui: &mut egui_taffy::Tui, label: &str, widget: impl TuiWidg
 
 impl CorgiUI {
     /// Create a new state struct; status should be shared with the render thread.
-    pub fn new(image: Image) -> Self {
+    pub fn new(image: Image, send: mpsc::Sender<Message>) -> Self {
         Self {
             status: Status::default(),
             rendered_viewport: image.viewport.clone(),
@@ -84,6 +88,7 @@ impl CorgiUI {
             setting_probe: false,
             mouse_down: false,
             swap: false,
+            send,
         }
     }
 
@@ -333,7 +338,6 @@ impl CorgiUI {
                             .add_filter("corg", &["corg"])
                             .pick_file()
                         {
-                            // write to file
                             let contents = read_to_string(path);
                             match contents {
                                 Err(err) => {
@@ -358,6 +362,19 @@ impl CorgiUI {
                                     }
                                 },
                             }
+                        }
+                    }
+
+                    if tui.ui_add(Button::new("Render to file")).clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("image", &["avif", "png", "tiff"])
+                            .set_file_name("fractal.avif")
+                            .save_file()
+                        {
+                            let mut image = self.image_settings.clone();
+                            image.viewport = self.output_viewport.clone();
+                            let _ = self.send.send(Message::NewOutputSettings(image));
+                            let _ = self.send.send(Message::SaveToFile(path));
                         }
                     }
                     tui.separator();
