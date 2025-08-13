@@ -38,8 +38,10 @@ pub struct GPUData {
     pub compute_shader: ShaderModule,
     /// The compute pipeline for the compute shader
     pub compute_pipeline: ComputePipeline,
-    /// The pipeline layout for the render pipeline
-    pub render_pipeline_layout: PipelineLayout,
+    /// The shader module for the color shader
+    pub color_shader: ShaderModule,
+    /// The color pipeline for the color shader
+    pub color_pipeline: ComputePipeline,
     /// The texture that the image will be rendered to.
     /// This is shared between the renderer and caller.
     pub texture: Arc<RwLock<Texture>>,
@@ -109,13 +111,31 @@ impl GPUData {
             cache: None,
         });
 
+        let color_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some(format!("{label} Color Shader").as_str()),
+            source: wgpu::ShaderSource::Wgsl(wesl::include_wesl!("color").into()),
+        });
+
+        let color_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some(format!("{label} Color Pipeline").as_str()),
+            layout: Some(&render_pipeline_layout),
+            module: &color_shader,
+            entry_point: Some("main_color"),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &[],
+                zero_initialize_workgroup_memory: false,
+            },
+            cache: None,
+        });
+
         Self {
             label: label.into(),
             device,
             queue,
             compute_shader,
             compute_pipeline,
-            render_pipeline_layout,
+            color_shader,
+            color_pipeline,
             texture: Arc::new(RwLock::new(texture)),
             buffers,
             bind_groups,
@@ -150,7 +170,20 @@ impl GPUData {
                     },
                     cache: None,
                 });
-        self.render_pipeline_layout = render_pipeline_layout;
+
+        self.color_pipeline =
+            self.device
+                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some(format!("{} Color Pipeline", self.label).as_str()),
+                    layout: Some(&render_pipeline_layout),
+                    module: &self.color_shader,
+                    entry_point: Some("main_color"),
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants: &[],
+                        zero_initialize_workgroup_memory: false,
+                    },
+                    cache: None,
+                });
 
         *self.texture.write() = texture;
     }

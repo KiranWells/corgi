@@ -416,7 +416,7 @@ fn run_render_step(image: &Image, gpu_data: &GPUData) {
         queue,
         bind_groups,
         buffers,
-        render_pipeline_layout,
+        color_pipeline,
         ..
     } = gpu_data;
     let color_params: RenderParams = image.into();
@@ -425,26 +425,6 @@ fn run_render_step(image: &Image, gpu_data: &GPUData) {
         0,
         bytemuck::cast_slice(&[color_params]),
     );
-
-    // select the render shader
-    let render_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("Render Shader"),
-        source: wgpu::ShaderSource::Wgsl(wesl::include_wesl!("color").into()),
-    });
-
-    // create the render pipeline
-    let render_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("Render Pipeline"),
-        layout: Some(render_pipeline_layout),
-        module: &render_shader,
-        entry_point: Some("main_color"),
-        compilation_options: wgpu::PipelineCompilationOptions {
-            constants: &[],
-            zero_initialize_workgroup_memory: false,
-        },
-        cache: None,
-    });
-
     // create encoder for CPU - GPU communication
     let mut encoder =
         device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
@@ -458,7 +438,7 @@ fn run_render_step(image: &Image, gpu_data: &GPUData) {
         cpass.set_bind_group(0, &bind_groups.render_buffers, &[]);
         cpass.set_bind_group(1, &bind_groups.render_texture, &[]);
         cpass.set_bind_group(2, &bind_groups.render_parameters, &[]);
-        cpass.set_pipeline(&render_pipeline);
+        cpass.set_pipeline(color_pipeline);
         cpass.dispatch_workgroups(
             (image.viewport.width as f64 / 16.0).ceil() as u32,
             (image.viewport.height as f64 / 16.0).ceil() as u32,
