@@ -61,6 +61,10 @@ https://gbillotey.github.io/Fractalshades-doc/math.html
 - Finding minibrots
     - selecting new probe points
     - finding interesting locations to go to
+https://persianney.com/fractal/fractalNotes.pdf
+- explains the above in more detail
+https://mathr.co.uk/blog/2021-05-14_deep_zoom_theory_and_practice.html
+- describes some methods for optimizing floatexp form
 
 ### Features
 
@@ -81,6 +85,8 @@ https://gbillotey.github.io/Fractalshades-doc/math.html
     - [ ] extended range floating point
         - https://andrewthall.org/papers/df64_qf128.pdf
             - could be used for f64 polyfill as well
+        - or entended exponent (floatexp):
+            - (f32, i32)
 - [?] hdr
 
 
@@ -130,6 +136,7 @@ https://gbillotey.github.io/Fractalshades-doc/math.html
     - [x] import/export text
     - [x] CLI import
     - [ ] drag and drop
+    - [ ] rendered image metadata for reproduction    - little_exif library
 - [x] Add rendering controls
     - width, height, output location, format
     - [ ] anti-aliasing
