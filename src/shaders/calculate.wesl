@@ -59,7 +59,11 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var delta_n_prime: vec2<f32>;
     if params.iter_offset == 0u {
         delta_n = delta_0;
-        delta_n_prime = vec2<f32>(0.0);
+        let x_n_prime = probed_point[params.probe_len];
+        delta_n_prime = vec2<f32>(
+            2.0 * (x_n_prime.x * delta_n.x - x_n_prime.y * delta_n.y),
+            2.0 * (x_n_prime.x * delta_n.y + x_n_prime.y * delta_n.x)
+        );
     } else {
         delta_n = delta_grid_iter[i + j * params.width];
         delta_n_prime = delta_grid_prime[i + j * params.width];
@@ -76,7 +80,7 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // let diff = y_n - y_old;
         // let dist = diff.x * diff.x + diff.y + diff.y;
         let radius_squared = y_n.x * y_n.x + y_n.y * y_n.y;
-        if radius_squared > ESCAPE_RADIUS || all(y_n == y_old) {//|| delta_n_prime.x * delta_n_prime.x + delta_n_prime.y * delta_n_prime.y > ESCAPE_RADIUS {
+        if radius_squared > ESCAPE_RADIUS {
             // set the sentinel value to indicate that the point has escaped
             delta_grid_iter[i + j * params.width] = vec2<f32>(-ESCAPE_RADIUS - 1.0, 0.0);
             // update the output values
@@ -91,18 +95,9 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
             intermediate_dr[i + j * params.width] = sqrt(y_n_prime.x * y_n_prime.x + y_n_prime.y * y_n_prime.y);
             return;
         }
-        if (step % 64u == 0) {
-            y_old = y_n;
-        }
 
         // calculate the next iteration according to the perturbation formula
-        // delta_n = 2 * x_n * delta_n - delta_n^2 + delta_0
-        // Δₙ_real = 2×xₙ_r×Δₙ_r - 2×xₙ_i×Δₙ_i + Δₙ_r×Δₙ_r - Δₙ_i×Δₙ_i + Δ₀_r;
-        // Δₙ_imag = 2×xₙ_r×Δₙ_i + 2×xₙ_i×Δₙ_r + 2×Δₙ_r×Δₙ_i + Δ₀_i;
-        delta_n = vec2<f32>(
-            2.0 * x_n.x * delta_n.x - 2.0 * x_n.y * delta_n.y + delta_n.x * delta_n.x - delta_n.y * delta_n.y + delta_0.x,
-            2.0 * x_n.x * delta_n.y + 2.0 * x_n.y * delta_n.x + 2.0 * delta_n.x * delta_n.y + delta_0.y
-        );
+
         // delta_n_prime = 2 * x_n * delta_n_prime + 2 * x_n_prime * delta_n + 2 * delta_n_prime * delta_n
         // Δₙ'_real = (2×xₙ_r×Δₙ'_r - 2×xₙ_i×Δₙ'_i) + (2×xₙ'_r×Δₙ_r - 2×xₙ'_i×Δₙ_i) + (2×Δₙ'_r×Δₙ_r - 2×Δₙ'_i×Δₙ_i);
         // Δₙ'_imag = 2(xₙ_r×Δₙ'_i + xₙ_i×Δₙ'_r) + 2(xₙ'_r×Δₙ_i + xₙ'_i×Δₙ_r) + 2(Δₙ'_r×Δₙ_i + Δₙ'_i×Δₙ_r);
@@ -110,11 +105,13 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
             2.0 * (x_n.x * delta_n_prime.x - x_n.y * delta_n_prime.y + x_n_prime.x * delta_n.x - x_n_prime.y * delta_n.y + delta_n_prime.x * delta_n.x - delta_n_prime.y * delta_n.y),
             2.0 * (x_n.x * delta_n_prime.y + x_n.y * delta_n_prime.x + x_n_prime.x * delta_n.y + x_n_prime.y * delta_n.x + delta_n_prime.x * delta_n.y + delta_n_prime.y * delta_n.x)
         );
-        // In some cases, the derivative tends toward infinity, causing NaN values during coloring.
-        // Clamping to a very large value provides (visually) cleaner results.
-        // 1e19 is used as roughly sqrt(f32::MAX)
-        let MAX = 1e19;
-        delta_n_prime = clamp(delta_n_prime, vec2<f32>(-MAX), vec2<f32>(MAX));
+        // delta_n = 2 * x_n * delta_n - delta_n^2 + delta_0
+        // Δₙ_real = 2×xₙ_r×Δₙ_r - 2×xₙ_i×Δₙ_i + Δₙ_r×Δₙ_r - Δₙ_i×Δₙ_i + Δ₀_r;
+        // Δₙ_imag = 2×xₙ_r×Δₙ_i + 2×xₙ_i×Δₙ_r + 2×Δₙ_r×Δₙ_i + Δ₀_i;
+        delta_n = vec2<f32>(
+            2.0 * x_n.x * delta_n.x - 2.0 * x_n.y * delta_n.y + delta_n.x * delta_n.x - delta_n.y * delta_n.y + delta_0.x,
+            2.0 * x_n.x * delta_n.y + 2.0 * x_n.y * delta_n.x + 2.0 * delta_n.x * delta_n.y + delta_0.y
+        );
 
         // orbit trap around origin
         orbit = min(orbit, radius_squared);

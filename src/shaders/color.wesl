@@ -38,8 +38,8 @@ fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
 
-    // distance estimation: 2 * ln(r) * r/dr
-    let distance_estimate = 2.0 * log(r) * r * r / dr;
+    // distance estimation: ln(r) * r/dr
+    let distance_estimate = log(r) * r / dr;
     // a glow effect based on distance estimation
     var glow = (-log(distance_estimate) + params.glow_spread * 2.5 - params.zoom * 0.5) * params.glow_intensity * 0.1;
     if params.glow_intensity == 0.0 || isinf(glow) || isnan(glow) {

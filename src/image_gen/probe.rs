@@ -53,7 +53,9 @@ where
     let mut z_squared_real = Float::with_val(precision, 0.0);
     let mut z_squared_imag = Float::with_val(precision, 0.0);
 
-    for _step in 0..max_iter {
+    probed_point.push([T::from_float(&z_real), T::from_float(&z_imag)]);
+    probed_point_derivative.push([T::from_float(&z_prime_real), T::from_float(&z_prime_imag)]);
+    for _step in 0..max_iter - 1 {
         // iterate values, according to z = z^2 + c
         //
         // uses an optimized computation method from wikipedia for z:
@@ -61,6 +63,14 @@ where
         //   z.r := r2 - i2 + c.r
         //   r2 := z.r × z.r
         //   i2 := z.i × z.i
+
+        // compute z
+        z_imag = (z_real.clone() + z_real.clone()) * z_imag.clone() + c_imag.clone();
+        z_real = z_squared_real.clone() - z_squared_imag.clone() + c_real.clone();
+
+        // compute z^2
+        z_squared_real = z_real.clone() * z_real.clone();
+        z_squared_imag = z_imag.clone() * z_imag.clone();
 
         // compute z'
         // z' = 2 × z × z' + 1
@@ -70,14 +80,6 @@ where
         let bc_ad = z_imag.clone() * z_prime_real.clone() + z_real.clone() * z_prime_imag.clone();
         z_prime_real = ac_bd.clone() + ac_bd.clone() + 1.0;
         z_prime_imag = bc_ad.clone() + bc_ad.clone();
-
-        // compute z
-        z_imag = (z_real.clone() + z_real.clone()) * z_imag.clone() + c_imag.clone();
-        z_real = z_squared_real.clone() - z_squared_imag.clone() + c_real.clone();
-
-        // compute z^2
-        z_squared_real = z_real.clone() * z_real.clone();
-        z_squared_imag = z_imag.clone() * z_imag.clone();
 
         probed_point.push([T::from_float(&z_real), T::from_float(&z_imag)]);
         probed_point_derivative.push([T::from_float(&z_prime_real), T::from_float(&z_prime_imag)]);
