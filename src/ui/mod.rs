@@ -247,7 +247,7 @@ impl CorgiUI {
                         tui,
                         "Color frequency",
                         egui::DragValue::new(&mut self.image_settings.coloring.color_frequency)
-                            .speed(0.01),
+                            .speed(0.003),
                     );
 
                     input_with_label(
@@ -262,15 +262,14 @@ impl CorgiUI {
                         tui,
                         "Glow spread",
                         egui::DragValue::new(&mut self.image_settings.coloring.glow_spread)
-                            .speed(0.01)
-                            .range(0.0..=f32::MAX),
+                            .speed(0.01),
                     );
 
                     input_with_label(
                         tui,
                         "Glow intensity",
                         egui::DragValue::new(&mut self.image_settings.coloring.glow_intensity)
-                            .speed(0.01),
+                            .speed(0.005),
                     );
 
                     input_with_label(

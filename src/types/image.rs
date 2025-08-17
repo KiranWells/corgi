@@ -134,7 +134,7 @@ impl Default for Coloring {
             color_frequency: 1.0,
             color_offset: 0.0,
             glow_spread: 1.0,
-            glow_intensity: 1.0,
+            glow_intensity: 0.5,
             brightness: 2.0,
             internal_brightness: 0.5,
             saturation: 1.0,
