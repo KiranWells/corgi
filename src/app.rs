@@ -6,8 +6,11 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::thread;
+use std::time::Duration;
+use std::time::Instant;
 
 use crate::image_gen::WorkerState;
+use crate::types::Debouncer;
 use crate::types::Message;
 use crate::types::StatusMessage;
 use crate::{
@@ -29,10 +32,10 @@ pub struct CorgiApp {
     send: mpsc::Sender<Message>,
     recv: mpsc::Receiver<StatusMessage>,
     last_rendered: Image,
+    last_send_time: Instant,
+    last_calc_time: Duration,
     previous_frame: Image,
-    // TODO: add debouncing on all 'recalculate' functions
-    // with a dynamic delay based on recalculate cost
-    // debouncer: Debouncer,
+    debouncer: Debouncer,
 }
 
 impl CorgiApp {
@@ -80,9 +83,11 @@ impl CorgiApp {
         Ok(Box::new(CorgiApp {
             send: ui_send,
             recv: ui_recv,
-            // debouncer: Debouncer::new(std::time::Duration::from_millis(16)),
+            debouncer: Debouncer::new(std::time::Duration::from_millis(300)),
             last_rendered: ui_state.image().clone(),
             previous_frame: ui_state.image().clone(),
+            last_send_time: Instant::now(),
+            last_calc_time: Duration::from_millis(16),
             ui_state,
         }))
     }
@@ -101,6 +106,10 @@ impl eframe::App for CorgiApp {
                     self.ui_state.status.progress = None;
                     self.ui_state.rendered_viewport = viewport;
                     self.ui_state.swap = true;
+                    let new_calc_time = Instant::now() - self.last_send_time;
+                    // use a running average
+                    self.last_calc_time = (self.last_calc_time + new_calc_time) / 2;
+                    tracing::debug!("Ready for display in {:?}", new_calc_time);
                 }
             }
         }
@@ -114,23 +123,48 @@ impl eframe::App for CorgiApp {
             // send the new image to the render thread, but only if
             // - the image is different
             // - the image has not changed for a full frame
+            let mouse_down = ctx.input(|is| is.pointer.primary_down());
             if self.last_rendered != image {
-                if image == self.previous_frame && !self.ui_state.mouse_down() {
+                let diff = image.comp(&self.last_rendered);
+                let calc_time = if diff.reprobe || diff.recompute {
+                    self.last_calc_time
+                } else {
+                    Duration::from_millis(1)
+                };
+                let do_send = match calc_time {
+                    x if x < Duration::from_millis(16) => true,
+                    x if x < Duration::from_millis(500) => {
+                        image == self.previous_frame && !mouse_down
+                    }
+                    _ => {
+                        self.debouncer.wait_time = (calc_time / 2).max(Duration::from_millis(500));
+                        image == self.previous_frame && !mouse_down && self.debouncer.poll()
+                    }
+                };
+                if do_send {
                     if self
                         .send
                         .send(Message::NewPreviewSettings(image.clone()))
                         .is_ok()
                     {
-                        self.last_rendered = image;
+                        self.last_send_time = Instant::now();
+                        self.last_rendered = image.clone();
+                        self.debouncer.reset();
+                        if calc_time < Duration::from_millis(16) {
+                            ctx.request_repaint();
+                        }
                     } else {
                         tracing::warn!("Failed to send image update")
                     }
                 } else {
-                    self.previous_frame = self.ui_state.image().clone();
+                    if self.previous_frame != image {
+                        self.debouncer.trigger();
+                    }
                     // we need to force a re-check next frame
                     ctx.request_repaint();
                 }
             }
+            self.previous_frame = image;
         }
     }
 }

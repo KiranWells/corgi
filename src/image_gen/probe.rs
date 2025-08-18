@@ -27,7 +27,7 @@ impl FromFloat for f32 {
 /// The resulting vector will be of length `max_iter` or less if the point escapes.
 pub fn probe<T>(
     ProbeLocation { x, y }: &ProbeLocation,
-    max_iter: usize,
+    max_iter: u64,
     zoom: f64,
 ) -> (Vec<[T; 2]>, Vec<[T; 2]>)
 where

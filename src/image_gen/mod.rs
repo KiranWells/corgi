@@ -21,8 +21,8 @@ use std::sync::mpsc;
 use tracing::debug;
 
 use crate::types::{
-    ComputeParams, Image, MAX_GPU_GROUP_ITER, Message, ProbeLocation, RenderParams, StatusMessage,
-    Viewport,
+    Algorithm, ComputeParams, Image, ImageDiff, MAX_GPU_GROUP_ITER, Message, RenderParams,
+    StatusMessage,
 };
 use probe::probe;
 
@@ -119,14 +119,17 @@ impl WorkerState {
                 }
             }
             if let Some(image) = new_preview {
-                render_image(
-                    &mut self.preview_state,
-                    &mut self.probe_buffer,
-                    &image,
-                    self.preview_settings.as_ref(),
-                    self.send.clone(),
-                    self.cancelled.clone(), // TODO: should this be the same cancel??
-                    self.ctx.clone(),
+                time!(
+                    "full render",
+                    render_image(
+                        &mut self.preview_state,
+                        &mut self.probe_buffer,
+                        &image,
+                        self.preview_settings.as_ref(),
+                        self.send.clone(),
+                        self.cancelled.clone(), // TODO: should this be the same cancel??
+                        self.ctx.clone(),
+                    )
                 );
                 let _ = self
                     .send
@@ -207,39 +210,9 @@ fn render_image(
     cancelled: Arc<AtomicBool>,
     ctx: egui::Context,
 ) {
-    let resize;
-    let reprobe;
-    let recompute;
-    let recolor;
-    if let Some(last_image) = last_image {
-        // if the image has not changed, skip the render
-        if image == last_image {
-            return;
-        }
-        // if the viewport has changed, resize the GPU data
-        resize = image.viewport.width != last_image.viewport.width
-            || image.viewport.height != last_image.viewport.height;
-        // if the max iteration or probe location has changed, re-run the probe
-        reprobe = image.max_iter != last_image.max_iter
-            || image.probe_location.x != last_image.probe_location.x
-            || image.probe_location.y != last_image.probe_location.y;
-        // if the probe location has changed or the image viewport has changed, re-generate the delta grid
-        // if the image generation parameters have changed, re-run the compute shader
-        recompute = image.max_iter != last_image.max_iter
-            || image.viewport != last_image.viewport
-            || reprobe;
-        // if the image coloring parameters have changed, re-run the image render
-        recolor = image.coloring != last_image.coloring
-            || recompute
-            || image.misc != last_image.misc
-            || image.debug_shutter != last_image.debug_shutter;
-    } else {
-        // if there is no last image, re-run everything
-        resize = true;
-        reprobe = true;
-        recompute = true;
-        recolor = true;
-    }
+    let diff = last_image
+        .map(|img| image.comp(img))
+        .unwrap_or(ImageDiff::full());
 
     // the actual image generation process
     // - resize the GPU data
@@ -248,11 +221,11 @@ fn render_image(
     // - run the compute shader
     // - run the image render
 
-    if resize {
+    if diff.resize {
         gpu_data.resize(&image.viewport);
     }
 
-    if reprobe {
+    if diff.reprobe {
         let _ = send.send(StatusMessage::Progress("Probing point".into(), 0.0));
         ctx.request_repaint();
         // probe the point
@@ -262,7 +235,7 @@ fn render_image(
         );
     }
 
-    if recompute {
+    if diff.recompute {
         let _ = send.send(StatusMessage::Progress(
             format!("Computing iteration 1 of {}", image.max_iter),
             0.0,
@@ -270,15 +243,7 @@ fn render_image(
         ctx.request_repaint();
         time!(
             "Running compute shader",
-            run_compute_step(
-                probed_data,
-                &image.viewport,
-                &image.probe_location,
-                gpu_data,
-                &send,
-                cancelled,
-                &ctx
-            )
+            run_compute_step(probed_data, image, gpu_data, &send, cancelled, &ctx)
         );
     }
 
@@ -286,7 +251,7 @@ fn render_image(
     // This is suboptimal, as it might freeze the render thread, but
     // the color step should always complete with a low-enough time budget to
     // avoid dropped frames.
-    if recolor {
+    if diff.recolor {
         let _ = send.send(StatusMessage::Progress("Rendering Colors".into(), 0.0));
         ctx.request_repaint();
         time!("Running image render", run_render_step(image, gpu_data));
@@ -298,8 +263,7 @@ fn render_image(
 /// location, max iteration, or image viewport has changed.
 fn run_compute_step(
     probed_data: &(Vec<[f32; 2]>, Vec<[f32; 2]>),
-    viewport: &Viewport,
-    probe_location: &ProbeLocation,
+    image: &Image,
     gpu_data: &GPUData,
     send: &mpsc::Sender<StatusMessage>,
     _cancelled: Arc<AtomicBool>,
@@ -313,20 +277,20 @@ fn run_compute_step(
         buffers,
         ..
     } = gpu_data;
-    let texture_size: Extent3d = viewport.into();
-    let probe_len = probed_data.0.len();
-    debug_assert!(probe_len == probed_data.1.len());
+    let texture_size: Extent3d = (&image.viewport).into();
 
-    let (compute_pipeline, x, y) = match viewport.zoom {
-        x if x < 13.0 => (
+    let (compute_pipeline, x, y, probe_len) = match image.algorithm() {
+        crate::types::Algorithm::Directf32 => (
             direct_f32_pipeline,
-            viewport.x.to_f32(),
-            viewport.y.to_f32(),
+            image.viewport.x.to_f32(),
+            image.viewport.y.to_f32(),
+            image.max_iter as usize,
         ),
-        _ => (
+        crate::types::Algorithm::Perturbedf32 => (
             perturbed_f32_pipeline,
-            (viewport.x.clone() - probe_location.x.clone()).to_f32(),
-            (viewport.y.clone() - probe_location.y.clone()).to_f32(),
+            (image.viewport.x.clone() - image.probe_location.x.clone()).to_f32(),
+            (image.viewport.y.clone() - image.probe_location.y.clone()).to_f32(),
+            probed_data.0.len(),
         ),
     };
 
@@ -368,9 +332,9 @@ fn run_compute_step(
                 (probe_len % MAX_GPU_GROUP_ITER) as u32
             },
             iter_offset: (i * MAX_GPU_GROUP_ITER) as u32,
-            x ,
-            y ,
-            zoom: viewport.zoom as f32,
+            x,
+            y,
+            zoom: image.viewport.zoom as f32,
         };
         if parameters.probe_len == 0 {
             break;
@@ -382,28 +346,28 @@ fn run_compute_step(
         );
 
         // update the probe buffer
-        queue.write_buffer(
-            &buffers.probe,
-            0,
-            bytemuck::cast_slice(
-                &probed_data.0[i * MAX_GPU_GROUP_ITER
-                    ..i * MAX_GPU_GROUP_ITER + parameters.probe_len as usize],
-            ),
-        );
-        queue.write_buffer(
-            &buffers.probe,
-            MAX_GPU_GROUP_ITER as u64 * 8,
-            bytemuck::cast_slice(
-                &probed_data.1[i * MAX_GPU_GROUP_ITER
-                    ..i * MAX_GPU_GROUP_ITER + parameters.probe_len as usize],
-            ),
-        );
+        if image.algorithm() != Algorithm::Directf32 {
+            queue.write_buffer(
+                &buffers.probe,
+                0,
+                bytemuck::cast_slice(
+                    &probed_data.0[i * MAX_GPU_GROUP_ITER
+                        ..i * MAX_GPU_GROUP_ITER + parameters.probe_len as usize],
+                ),
+            );
+            queue.write_buffer(
+                &buffers.probe,
+                MAX_GPU_GROUP_ITER as u64 * 8,
+                bytemuck::cast_slice(
+                    &probed_data.1[i * MAX_GPU_GROUP_ITER
+                        ..i * MAX_GPU_GROUP_ITER + parameters.probe_len as usize],
+                ),
+            );
+        }
 
         // submit the compute shader command buffer
         queue.submit(Some(command_buffer));
         };
-        time! {
-            "status update",
         let _ = send.send(StatusMessage::Progress(
             format!(
                 "Computing iteration {} of {}",
@@ -413,7 +377,6 @@ fn run_compute_step(
             (i * MAX_GPU_GROUP_ITER + parameters.probe_len as usize) as f64 / probe_len as f64,
         ));
         ctx.request_repaint();
-        }
     }
 }
 

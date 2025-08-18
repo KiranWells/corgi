@@ -55,7 +55,7 @@ pub struct ProbeLocation {
 #[derive(Debug, Clone, PartialEq, DeJson, SerJson)]
 pub struct Image {
     pub viewport: Viewport,
-    pub max_iter: usize,
+    pub max_iter: u64,
     pub probe_location: ProbeLocation,
     pub coloring: Coloring,
     pub misc: f32,
@@ -200,6 +200,13 @@ impl Viewport {
         let y = ((i.clone() - self.y.clone()) / scale).to_f64() / aspect_scale.y as f64;
         (x * 0.5 * self.width as f64, y * 0.5 * self.height as f64)
     }
+
+    pub fn algorithm(&self) -> Algorithm {
+        match self.zoom {
+            x if x < 13.0 => Algorithm::Directf32,
+            _ => Algorithm::Perturbedf32,
+        }
+    }
 }
 
 impl From<&Viewport> for Extent3d {
@@ -228,6 +235,79 @@ impl From<&Image> for RenderParams {
             misc: image.misc,
             debug_shutter: image.debug_shutter,
         }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Algorithm {
+    Directf32,
+    Perturbedf32,
+}
+
+#[derive(Clone, Debug)]
+pub struct ImageDiff {
+    pub reprobe: bool,
+    pub recompute: bool,
+    pub recolor: bool,
+    pub resize: bool,
+}
+
+impl ImageDiff {
+    pub fn full() -> Self {
+        ImageDiff {
+            resize: true,
+            reprobe: true,
+            recompute: true,
+            recolor: true,
+        }
+    }
+}
+
+impl Image {
+    pub fn algorithm(&self) -> Algorithm {
+        self.viewport.algorithm()
+    }
+
+    pub fn comp(&self, other: &Self) -> ImageDiff {
+        // if the viewport has changed, resize the GPU data
+        let resize = self.viewport.width != other.viewport.width
+            || self.viewport.height != other.viewport.height;
+        // if the max iteration or probe location has changed, re-run the probe
+        let reprobe = self.max_iter != other.max_iter
+            || self.probe_location.x != other.probe_location.x
+            || self.probe_location.y != other.probe_location.y;
+        // if the probe location has changed or the image viewport has changed, re-generate the delta grid
+        // if the image generation parameters have changed, re-run the compute shader
+        let recompute =
+            self.max_iter != other.max_iter || self.viewport != other.viewport || reprobe;
+        // if the image coloring parameters have changed, re-run the image render
+        let recolor = self.coloring != other.coloring
+            || recompute
+            || self.misc != other.misc
+            || self.debug_shutter != other.debug_shutter;
+        ImageDiff {
+            reprobe,
+            recompute,
+            recolor,
+            resize,
+        }
+    }
+
+    pub fn estimate_calc_time(&self, previous: Option<&Self>) -> std::time::Duration {
+        let diff = previous
+            .map(|img| self.comp(img))
+            .unwrap_or(ImageDiff::full());
+        let mut calc_time_ms = 0;
+        if diff.reprobe {
+            calc_time_ms += self.max_iter / 1000;
+        }
+        if diff.recompute {
+            calc_time_ms += self.max_iter / 1000 + (self.viewport.zoom / 2.0) as u64;
+        }
+        if diff.resize {
+            calc_time_ms += 1;
+        }
+        std::time::Duration::from_millis(calc_time_ms)
     }
 }
 

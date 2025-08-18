@@ -21,7 +21,7 @@ pub const ESCAPE_RADIUS: f64 = 1e10;
 // This needs to be set low enough to ensure the GPU is not
 // busy for too long; that causes stuttering and possibly
 // shader execution failures.
-pub const MAX_GPU_GROUP_ITER: usize = 5000;
+pub const MAX_GPU_GROUP_ITER: usize = 10000;
 
 /// Get the precision for a given zoom level
 pub fn get_precision(zoom: f64) -> u32 {
@@ -119,7 +119,7 @@ impl Error for RenderErr {}
 /// assert!(!debouncer.poll());
 /// ```
 pub struct Debouncer {
-    wait_time: std::time::Duration,
+    pub wait_time: std::time::Duration,
     last_triggered: Option<std::time::Instant>,
 }
 

@@ -33,7 +33,7 @@ fn vs_main(
         case 3u: {vertex = vec2<f32>(1., 1.);}
         default: {vertex = vec2<f32>(0., 0.);}
     }
-    out.clip_position = vec4<f32>(vertex * uniforms.scale + uniforms.offset, 0.5, 1.0);
+    out.clip_position = vec4<f32>((vertex + uniforms.offset) * uniforms.scale, 0.5, 1.0);
     switch (in_vertex_index) {
         case 0u: {vertex = vec2<f32>(0., 0.);}
         case 1u: {vertex = vec2<f32>(0., 1.);}
