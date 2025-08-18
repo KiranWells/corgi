@@ -12,7 +12,6 @@ use std::sync::{Arc, mpsc};
 
 use eframe::{
     egui::mutex::RwLock,
-    egui_wgpu::RenderState,
     wgpu::{
         self, BindGroup, BindGroupLayoutEntry, Buffer, ComputePipeline, Device, PipelineLayout,
         Queue, Texture, TextureView,
@@ -28,28 +27,36 @@ use crate::types::{ComputeParams, MAX_GPU_GROUP_ITER, RenderParams, Viewport};
 pub struct GPUData {
     /// The name for this Data object
     pub label: String,
-    // general GPU Handles
-    /// An Arc to the device
-    pub device: Device,
-    /// An Arc to the queue
-    pub queue: Queue,
-    // Rendering data
-    /// The shader module for the compute shader
-    pub compute_shader: ShaderModule,
-    /// The compute pipeline for the compute shader
-    pub compute_pipeline: ComputePipeline,
-    /// The shader module for the color shader
-    pub color_shader: ShaderModule,
-    /// The color pipeline for the color shader
-    pub color_pipeline: ComputePipeline,
     /// The texture that the image will be rendered to.
     /// This is shared between the renderer and caller.
     pub texture: Arc<RwLock<Texture>>,
+    /// The compute pipeline for the directly calculated f32 shader
+    pub direct_f32_pipeline: ComputePipeline,
+    /// The compute pipeline for the perturbation formula f32 shader
+    pub perturbed_f32_pipeline: ComputePipeline,
+    /// The color pipeline for the color shader
+    pub color_pipeline: ComputePipeline,
     // Data
     /// A struct containing all of the buffers used by the GPU
     pub buffers: Buffers,
     /// A struct containing all of the bind groups used by the GPU
     pub bind_groups: BindGroups,
+    /// A copy of the shared state handles
+    pub shared: SharedState,
+}
+
+#[derive(Clone)]
+pub struct SharedState {
+    /// A handle to the device
+    pub device: Device,
+    /// A handle to the queue
+    pub queue: Queue,
+    /// The shader module for the directly calculated f32 shader
+    pub direct_f32_shader: ShaderModule,
+    /// The shader module for the perturbation formula f32 shader
+    pub perturbed_f32_shader: ShaderModule,
+    /// The shader module for the color shader
+    pub color_shader: ShaderModule,
 }
 
 /// A struct containing all of the buffers used by the GPU
@@ -81,45 +88,48 @@ pub struct BindGroups {
     pub render_texture: BindGroup,
 }
 
-impl GPUData {
-    /// Initializes the GPU handles for use in rendering an image.
-    pub fn init(
-        viewport: &Viewport,
-        wgpu: &RenderState,
-        compute_shader: ShaderModule,
-        label: &str,
-    ) -> Self {
-        let device = wgpu.device.clone();
-        let queue = wgpu.queue.clone();
+impl SharedState {
+    pub fn new(device: Device, queue: Queue) -> Self {
+        let direct_f32_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Direct f32 Shader".to_string().as_str()),
+            source: wgpu::ShaderSource::Wgsl(wesl::include_wesl!("direct").into()),
+        });
 
-        let texture = Self::create_texture(&device, viewport);
-        let final_texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-        let buffers = Buffers::init(&device, viewport);
-        let (bind_groups, compute_pipeline_layout, render_pipeline_layout) =
-            BindGroups::init(&device, &buffers, &final_texture_view);
-
-        let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some(format!("{label} Compute Pipeline").as_str()),
-            layout: Some(&compute_pipeline_layout),
-            module: &compute_shader,
-            entry_point: Some("main_mandel"),
-            compilation_options: wgpu::PipelineCompilationOptions {
-                constants: &[],
-                zero_initialize_workgroup_memory: false,
-            },
-            cache: None,
+        let perturbed_f32_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Perturbed f32 Shader".to_string().as_str()),
+            source: wgpu::ShaderSource::Wgsl(wesl::include_wesl!("calculate").into()),
         });
 
         let color_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some(format!("{label} Color Shader").as_str()),
+            label: Some("Color Shader".to_string().as_str()),
             source: wgpu::ShaderSource::Wgsl(wesl::include_wesl!("color").into()),
         });
+        SharedState {
+            device,
+            queue,
+            direct_f32_shader,
+            perturbed_f32_shader,
+            color_shader,
+        }
+    }
+}
+
+impl GPUData {
+    /// Initializes the GPU handles for use in rendering an image.
+    pub fn init(viewport: &Viewport, shared: SharedState, label: &str) -> Self {
+        let device = &shared.device;
+
+        let texture = Self::create_texture(device, viewport);
+        let final_texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let buffers = Buffers::init(device, viewport);
+        let (bind_groups, compute_pipeline_layout, render_pipeline_layout) =
+            BindGroups::init(device, &buffers, &final_texture_view);
 
         let color_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some(format!("{label} Color Pipeline").as_str()),
             layout: Some(&render_pipeline_layout),
-            module: &color_shader,
+            module: &shared.color_shader,
             entry_point: Some("main_color"),
             compilation_options: wgpu::PipelineCompilationOptions {
                 constants: &[],
@@ -128,13 +138,37 @@ impl GPUData {
             cache: None,
         });
 
+        let direct_f32_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(format!("{label} Direct f32 Pipeline").as_str()),
+                layout: Some(&compute_pipeline_layout),
+                module: &shared.direct_f32_shader,
+                entry_point: Some("main_mandel"),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &[],
+                    zero_initialize_workgroup_memory: false,
+                },
+                cache: None,
+            });
+
+        let perturbed_f32_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(format!("{label} Perturbed f32 Pipeline").as_str()),
+                layout: Some(&compute_pipeline_layout),
+                module: &shared.perturbed_f32_shader,
+                entry_point: Some("main_mandel"),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &[],
+                    zero_initialize_workgroup_memory: false,
+                },
+                cache: None,
+            });
+
         Self {
             label: label.into(),
-            device,
-            queue,
-            compute_shader,
-            compute_pipeline,
-            color_shader,
+            shared,
+            direct_f32_pipeline,
+            perturbed_f32_pipeline,
             color_pipeline,
             texture: Arc::new(RwLock::new(texture)),
             buffers,
@@ -147,22 +181,38 @@ impl GPUData {
     /// Any objects which created a texture view of the image will need to recreate it.
     pub fn resize(&mut self, new_view: &Viewport) {
         // recreate the texture with the new size
-        let texture = Self::create_texture(&self.device, new_view);
+        let texture = Self::create_texture(&self.shared.device, new_view);
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        self.buffers.resize(new_view, &self.device);
+        self.buffers.resize(new_view, &self.shared.device);
 
         let (bind_groups, compute_pipeline_layout, render_pipeline_layout) =
-            BindGroups::init(&self.device, &self.buffers, &texture_view);
+            BindGroups::init(&self.shared.device, &self.buffers, &texture_view);
 
         self.bind_groups = bind_groups;
 
-        self.compute_pipeline =
-            self.device
+        self.direct_f32_pipeline =
+            self.shared
+                .device
                 .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                     label: Some(format!("{} Compute Pipeline", self.label).as_str()),
                     layout: Some(&compute_pipeline_layout),
-                    module: &self.compute_shader,
+                    module: &self.shared.direct_f32_shader,
+                    entry_point: Some("main_mandel"),
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants: &[],
+                        zero_initialize_workgroup_memory: false,
+                    },
+                    cache: None,
+                });
+
+        self.perturbed_f32_pipeline =
+            self.shared
+                .device
+                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some(format!("{} Compute Pipeline", self.label).as_str()),
+                    layout: Some(&compute_pipeline_layout),
+                    module: &self.shared.perturbed_f32_shader,
                     entry_point: Some("main_mandel"),
                     compilation_options: wgpu::PipelineCompilationOptions {
                         constants: &[],
@@ -172,11 +222,12 @@ impl GPUData {
                 });
 
         self.color_pipeline =
-            self.device
+            self.shared
+                .device
                 .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                     label: Some(format!("{} Color Pipeline", self.label).as_str()),
                     layout: Some(&render_pipeline_layout),
-                    module: &self.color_shader,
+                    module: &self.shared.color_shader,
                     entry_point: Some("main_color"),
                     compilation_options: wgpu::PipelineCompilationOptions {
                         constants: &[],
@@ -208,13 +259,14 @@ impl GPUData {
         let ext = self.texture.read().size();
         // let padded_width = ext.width * 4;
         let padded_width = ((ext.width * 4) as f32 / 256.0).ceil() as u32 * 256;
-        let tmp_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+        let tmp_buffer = self.shared.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
             size: padded_width as u64 * ext.height as u64,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let mut encoder = self
+            .shared
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         encoder.copy_texture_to_buffer(
@@ -229,13 +281,13 @@ impl GPUData {
             },
             self.texture.read().size(),
         );
-        self.queue.submit([encoder.finish()]);
+        self.shared.queue.submit([encoder.finish()]);
         let slice = tmp_buffer.slice(..);
         let (send, recv) = mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |res| {
             let _ = send.send(res);
         });
-        let _ = self.device.poll(wgpu::PollType::Wait);
+        let _ = self.shared.device.poll(wgpu::PollType::Wait);
         match recv.recv() {
             Ok(Ok(())) => {
                 let mut out = Vec::new();

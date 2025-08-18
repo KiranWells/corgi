@@ -14,6 +14,7 @@ mod probe;
 use eframe::egui::mutex::RwLock;
 use eframe::wgpu::{self, Extent3d};
 use eframe::{egui, egui_wgpu};
+use gpu_setup::SharedState;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
@@ -67,21 +68,11 @@ impl WorkerState {
         cancelled: Arc<AtomicBool>,
         ctx: egui::Context,
     ) -> Self {
-        let compute_shader = wgpu
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("calculate"),
-                source: wgpu::ShaderSource::Wgsl(wesl::include_wesl!("calculate").into()),
-            });
+        let shared = SharedState::new(wgpu.device.clone(), wgpu.queue.clone());
 
         WorkerState {
-            preview_state: GPUData::init(
-                &preview_settings.viewport,
-                wgpu,
-                compute_shader.clone(),
-                "Preview",
-            ),
-            output_state: GPUData::init(&output_settings.viewport, wgpu, compute_shader, "Output"),
+            preview_state: GPUData::init(&preview_settings.viewport, shared.clone(), "Preview"),
+            output_state: GPUData::init(&output_settings.viewport, shared, "Output"),
             probe_buffer: (vec![], vec![]),
             preview_settings: None,
             output_settings: None,
@@ -315,16 +306,29 @@ fn run_compute_step(
     ctx: &egui::Context,
 ) {
     let GPUData {
-        device,
-        queue,
+        shared: SharedState { device, queue, .. },
         bind_groups,
-        compute_pipeline,
+        direct_f32_pipeline,
+        perturbed_f32_pipeline,
         buffers,
         ..
     } = gpu_data;
     let texture_size: Extent3d = viewport.into();
     let probe_len = probed_data.0.len();
     debug_assert!(probe_len == probed_data.1.len());
+
+    let (compute_pipeline, x, y) = match viewport.zoom {
+        x if x < 13.0 => (
+            direct_f32_pipeline,
+            viewport.x.to_f32(),
+            viewport.y.to_f32(),
+        ),
+        _ => (
+            perturbed_f32_pipeline,
+            (viewport.x.clone() - probe_location.x.clone()).to_f32(),
+            (viewport.y.clone() - probe_location.y.clone()).to_f32(),
+        ),
+    };
 
     // Compute passes have encountered timeouts on some GPUs, so we split the compute passes into
     // multiple smaller passes.
@@ -346,7 +350,7 @@ fn run_compute_step(
             cpass.set_bind_group(1, &bind_groups.compute_parameters, &[]);
             cpass.set_pipeline(compute_pipeline);
             cpass.dispatch_workgroups(
-                (texture_size.width as f64 / 16.0).ceil() as u32,
+               (texture_size.width as f64 / 16.0).ceil() as u32,
                 (texture_size.height as f64 / 16.0).ceil() as u32,
                 1,
             );
@@ -364,8 +368,8 @@ fn run_compute_step(
                 (probe_len % MAX_GPU_GROUP_ITER) as u32
             },
             iter_offset: (i * MAX_GPU_GROUP_ITER) as u32,
-            x: (viewport.x.clone() - probe_location.x.clone()).to_f32(),
-            y: (viewport.y.clone() - probe_location.y.clone()).to_f32(),
+            x ,
+            y ,
             zoom: viewport.zoom as f32,
         };
         if parameters.probe_len == 0 {
@@ -416,8 +420,7 @@ fn run_compute_step(
 /// Runs the render shader on the GPU
 fn run_render_step(image: &Image, gpu_data: &GPUData) {
     let GPUData {
-        device,
-        queue,
+        shared: SharedState { device, queue, .. },
         bind_groups,
         buffers,
         color_pipeline,
