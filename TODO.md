@@ -65,6 +65,12 @@ https://persianney.com/fractal/fractalNotes.pdf
 - explains the above in more detail
 https://mathr.co.uk/blog/2021-05-14_deep_zoom_theory_and_practice.html
 - describes some methods for optimizing floatexp form
+https://www.fractalforums.com/general-discussion/stripe-average-coloring/msg42797/?PHPSESSID=1c149a35846c66e0c53aacdc63bc9843#msg42797
+- stripe average coloring
+https://iquilezles.org/articles/ftrapsgeometric/
+- orbit traps
+https://iquilezles.org/articles/palettes/
+- generated palettes
 
 ### Features
 
@@ -78,16 +84,47 @@ https://mathr.co.uk/blog/2021-05-14_deep_zoom_theory_and_practice.html
 - [-] add multiple probes to reduce errors in image generation
     - precision loss fixes or re-selecing probe point is better
 - [ ] multiple precision options:
-    - [ ] 32-bit direct calculation
+    - [ ] UI for selecting automatic or manual formula selector
+    - [x] 32-bit direct calculation
     - [ ] 64-bit floating precision - requires a shading language other than wgsl (unless the extension gets supported)
     - [x] 32-bit probed point
+        - [ ] with floatexp for derivative, since it underflows sooner
     - [ ] 64-bit probed point
     - [ ] extended range floating point
         - https://andrewthall.org/papers/df64_qf128.pdf
             - could be used for f64 polyfill as well
         - or entended exponent (floatexp):
             - (f32, i32)
+- [ ] use floatexp for exported data for coloring shader, since it can handle the reduced performance regardless of whether it is needed
 - [?] hdr
+- [ ] additional coloring algorithms
+    - [x] non-smooth iteration
+    - [x] smooth iteration
+    - [x] distance estimation
+    - [x] stripe-average coloring
+    - [x] gradient coloring
+    - [x] escape radii outlines
+    - [x] orbit traps
+        - [ ] will need some controls for point/geometry selection
+    - interior:
+        - [/] orbit traps
+        - [ ] interior distance estimation
+- [ ] more flexible color formulas:
+    - [ ] user-defined gradient
+        - [x] generated gradients
+        - non-smooth/smooth iteration, stripe-average, distance estimation, gradient
+    - [x] togglable overlays:
+        - distance estimation, escape radii outlines
+- [ ] standardized generation metadata
+    - grid/viewport region
+    - max iteration count
+    - coloring:
+        - ?
+        - probably just include the parameters used internally until support for a dynamic coloring formula is added
+- [ ] additional fractal algorithms
+    - [x] mandelbrot
+    - [ ] julia
+    - [ ] burning ship
 
 
 ### Performance
@@ -95,7 +132,7 @@ https://mathr.co.uk/blog/2021-05-14_deep_zoom_theory_and_practice.html
 - [x] test using rayon for delta grid generation
 - [x] switch to GPU calculations for initial deltas, if possible
 - [ ] dynamically select the work group size
-- [ ] dynamic precision selection
+- [x] dynamic precision selection
     - use zoom level to conservatively decide on necessary precision
     - switch on precision level to decide on strategy to use:
         - either use multiple shaders or specialization constants to switch methods
@@ -106,7 +143,7 @@ https://mathr.co.uk/blog/2021-05-14_deep_zoom_theory_and_practice.html
             - zoom < 1000 (scale ~= 1^-308) - f64 probed (if compatible)
             - zoom < 10000 (scale ~= 1^-4900) - f128 probed
             - else - extended range fp probed
-- [ ] dynamic debounce delay based on render time
+- [x] dynamic debounce delay based on render time
 - [x] make sure render thread is not blocking other threads
     - cannot create separate queues in wgpu yet: https://github.com/gfx-rs/wgpu/discussions/6268
 

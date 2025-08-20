@@ -19,7 +19,7 @@ use eframe::{
 };
 use wgpu::ShaderModule;
 
-use crate::types::{ComputeParams, MAX_GPU_GROUP_ITER, RenderParams, Viewport};
+use crate::types::{ColorParams, ComputeParams, MAX_GPU_GROUP_ITER, RenderParams, Viewport};
 
 /// A struct containing all of the GPU handles for the application
 /// and the data needed to render an image. Use the `init` function
@@ -69,14 +69,13 @@ pub struct Buffers {
     pub delta_prime: Buffer,
     // parameters
     pub compute_parameters: Buffer,
+    pub external_coloring: Buffer,
+    pub internal_coloring: Buffer,
     pub render_parameters: Buffer,
     // intermediate data
     pub step: Buffer,
-    pub orbit: Buffer,
-    pub r: Buffer,
-    pub dr: Buffer,
-    // output buffers
-    pub readable: Buffer,
+    pub orbits: Buffer,
+    pub stripes: Buffer,
 }
 
 /// A struct containing all of the bind groups used by the GPU
@@ -319,6 +318,7 @@ enum BuffType {
     /// A buffer that can be written to by the host, but not read.
     HostWritable,
     /// A buffer that can be read by the host; used for the target of a copy operation.
+    #[allow(dead_code)]
     HostReadable,
     /// A uniform buffer that can be written by the host.
     Uniform,
@@ -331,17 +331,16 @@ impl Buffers {
         let image_size = viewport.width * viewport.height;
         Self {
             probe: Self::create_buffer::<f32>(device, MAX_GPU_GROUP_ITER * 2 * 2, HostWritable),
-            // probe_prime: Self::create_buffer::<f32>(device, MAX_GPU_GROUP_ITER * 2, HostWritable),
-            delta_0: Self::create_buffer::<f32>(device, image_size * 2, HostWritable),
+            delta_0: Self::create_buffer::<f32>(device, image_size * 2, ShaderOnly),
             delta_n: Self::create_buffer::<f32>(device, image_size * 2, ShaderOnly),
             delta_prime: Self::create_buffer::<f32>(device, image_size * 2, ShaderOnly),
             compute_parameters: Self::create_buffer::<ComputeParams>(device, 1, Uniform),
+            external_coloring: Self::create_buffer::<ColorParams>(device, 1, Uniform),
+            internal_coloring: Self::create_buffer::<ColorParams>(device, 1, Uniform),
             render_parameters: Self::create_buffer::<RenderParams>(device, 1, Uniform),
             step: Self::create_buffer::<u32>(device, image_size, ShaderOnly),
-            orbit: Self::create_buffer::<f32>(device, image_size, ShaderOnly),
-            r: Self::create_buffer::<f32>(device, image_size, ShaderOnly),
-            dr: Self::create_buffer::<f32>(device, image_size, ShaderOnly),
-            readable: Self::create_buffer::<u32>(device, image_size, HostReadable),
+            orbits: Self::create_buffer::<f32>(device, image_size * 4, ShaderOnly),
+            stripes: Self::create_buffer::<f32>(device, image_size * 4, ShaderOnly),
         }
     }
 
@@ -367,15 +366,12 @@ impl Buffers {
         use BuffType::*;
         // replace all sized buffers (not uniforms or probe)
         let image_size = new_view.width * new_view.height;
-        self.delta_0 = Self::create_buffer::<f32>(device, image_size * 2, HostWritable);
+        self.delta_0 = Self::create_buffer::<f32>(device, image_size * 2, ShaderOnly);
         self.delta_n = Self::create_buffer::<f32>(device, image_size * 2, ShaderOnly);
         self.delta_prime = Self::create_buffer::<f32>(device, image_size * 2, ShaderOnly);
         self.step = Self::create_buffer::<u32>(device, image_size, ShaderOnly);
-        self.orbit = Self::create_buffer::<f32>(device, image_size, ShaderOnly);
-        self.r = Self::create_buffer::<f32>(device, image_size, ShaderOnly);
-        self.dr = Self::create_buffer::<f32>(device, image_size, ShaderOnly);
-        self.readable =
-            Self::create_buffer::<u32>(device, new_view.width * new_view.height, HostReadable);
+        self.orbits = Self::create_buffer::<f32>(device, image_size * 4, ShaderOnly);
+        self.stripes = Self::create_buffer::<f32>(device, image_size * 4, ShaderOnly);
     }
 }
 
@@ -393,13 +389,12 @@ impl BindGroups {
             delta_n,
             delta_prime,
             step,
-            orbit,
-            r,
-            dr,
-            // readable,
+            orbits,
+            stripes,
             compute_parameters,
+            external_coloring,
+            internal_coloring,
             render_parameters,
-            ..
         } = buffers;
 
         // create the bind groups for the compute shader
@@ -407,13 +402,12 @@ impl BindGroups {
             label: Some("Compute Bind Group Layout"),
             entries: &[
                 Self::create_buffer_layout_entry(0, true),
-                Self::create_buffer_layout_entry(1, true),
+                Self::create_buffer_layout_entry(1, false),
                 Self::create_buffer_layout_entry(2, false),
                 Self::create_buffer_layout_entry(3, false),
                 Self::create_buffer_layout_entry(4, false),
                 Self::create_buffer_layout_entry(5, false),
                 Self::create_buffer_layout_entry(6, false),
-                Self::create_buffer_layout_entry(7, false),
             ],
         });
 
@@ -442,15 +436,11 @@ impl BindGroups {
                 },
                 wgpu::BindGroupEntry {
                     binding: 5,
-                    resource: orbit.as_entire_binding(),
+                    resource: orbits.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 6,
-                    resource: r.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 7,
-                    resource: dr.as_entire_binding(),
+                    resource: stripes.as_entire_binding(),
                 },
             ],
             label: Some("Compute Bind Group"),
@@ -507,6 +497,7 @@ impl BindGroups {
                     Self::create_buffer_layout_entry(1, true),
                     Self::create_buffer_layout_entry(2, true),
                     Self::create_buffer_layout_entry(3, true),
+                    Self::create_buffer_layout_entry(4, true),
                 ],
             });
 
@@ -519,15 +510,19 @@ impl BindGroups {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: orbit.as_entire_binding(),
+                    resource: orbits.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: r.as_entire_binding(),
+                    resource: stripes.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
-                    resource: dr.as_entire_binding(),
+                    resource: delta_n.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: delta_prime.as_entire_binding(),
                 },
             ],
             label: None,
@@ -535,28 +530,33 @@ impl BindGroups {
 
         // create the parameters group
 
-        let params_bind_group_layout =
+        let render_params_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: None,
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
+                label: Some("render params group layout"),
+                entries: &[
+                    Self::create_uniform_layout_entry(0),
+                    Self::create_uniform_layout_entry(1),
+                    Self::create_uniform_layout_entry(2),
+                ],
             });
 
         let render_parameters_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &params_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: render_parameters.as_entire_binding(),
-            }],
-            label: None,
+            layout: &render_params_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: external_coloring.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: internal_coloring.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: render_parameters.as_entire_binding(),
+                },
+            ],
+            label: Some("render params group"),
         });
 
         // create pipeline layouts
@@ -574,7 +574,7 @@ impl BindGroups {
                 bind_group_layouts: &[
                     &render_buffers_layout,
                     &texture_bind_group_layout,
-                    &params_bind_group_layout,
+                    &render_params_bind_group_layout,
                 ],
                 push_constant_ranges: &[],
             });

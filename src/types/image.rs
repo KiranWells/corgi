@@ -74,6 +74,160 @@ pub struct Coloring {
     pub internal_brightness: f32,
 }
 
+#[derive(Clone, Debug)]
+pub struct Coloring2 {
+    pub saturation: f32,
+    pub brightness: f32,
+    pub color_frequency: f32,
+    pub color_offset: f32,
+    pub gradient: Gradient,
+    pub color_layers: [Layer; 8],
+    pub lighting: Lighting,
+    pub overlays: Overlays,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum Lighting {
+    Flat,
+    Layers([Layer; 8]),
+    Diffuse([Light; 3]),
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Light {
+    pub strength: f32,
+    pub direction: [f32; 2],
+    pub color: [f32; 3],
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Layer {
+    pub kind: LayerKind,
+    pub strength: f32,
+    pub param: f32,
+}
+
+impl Default for Layer {
+    fn default() -> Self {
+        Self {
+            kind: LayerKind::None,
+            strength: 0.5,
+            param: 0.0,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Overlays {
+    pub iteration_outline_color: [f32; 4],
+    pub set_outline_color: [f32; 4],
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug)]
+pub enum LayerKind {
+    None = 0,
+    Step,
+    SmoothStep,
+    Distance,
+    OrbitTrap,
+    Normal,
+    Stripe,
+    // Step(StepLayer),
+    // SmoothStep(SmoothStepLayer),
+    // Distance(DistanceLayer),
+    // OrbitTrap(OrbitTrapLayer),
+    // Normal(NormalLayer),
+    // Stripe(StripeLayer),
+}
+
+// pub struct StepLayer {}
+// pub struct SmoothStepLayer {}
+// pub struct DistanceLayer {}
+// pub struct OrbitTrapLayer {}
+// pub struct NormalLayer {}
+// pub struct StripeLayer {}
+
+#[derive(Clone, Debug)]
+pub enum Gradient {
+    Flat([f32; 3]),
+    Procedural([[f32; 3]; 4]),
+    Manual([[f32; 4]; 3]),
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ColorParams {
+    pub saturation: f32,
+    pub brightness: f32,
+    pub color_frequency: f32,
+    pub color_offset: f32,
+    pub gradient_type: u32,
+    padding: [u32; 3],
+    pub gradient: [f32; 12],
+    pub color_layer_types: [u8; 8],
+    padding1: [u32; 2],
+    pub color_strengths: [f32; 8],
+    pub color_params: [f32; 8],
+    pub lighting_data: [u8; 80],
+    pub lighting_type: u32,
+    padding2: [u32; 3],
+    pub overlays: Overlays,
+    // padding3: [u32; 2],
+}
+
+impl From<&Coloring2> for ColorParams {
+    fn from(value: &Coloring2) -> Self {
+        let (gradient_type, gradient_vec) = match value.gradient {
+            Gradient::Flat(data) => {
+                let mut new_data = data.to_vec();
+                new_data.extend_from_slice(&[0.0; 9]);
+                (0, new_data)
+            }
+            Gradient::Procedural(data) => (1, data.concat()),
+            Gradient::Manual(data) => (2, data.concat()),
+        };
+        let mut gradient = [0.0; 12];
+        gradient.copy_from_slice(&gradient_vec);
+        let (lighting_type, lighting_data) = match value.lighting {
+            Lighting::Flat => (0, [0u8; 80]),
+            Lighting::Layers(data) => {
+                let mut new_data = [0u8; 80];
+                let kinds = data.map(|x| x.kind as u8);
+                let strengths = data.map(|x| x.strength);
+                let strengths = bytemuck::cast::<[f32; 8], [u8; 32]>(strengths);
+                let params = data.map(|x| x.param);
+                let params = bytemuck::cast::<[f32; 8], [u8; 32]>(params);
+                new_data[..8].copy_from_slice(&kinds);
+                new_data[8..40].copy_from_slice(&strengths);
+                new_data[40..72].copy_from_slice(&params);
+                (1, new_data)
+            }
+            Lighting::Diffuse(data) => (2, bytemuck::cast(data)),
+        };
+        ColorParams {
+            saturation: value.saturation,
+            brightness: value.brightness,
+            color_frequency: value.color_frequency,
+            color_offset: value.color_offset,
+            gradient_type,
+            gradient,
+            color_layer_types: value.color_layers.map(|x| x.kind as u8),
+            color_strengths: value.color_layers.map(|x| x.strength),
+            color_params: value.color_layers.map(|x| x.param),
+            lighting_type,
+            lighting_data,
+            overlays: value.overlays,
+            padding: [0; 3],
+            padding1: [0; 2],
+            padding2: [0; 3],
+            // padding3: [0; 2],
+        }
+    }
+}
+
 /// The parameters for the compute shader. This is sent as a uniform
 /// to the compute shader.
 #[repr(C)]
@@ -97,13 +251,6 @@ pub struct RenderParams {
     pub image_width: u32,
     pub max_step: u32,
     pub zoom: f32,
-    pub saturation: f32,
-    pub color_frequency: f32,
-    pub color_offset: f32,
-    pub glow_spread: f32,
-    pub glow_intensity: f32,
-    pub brightness: f32,
-    pub internal_brightness: f32,
     pub misc: f32,
     pub debug_shutter: f32,
 }
@@ -138,6 +285,72 @@ impl Default for Coloring {
             brightness: 2.0,
             internal_brightness: 0.5,
             saturation: 1.0,
+        }
+    }
+}
+
+impl Default for Coloring2 {
+    fn default() -> Self {
+        Self {
+            saturation: 1.0,
+            brightness: 1.0,
+            color_frequency: 1.0,
+            color_offset: 0.0,
+            gradient: Gradient::Procedural([[0.5; 3], [0.5; 3], [1.0; 3], [0.0, 0.1, 0.2]]),
+            color_layers: [
+                Layer {
+                    kind: LayerKind::SmoothStep,
+                    strength: 1.0,
+                    param: 0.0,
+                },
+                Layer {
+                    kind: LayerKind::Stripe,
+                    strength: 1.0,
+                    param: 0.5,
+                },
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+            ],
+            lighting: Lighting::Flat,
+            overlays: Overlays {
+                iteration_outline_color: [0.0; 4],
+                set_outline_color: [0.0; 4],
+            },
+        }
+    }
+}
+
+impl Coloring2 {
+    pub fn internal_default() -> Self {
+        Self {
+            saturation: 1.0,
+            brightness: 1.0,
+            color_frequency: 1.0,
+            color_offset: 0.0,
+            gradient: Gradient::Flat([1.0; 3]),
+            color_layers: [Layer::default(); 8],
+            lighting: Lighting::Layers([
+                Layer {
+                    kind: LayerKind::Stripe,
+                    strength: 1.0,
+                    param: 0.5,
+                },
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+            ]),
+            overlays: Overlays {
+                iteration_outline_color: [0.0; 4],
+                set_outline_color: [0.0; 4],
+            },
         }
     }
 }
@@ -225,13 +438,6 @@ impl From<&Image> for RenderParams {
             image_width: image.viewport.width as u32,
             max_step: image.max_iter as u32,
             zoom: image.viewport.zoom as f32,
-            saturation: image.coloring.saturation,
-            color_frequency: image.coloring.color_frequency,
-            color_offset: image.coloring.color_offset,
-            glow_spread: image.coloring.glow_spread,
-            glow_intensity: image.coloring.glow_intensity,
-            brightness: image.coloring.brightness,
-            internal_brightness: image.coloring.internal_brightness,
             misc: image.misc,
             debug_shutter: image.debug_shutter,
         }

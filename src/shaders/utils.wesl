@@ -1,4 +1,4 @@
-fn hsl2rgb(hsv: vec3<f32>) -> vec3<f32> {
+fn hsv2rgb(hsv: vec3<f32>) -> vec3<f32> {
     var rgb: vec3<f32>;
 
     let i = floor(hsv.x * 6.);
@@ -18,6 +18,28 @@ fn hsl2rgb(hsv: vec3<f32>) -> vec3<f32> {
     }
 
     return rgb;
+}
+
+fn rgb2hsv(rgb: vec3f) -> vec3f {
+    var hsv: vec3f;
+    let max = max(max(rgb.r, rgb.g), rgb.b);
+    let min = min(min(rgb.r, rgb.g), rgb.b);
+    hsv.z = max;
+    let c = max-min;
+    if c == 0.0 {
+        hsv.x = 0.0;
+        hsv.y = 0.0;
+    } else {
+        hsv.y = c / max;
+        if max == rgb.r { hsv.x = ((rgb.g - rgb.b) / c); }
+        else if max == rgb.g { hsv.x = ((rgb.b - rgb.r) / c) + 2.0; }
+        else if max == rgb.b { hsv.x = ((rgb.r - rgb.g) / c) + 4.0; }
+        hsv.x /= 6.0;
+        if hsv.x < 0.0 {
+            hsv.x += 1.0;
+        }
+    }
+    return hsv;
 }
 
 fn isnan(x: f32) -> bool {

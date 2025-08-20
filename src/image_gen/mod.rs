@@ -21,8 +21,8 @@ use std::sync::mpsc;
 use tracing::debug;
 
 use crate::types::{
-    Algorithm, ComputeParams, Image, ImageDiff, MAX_GPU_GROUP_ITER, Message, RenderParams,
-    StatusMessage,
+    Algorithm, ColorParams, Coloring2, ComputeParams, Image, ImageDiff, MAX_GPU_GROUP_ITER,
+    Message, RenderParams, StatusMessage,
 };
 use probe::probe;
 
@@ -390,6 +390,16 @@ fn run_render_step(image: &Image, gpu_data: &GPUData) {
         ..
     } = gpu_data;
     let color_params: RenderParams = image.into();
+    queue.write_buffer(
+        &buffers.external_coloring,
+        0,
+        bytemuck::cast_slice(&[ColorParams::from(&Coloring2::default())]),
+    );
+    queue.write_buffer(
+        &buffers.internal_coloring,
+        0,
+        bytemuck::cast_slice(&[ColorParams::from(&Coloring2::internal_default())]),
+    );
     queue.write_buffer(
         &buffers.render_parameters,
         0,
