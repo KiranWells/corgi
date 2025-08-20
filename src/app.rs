@@ -101,15 +101,17 @@ impl eframe::App for CorgiApp {
                     self.ui_state.status.message = message;
                     self.ui_state.status.progress = Some(progress);
                 }
-                StatusMessage::NewPreviewViewport(viewport) => {
+                StatusMessage::NewPreviewViewport(new_calc_time, viewport) => {
                     self.ui_state.status.message = "Finished rendering".into();
                     self.ui_state.status.progress = None;
                     self.ui_state.rendered_viewport = viewport;
                     self.ui_state.swap = true;
-                    let new_calc_time = Instant::now() - self.last_send_time;
                     // use a running average
                     self.last_calc_time = (self.last_calc_time + new_calc_time) / 2;
-                    tracing::debug!("Ready for display in {:?}", new_calc_time);
+                    tracing::debug!(
+                        "Ready for display in {:?}",
+                        Instant::now() - self.last_send_time
+                    );
                 }
             }
         }
@@ -132,7 +134,7 @@ impl eframe::App for CorgiApp {
                     Duration::from_millis(1)
                 };
                 let do_send = match calc_time {
-                    x if x < Duration::from_millis(16) => true,
+                    x if x < Duration::from_millis(30) => true,
                     x if x < Duration::from_millis(500) => {
                         image == self.previous_frame && !mouse_down
                     }

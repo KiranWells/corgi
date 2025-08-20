@@ -18,6 +18,7 @@ use gpu_setup::SharedState;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
+use std::time::Instant;
 use tracing::debug;
 
 use crate::types::{
@@ -119,6 +120,7 @@ impl WorkerState {
                 }
             }
             if let Some(image) = new_preview {
+                let start = Instant::now();
                 time!(
                     "full render",
                     render_image(
@@ -131,9 +133,10 @@ impl WorkerState {
                         self.ctx.clone(),
                     )
                 );
-                let _ = self
-                    .send
-                    .send(StatusMessage::NewPreviewViewport(image.viewport.clone()));
+                let _ = self.send.send(StatusMessage::NewPreviewViewport(
+                    Instant::now() - start,
+                    image.viewport.clone(),
+                ));
                 self.preview_settings = Some(image);
                 self.ctx.request_repaint();
             }
@@ -366,7 +369,14 @@ fn run_compute_step(
         }
 
         // submit the compute shader command buffer
-        queue.submit(Some(command_buffer));
+        let si = queue.submit(Some(command_buffer));
+        // This slows down render times, so we avoid it in release
+        #[cfg(debug_assertions)]
+        time!("wait",
+            let _ = device.poll(wgpu::MaintainBase::WaitForSubmissionIndex(si));
+        );
+        #[cfg(not(debug_assertions))]
+        let _ = si;
         };
         let _ = send.send(StatusMessage::Progress(
             format!(
@@ -427,5 +437,6 @@ fn run_render_step(image: &Image, gpu_data: &GPUData) {
     }
 
     // submit the render command queue
-    queue.submit(Some(encoder.finish()));
+    let si = queue.submit(Some(encoder.finish()));
+    let _ = device.poll(wgpu::MaintainBase::WaitForSubmissionIndex(si));
 }
