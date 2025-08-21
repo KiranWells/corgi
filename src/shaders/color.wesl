@@ -15,23 +15,31 @@ struct Overlays {
     set_outline_color: vec4<f32>,
 }
 
+struct Light {
+    color: vec3f,
+    strength: f32,
+    direction: vec3f,
+    // padding: f32
+}
+
 // note: the arrays must use a stride of 16 (e.g. vec4x)
 struct ColorParams {
     saturation: f32,
     brightness: f32,
     color_frequency: f32,
     color_offset: f32,
-    gradient_type: u32,
-    // padding0: u32,
-    // padding1: u32,
-    // padding1: u32,
+    gradient_kind: u32,
+    lighting_kind: u32,
+    // padding: u32,
+    // padding: u32,
     gradient: array<vec4f, 3>,
-    color_layer_types: vec4u,
+    color_layer_types: vec2u,
+    light_layer_types: vec2u,
     color_strengths: array<vec4f, 2>,
     color_params: array<vec4f, 2>,
-    lighting_data: array<vec4u, 5>,
-    lighting_type: u32,
-    // padding2: u32,
+    light_strengths: array<vec4f, 2>,
+    light_params: array<vec4f, 2>,
+    lights: array<Light, 3>,
     overlays: Overlays,
 }
 
@@ -51,18 +59,68 @@ const LAYER_STEP = 1u;
 const LAYER_SMOOTH_STEP = 2u;
 const LAYER_DISTANCE = 3u;
 const LAYER_ORBIT_TRAP = 4u;
-const LAYER_NORMAL = 5u;
-const LAYER_STRIPE = 6u;
+const LAYER_STRIPE = 5u;
 
 const GRADIENT_FLAT = 0u;
 const GRADIENT_PROCEDURAL = 1u;
 const GRADIENT_MANUAL = 2u;
+const GRADIENT_HUE = 3u;
 
 const LIGHTING_FLAT = 0u;
 const LIGHTING_LAYERS = 1u;
 const LIGHTING_DIFFUSE = 2u;
 
 const PI = 3.1415926535897932384626433832795028841971693993751058209749445923078164062862089986280348253421170679;
+
+fn calculate_lighting_layers(x: u32, y: u32, color_params: ColorParams) -> f32 {
+    let pixel_index = x + y * render_params.image_width;
+    let step = step_buffer[pixel_index];
+    let orbits = orbit_buffer[pixel_index];
+    let z = z_buffer[pixel_index];
+    let dz = dz_buffer[pixel_index];
+    let stripes = stripe_buffer[pixel_index];
+
+    let r = length(z);
+    let dr = length(dz);
+
+    let smoothed_step = f32(step) + (1.0 - log(log(r)) / log(2.0));
+    // distance estimation: ln(r) * r/dr
+    let distance_estimate = log(r) * r / dr;
+    let scale = pow(2.0, -render_params.zoom);
+    var brightness = 0.0;
+    for (var i = 0u; i < 8; i += 1) {
+        let layer_kind_big = color_params.light_layer_types[i / 4];
+        let layer_kind = (layer_kind_big >> ((i % 4u) * 8u)) & 255u;
+        let layer_strength = color_params.light_strengths[i/4][i%4];
+        let layer_param = color_params.light_params[i/4][i%4];
+        switch layer_kind {
+            case LAYER_NONE {
+                continue;
+            }
+            case LAYER_STEP {
+                brightness += log(f32(step) + 1.0) * layer_strength;
+            }
+            case LAYER_SMOOTH_STEP {
+                brightness += log(smoothed_step + 1.0) * layer_strength;
+            }
+            case LAYER_DISTANCE {
+                if !isinf(distance_estimate) && !isnan(distance_estimate) {
+                    brightness += (-log(distance_estimate) + layer_param * 2.5 - render_params.zoom * 0.5) * layer_strength * 0.1;
+                }
+            }
+            case LAYER_ORBIT_TRAP {
+                let orbit = orbits[u32(layer_param)];
+                brightness += (cos(orbit * 2.0 * PI) + 1.0) * 0.5 * layer_strength;
+            }
+            case LAYER_STRIPE {
+                let stripe = stripes[u32(layer_param)];
+                brightness += (stripe - fract(layer_param)) * (render_params.zoom + 10.0) * (render_params.zoom + 10.0) * 0.01 * layer_strength + fract(layer_param);
+            }
+            default {}
+        }
+    }
+    return brightness;
+}
 
 @compute @workgroup_size(16, 16, 1)
 fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -118,9 +176,6 @@ fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let orbit = orbits[u32(layer_param)];
                 color_value += orbit * layer_strength;
             }
-            case LAYER_NORMAL {
-                color_value += (atan2(dz.x, dz.y) + layer_param) * layer_strength;
-            }
             case LAYER_STRIPE {
                 let stripe = stripes[u32(layer_param)];
                 color_value += (stripe - fract(layer_param)) * (render_params.zoom + 10.0) * (render_params.zoom + 10.0) * 0.01 * layer_strength + fract(layer_param);
@@ -132,7 +187,7 @@ fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     // then, turn the color value into a color
     var color = vec3f(0.0);
-    switch color_params.gradient_type {
+    switch color_params.gradient_kind {
         case GRADIENT_FLAT {
             let g = color_params.gradient;
             color = g[0].rgb;
@@ -172,83 +227,45 @@ fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 color = mix(c, a, ratio);
             }
         }
+        case GRADIENT_HUE {
+            color = hsv2rgb(vec3(fract(color_value), 1.0, 1.0));
+        }
         default {}
     }
 
+    let lighting_value = 0.0;
+
     // next, calculate lighting
-    var brightness = 0.0;
-    switch color_params.lighting_type {
+    var brightness = vec3(0.0);
+    switch color_params.lighting_kind {
         case LIGHTING_FLAT {
-            brightness = 1.0;
+            brightness = vec3(1.0);
         }
         case LIGHTING_LAYERS {
-            for (var i = 0u; i < 8; i += 1) {
-                let lighting_type_big = color_params.lighting_data[0][i / 4];
-                let layer_kind = (lighting_type_big >> ((i % 4u) * 8)) & 255u;
-                let layer_strength = bitcast<f32>(color_params.lighting_data[(i+2)/4][(i+2)%4]);
-                let layer_param = bitcast<f32>(color_params.lighting_data[(i + 10)/4][(i + 10)%4]);
-                switch layer_kind {
-                    case LAYER_NONE {
-                        continue;
-                    }
-                    case LAYER_STEP {
-                        brightness += log(f32(step) + 1.0) * layer_strength;
-                    }
-                    case LAYER_SMOOTH_STEP {
-                        brightness += log(smoothed_step + 1.0) * layer_strength;
-                    }
-                    case LAYER_DISTANCE {
-                        if !isinf(distance_estimate) && !isnan(distance_estimate) {
-                            brightness += (-log(distance_estimate) + layer_param * 2.5 - render_params.zoom * 0.5) * layer_strength * 0.1;
-                        }
-                    }
-                    case LAYER_ORBIT_TRAP {
-                        let orbit = orbits[u32(layer_param)];
-                        brightness += (cos(orbit * 2.0 * PI) + 1.0) * 0.5 * layer_strength;
-                    }
-                    case LAYER_NORMAL {
-                        let zx = z_buffer[global_id.x +1 + global_id.y * render_params.image_width];
-                        let dzx = dz_buffer[global_id.x +1 + global_id.y * render_params.image_width];
-                        let stepx = step_buffer[global_id.x +1 + global_id.y * render_params.image_width];
-                        let rx = length(zx);
-                        let drx = length(dzx);
-                        let distance_estimatex = log(rx) * rx / drx;
-                        let smoothed_stepx = f32(stepx) + (1.0 - log(log(rx)) / log(2.0));
-                        let zy = z_buffer[global_id.x + (global_id.y+1) * render_params.image_width];
-                        let dzy = dz_buffer[global_id.x + (global_id.y+1) * render_params.image_width];
-                        let stepy = step_buffer[global_id.x + (global_id.y+1) * render_params.image_width];
-                        let ry = length(zy);
-                        let dry = length(dzy);
-                        let distance_estimatey = log(ry) * ry / dry;
-                        let smoothed_stepy = f32(stepy) + (1.0 - log(log(ry)) / log(2.0));
-                        let normal = cross(vec3f(0.1, 0.0, smoothed_stepx - smoothed_step), vec3f(0.0, 0.1, smoothed_stepy - smoothed_step));
-                        // let gradient = vec2(smoothed_step - smoothed_stepx, smoothed_step - smoothed_stepy);
-                        // let gradient = vec2(distance_estimate - distance_estimatex, distance_estimate - distance_estimatey);
-                        brightness += max(dot(normalize(normal), normalize(vec3f(1.0, 0.3, 1.0))), layer_param) * layer_strength;
-                        brightness += max(dot(normalize(normal), normalize(vec3f(-0.3, 1.0, 0.5))), layer_param) * layer_strength;
-    if global_id.x < u32(f32(render_params.image_width) * render_params.debug_shutter) {
-    color = normalize(normal) * 0.5 + 0.5;
-    brightness = 1.0;
-    }
-                    }
-                    case LAYER_STRIPE {
-                        let stripe = stripes[u32(layer_param)];
-                        brightness += (stripe - fract(layer_param)) * (render_params.zoom + 10.0) * (render_params.zoom + 10.0) * 0.01 * layer_strength + fract(layer_param);
-                    }
-                    default {}
-                }
-            }
+            brightness = vec3(calculate_lighting_layers(global_id.x, global_id.y, color_params));
         }
         case LIGHTING_DIFFUSE {
-            // TODO
+            let point = calculate_lighting_layers(global_id.x, global_id.y, color_params);
+            let plus_x = calculate_lighting_layers(global_id.x + 1, global_id.y, color_params);
+            let plus_y = calculate_lighting_layers(global_id.x, global_id.y + 1, color_params);
+            let normal = normalize(cross(vec3f(0.1, 0.0, plus_x - point), vec3f(0.0, 0.1, plus_y - point)));
+            brightness += max(dot(normal, color_params.lights[0].direction), 0.0) * color_params.lights[0].strength * color_params.lights[0].color;
+            brightness += max(dot(normal, color_params.lights[1].direction), 0.0) * color_params.lights[1].strength * color_params.lights[1].color;
+            brightness += max(dot(normal, color_params.lights[2].direction), 0.0) * color_params.lights[2].strength * color_params.lights[2].color;
+            brightness /= 3.0;
+if global_id.x < u32(f32(render_params.image_width) * render_params.debug_shutter) {
+color = normalize(normal) * 0.5 + 0.5;
+brightness = vec3(1.0);
+}
         }
         default {}
     }
     let hsv_color = rgb2hsv(color);
-    brightness *= color_params.brightness;
-    color = hsv2rgb(vec3f(hsv_color.x, hsv_color.y * color_params.saturation, hsv_color.z * brightness));
+    let b = length(brightness) * color_params.brightness / 1.44224957030740838232;
+    color = hsv2rgb(vec3f(hsv_color.x, hsv_color.y * color_params.saturation, hsv_color.z * b));
+    color *= brightness;
     // above 1.0 brightness, start fading to white
-    color = mix(color, vec3(1.0), clamp(brightness-1.0, 0.0, 1.0));
+    color = mix(color, brightness, clamp(b-1.0, 0.0, 1.0));
 
     // if global_id.x < u32(f32(render_params.image_width) * render_params.debug_shutter) {
     // // color = vec3(normalize(dz), length(dz));

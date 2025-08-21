@@ -1,4 +1,7 @@
-use eframe::{egui::Vec2, wgpu::Extent3d};
+use eframe::{
+    egui::{Direction, Vec2},
+    wgpu::Extent3d,
+};
 use nanoserde::{DeJson, SerJson};
 use rug::{
     Float,
@@ -83,23 +86,58 @@ pub struct Coloring2 {
     pub color_offset: f32,
     pub gradient: Gradient,
     pub color_layers: [Layer; 8],
-    pub lighting: Lighting,
+    pub lighting_kind: LightingKind,
+    pub light_layers: [Layer; 8],
+    pub lights: [Light; 3],
     pub overlays: Overlays,
 }
 
+#[repr(u32)]
 #[derive(Clone, Copy, Debug, PartialEq, DeJson, SerJson)]
-pub enum Lighting {
+pub enum LightingKind {
     Flat,
-    Layers([Layer; 8]),
-    Diffuse([Light; 3]),
+    Gradient,
+    Shaded,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, DeJson, SerJson, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Light {
-    pub strength: f32,
-    pub direction: [f32; 2],
     pub color: [f32; 3],
+    pub strength: f32,
+    pub direction: [f32; 3],
+    padding: f32,
+}
+
+impl Light {
+    fn new(color: [f32; 3], strength: f32, direction: [f32; 3]) -> Self {
+        let direction_length = (direction[0] * direction[0]
+            + direction[1] * direction[1]
+            + direction[2] * direction[2])
+            .sqrt();
+        let direction = [
+            direction[0] / direction_length,
+            direction[1] / direction_length,
+            direction[2] / direction_length,
+        ];
+        Self {
+            color,
+            strength,
+            direction,
+            padding: 0.0,
+        }
+    }
+}
+
+impl Default for Light {
+    fn default() -> Self {
+        Self {
+            color: [1.0; 3],
+            strength: 1.0,
+            direction: [0.0, 1.0, 0.0],
+            padding: 0.0,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, DeJson, SerJson)]
@@ -134,7 +172,7 @@ pub enum LayerKind {
     SmoothStep,
     Distance,
     OrbitTrap,
-    Normal,
+    // Normal,
     Stripe,
     // Step(StepLayer),
     // SmoothStep(SmoothStepLayer),
@@ -156,6 +194,7 @@ pub enum Gradient {
     Flat([f32; 3]),
     Procedural([[f32; 3]; 4]),
     Manual([[f32; 4]; 3]),
+    Hue,
 }
 
 #[repr(C)]
@@ -165,23 +204,23 @@ pub struct ColorParams {
     pub brightness: f32,
     pub color_frequency: f32,
     pub color_offset: f32,
-    pub gradient_type: u32,
-    padding: [u32; 3],
+    pub gradient_kind: u32,
+    pub lighting_kind: u32,
+    padding: [u32; 2],
     pub gradient: [f32; 12],
     pub color_layer_types: [u8; 8],
-    padding1: [u32; 2],
+    pub light_layer_types: [u8; 8],
     pub color_strengths: [f32; 8],
     pub color_params: [f32; 8],
-    pub lighting_data: [u8; 80],
-    pub lighting_type: u32,
-    padding2: [u32; 3],
+    pub light_strengths: [f32; 8],
+    pub light_params: [f32; 8],
+    pub lights: [Light; 3],
     pub overlays: Overlays,
-    // padding3: [u32; 2],
 }
 
 impl From<&Coloring2> for ColorParams {
     fn from(value: &Coloring2) -> Self {
-        let (gradient_type, gradient_vec) = match value.gradient {
+        let (gradient_kind, gradient_vec) = match value.gradient {
             Gradient::Flat(data) => {
                 let mut new_data = data.to_vec();
                 new_data.extend_from_slice(&[0.0; 9]);
@@ -189,42 +228,43 @@ impl From<&Coloring2> for ColorParams {
             }
             Gradient::Procedural(data) => (1, data.concat()),
             Gradient::Manual(data) => (2, data.concat()),
+            Gradient::Hue => (3, vec![0.0; 12]),
         };
         let mut gradient = [0.0; 12];
         gradient.copy_from_slice(&gradient_vec);
-        let (lighting_type, lighting_data) = match value.lighting {
-            Lighting::Flat => (0, [0u8; 80]),
-            Lighting::Layers(data) => {
-                let mut new_data = [0u8; 80];
-                let kinds = data.map(|x| x.kind as u8);
-                let strengths = data.map(|x| x.strength);
-                let strengths = bytemuck::cast::<[f32; 8], [u8; 32]>(strengths);
-                let params = data.map(|x| x.param);
-                let params = bytemuck::cast::<[f32; 8], [u8; 32]>(params);
-                new_data[..8].copy_from_slice(&kinds);
-                new_data[8..40].copy_from_slice(&strengths);
-                new_data[40..72].copy_from_slice(&params);
-                (1, new_data)
-            }
-            Lighting::Diffuse(data) => (2, bytemuck::cast(data)),
-        };
+        // let (lighting_type, lighting_data) = match value.lighting {
+        //     LightingKind::Flat => (0, [0u8; 80]),
+        //     LightingKind::Layers(data) => {
+        //         let mut new_data = [0u8; 80];
+        //         let kinds = data.map(|x| x.kind as u8);
+        //         let strengths = data.map(|x| x.strength);
+        //         let strengths = bytemuck::cast::<[f32; 8], [u8; 32]>(strengths);
+        //         let params = data.map(|x| x.param);
+        //         let params = bytemuck::cast::<[f32; 8], [u8; 32]>(params);
+        //         new_data[..8].copy_from_slice(&kinds);
+        //         new_data[8..40].copy_from_slice(&strengths);
+        //         new_data[40..72].copy_from_slice(&params);
+        //         (1, new_data)
+        //     }
+        //     LightingKind::Diffuse(data) => (2, bytemuck::cast(data)),
+        // };
         ColorParams {
             saturation: value.saturation,
             brightness: value.brightness,
             color_frequency: value.color_frequency,
             color_offset: value.color_offset,
-            gradient_type,
+            gradient_kind,
+            lighting_kind: value.lighting_kind as u32,
             gradient,
             color_layer_types: value.color_layers.map(|x| x.kind as u8),
+            light_layer_types: value.light_layers.map(|x| x.kind as u8),
             color_strengths: value.color_layers.map(|x| x.strength),
             color_params: value.color_layers.map(|x| x.param),
-            lighting_type,
-            lighting_data,
+            light_strengths: value.light_layers.map(|x| x.strength),
+            light_params: value.light_layers.map(|x| x.param),
+            lights: value.lights,
             overlays: value.overlays,
-            padding: [0; 3],
-            padding1: [0; 2],
-            padding2: [0; 3],
-            // padding3: [0; 2],
+            padding: [0; 2],
         }
     }
 }
@@ -316,7 +356,22 @@ impl Default for Coloring2 {
                 Layer::default(),
                 Layer::default(),
             ],
-            lighting: Lighting::Flat,
+            lighting_kind: LightingKind::Gradient,
+            light_layers: [
+                Layer {
+                    kind: LayerKind::Distance,
+                    strength: 1.0,
+                    param: 2.0,
+                },
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+            ],
+            lights: [Light::default(); 3],
             overlays: Overlays {
                 iteration_outline_color: [0.0; 4],
                 set_outline_color: [0.0; 4],
@@ -334,7 +389,8 @@ impl Coloring2 {
             color_offset: 0.0,
             gradient: Gradient::Flat([1.0; 3]),
             color_layers: [Layer::default(); 8],
-            lighting: Lighting::Layers([
+            lighting_kind: LightingKind::Shaded,
+            light_layers: [
                 Layer {
                     kind: LayerKind::Stripe,
                     strength: 1.0,
@@ -347,7 +403,12 @@ impl Coloring2 {
                 Layer::default(),
                 Layer::default(),
                 Layer::default(),
-            ]),
+            ],
+            lights: [
+                Light::default(),
+                Light::new([1.0, 0.0, 0.0], 1.0, [1.0, 0.5, 0.3]),
+                Light::new([0.0, 1.0, 0.0], 1.0, [0.0, 0.2, 0.7]),
+            ],
             overlays: Overlays {
                 iteration_outline_color: [0.0; 4],
                 set_outline_color: [0.0; 4],

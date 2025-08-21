@@ -105,10 +105,12 @@ impl EditUI for Gradient {
         let flat = discriminant(&Gradient::Flat([0.0; 3]));
         let procedural = discriminant(&Gradient::Procedural([[0.0; 3]; 4]));
         let manual = discriminant(&Gradient::Manual([[0.0; 4]; 3]));
+        let hue = discriminant(&Gradient::Hue);
         let label = match discriminant(self) {
             x if x == flat => "Flat",
             x if x == procedural => "Procedural",
             x if x == manual => "Manual",
+            x if x == hue => "Hue",
             _ => unreachable!(),
         };
         let mut tmp = discriminant(self);
@@ -120,6 +122,7 @@ impl EditUI for Gradient {
                         ui.selectable_value(&mut tmp, flat, "Flat");
                         ui.selectable_value(&mut tmp, manual, "Manual");
                         ui.selectable_value(&mut tmp, procedural, "Procedural");
+                        ui.selectable_value(&mut tmp, hue, "Hue");
                     })
                     .response
             },
@@ -133,6 +136,7 @@ impl EditUI for Gradient {
                     Gradient::Procedural([[0.5; 3], [0.5; 3], [1.0; 3], [0.0, 0.1, 0.2]])
                 }
                 x if x == manual => Gradient::Manual([[0.7; 4], [0.5; 4], [0.0; 4]]),
+                x if x == hue => Gradient::Hue,
                 _ => unreachable!(),
             };
         }
@@ -191,6 +195,7 @@ impl EditUI for Gradient {
                     );
                 });
             }
+            Gradient::Hue => {}
         };
     }
 }
@@ -207,7 +212,6 @@ impl EditUI for Layer {
                         ui.selectable_value(&mut self.kind, LayerKind::Distance, "Distance");
                         ui.selectable_value(&mut self.kind, LayerKind::OrbitTrap, "Orbit Trap");
                         ui.selectable_value(&mut self.kind, LayerKind::Stripe, "Stripe Average");
-                        ui.selectable_value(&mut self.kind, LayerKind::Normal, "Normal");
                     })
                     .response
             },
@@ -237,11 +241,6 @@ impl EditUI for Layer {
                 );
                 self.param = index as f32 - 1.0;
             }
-            LayerKind::Normal => input_with_label(
-                tui,
-                "Minimum Brightness",
-                egui::DragValue::new(&mut self.param).speed(0.01),
-            ),
             LayerKind::Stripe => {
                 let mut index = self.param.floor() as i32 + 1;
                 let mut offset = self.param.fract();
