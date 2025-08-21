@@ -6,19 +6,23 @@ This module contains the main UI state struct and its implementation, which
 contains the code necessary to update internal state and render the ui.
  */
 
+use color_eyre::Result;
+use color_eyre::eyre::eyre;
 use coloring::EditUI;
 use eframe::egui::{Button, Color32, Sense, Stroke, UiBuilder, Vec2};
+use eframe::egui_wgpu::CallbackTrait;
+use eframe::{egui, egui_wgpu};
 use egui_taffy::{TuiBuilderLogic, TuiWidget, tui};
+use little_exif::exif_tag::ExifTag;
+use little_exif::metadata::Metadata;
 use nanoserde::{DeJson, SerJson};
+use rug::{Float, ops::PowAssign};
 use std::fs::{OpenOptions, read_to_string};
 use std::io::Write;
 use std::sync::mpsc;
 use taffy::{Overflow, prelude::*};
 
-use eframe::egui_wgpu::CallbackTrait;
-use eframe::{egui, egui_wgpu};
-use rug::{Float, ops::PowAssign};
-
+use crate::image_gen::is_metadata_supported;
 use crate::types::{
     Image, Message, PreviewRenderResources, ProbeLocation, Status, Viewport, get_precision,
 };
@@ -303,39 +307,45 @@ impl CorgiUI {
                     if tui.ui_add(Button::new("Load Image Settings")).clicked() {
                         if let Some(path) = rfd::FileDialog::new()
                             .add_filter("corg", &["corg"])
+                            .add_filter("image with metadata", &["jpg", "jpeg", "webp", "png"])
                             .pick_file()
                         {
-                            let contents = read_to_string(path);
-                            match contents {
+                            let image = if is_metadata_supported(&path) {
+                                read_settings_from_image(&path)
+                            } else {
+                                read_to_string(path)
+                                    .map_err(color_eyre::Report::from)
+                                    .and_then(|s| {
+                                        Image::deserialize_json(&s)
+                                            .map_err(color_eyre::Report::from)
+                                    })
+                            };
+                            match image {
+                                Ok(image) => {
+                                    self.x_text_buff = image.viewport.x.to_string_radix(10, None);
+                                    self.y_text_buff = image.viewport.y.to_string_radix(10, None);
+                                    self.x_probe_buff =
+                                        image.probe_location.x.to_string_radix(10, None);
+                                    self.y_probe_buff =
+                                        image.probe_location.y.to_string_radix(10, None);
+                                    self.image_settings = image;
+                                }
                                 Err(err) => {
                                     self.status.message =
                                         format!("Failed to load image settings: {err:?}")
                                 }
-                                Ok(file) => match Image::deserialize_json(file.as_ref()) {
-                                    Ok(image) => {
-                                        self.x_text_buff =
-                                            image.viewport.x.to_string_radix(10, None);
-                                        self.y_text_buff =
-                                            image.viewport.y.to_string_radix(10, None);
-                                        self.x_probe_buff =
-                                            image.probe_location.x.to_string_radix(10, None);
-                                        self.y_probe_buff =
-                                            image.probe_location.y.to_string_radix(10, None);
-                                        self.image_settings = image;
-                                    }
-                                    Err(err) => {
-                                        self.status.message =
-                                            format!("Failed to parse image settings: {err:?}")
-                                    }
-                                },
-                            }
+                            };
                         }
                     }
 
                     if tui.ui_add(Button::new("Render to file")).clicked() {
                         if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("image", &["avif", "png", "tiff"])
-                            .set_file_name("fractal.avif")
+                            .add_filter("image with metadata", &["jpg", "jpeg", "webp", "png"])
+                            .add_filter(
+                                "image without metadata",
+                                &["avif", "gif", "qoi", "tiff", "exr"],
+                            )
+                            .set_file_name("fractal.png")
                             .save_file()
                         {
                             let mut image = self.image_settings.clone();
@@ -501,6 +511,19 @@ impl CorgiUI {
     pub fn mouse_down(&self) -> bool {
         self.mouse_down
     }
+}
+
+fn read_settings_from_image(path: &std::path::Path) -> Result<Image> {
+    let meta = Metadata::new_from_path(path)?;
+    let tag = meta
+        .get_tag(&ExifTag::ImageDescription(String::new()))
+        .next()
+        .ok_or(eyre!("No Description tag"))?;
+    let ExifTag::ImageDescription(desc) = tag else {
+        return Err(eyre!("Tag is not a Description"));
+    };
+    let image = Image::deserialize_json(desc)?;
+    Ok(image)
 }
 
 struct PaintCallback {

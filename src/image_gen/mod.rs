@@ -15,6 +15,11 @@ use eframe::egui::mutex::RwLock;
 use eframe::wgpu::{self, Extent3d};
 use eframe::{egui, egui_wgpu};
 use gpu_setup::SharedState;
+use image::ImageBuffer;
+use little_exif::exif_tag::ExifTag;
+use little_exif::metadata::Metadata;
+use nanoserde::SerJson;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
@@ -171,13 +176,16 @@ impl WorkerState {
                         .send
                         .send(StatusMessage::Progress("Saving image".into(), 0.0));
                     self.ctx.request_repaint();
-                    if let Err(err) = image::save_buffer(
-                        path,
-                        data.as_slice(),
-                        output_settings.viewport.width as u32,
-                        output_settings.viewport.height as u32,
-                        image::ColorType::Rgba8,
-                    ) {
+                    let mut img = image::DynamicImage::ImageRgba8(
+                        ImageBuffer::from_raw(
+                            output_settings.viewport.width as u32,
+                            output_settings.viewport.height as u32,
+                            data,
+                        )
+                        .expect("image data to be properly formatted"),
+                    );
+                    img = image::DynamicImage::ImageRgb8(img.flipv().into_rgb8());
+                    if let Err(err) = img.save(path.clone()) {
                         tracing::error!("Failed to save image: {err}");
                         let _ = self.send.send(StatusMessage::Progress(
                             format!("Failed to save image: {err}"),
@@ -185,6 +193,17 @@ impl WorkerState {
                         ));
                         self.ctx.request_repaint();
                     } else {
+                        // add metadata
+                        if is_metadata_supported(&path) {
+                            let mut meta = Metadata::new();
+                            meta.set_tag(ExifTag::ImageDescription(
+                                self.output_settings.as_ref().unwrap().serialize_json(),
+                            ));
+                            meta.set_tag(ExifTag::Software("Corgi".into()));
+                            if let Err(err) = meta.write_to_file(&path) {
+                                tracing::error!("Failed to write metadata to file: {err:?}");
+                            }
+                        }
                         let _ = self
                             .send
                             .send(StatusMessage::Progress("Image save complete".into(), 100.0));
@@ -202,6 +221,10 @@ impl WorkerState {
     pub fn output_texture(&self) -> Arc<RwLock<wgpu::Texture>> {
         self.output_state.texture.clone()
     }
+}
+
+pub fn is_metadata_supported(path: &Path) -> bool {
+    matches!(path.extension(), Some(x) if x == "jpg" || x == "jpeg" || x == "png" || x == "webp")
 }
 
 fn render_image(
