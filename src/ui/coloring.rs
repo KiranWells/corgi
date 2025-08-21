@@ -1,7 +1,7 @@
 use std::mem::discriminant;
 
 use super::input_with_label;
-use crate::types::{Coloring2, Gradient, Layer, LayerKind, Overlays};
+use crate::types::{Coloring2, Gradient, Layer, LayerKind, Light, LightingKind, Overlays};
 use eframe::egui;
 use egui_taffy::TuiBuilderLogic;
 use taffy::prelude::*;
@@ -45,54 +45,20 @@ impl EditUI for Coloring2 {
                 .speed(0.003)
                 .range(0.0..=1.0),
         );
+        tui.separator();
 
         self.gradient.render_edit_ui(ctx, tui);
-        let mut layer_ct = 0;
-        let mut new_layers = [Layer::default(); 8];
-        for layer in self.color_layers.iter_mut() {
-            if layer.kind == LayerKind::None {
-                break;
-            }
-            tui.style(Style {
-                flex_direction: FlexDirection::Row,
-                ..Default::default()
-            })
-            .add(|tui| {
-                tui.label(layer_ct.to_string());
-                tui.style(Style {
-                    flex_direction: FlexDirection::Column,
-                    align_items: Some(AlignItems::Start),
-                    padding: Rect {
-                        left: length(5.0),
-                        right: length(5.0),
-                        top: length(0.0),
-                        bottom: length(0.0),
-                    },
-                    gap: length(5.0),
-                    ..Default::default()
-                })
-                .add(|tui| {
-                    layer.render_edit_ui(ctx, tui);
-                    if !tui.button(|tui| tui.label("Remove")).clicked() {
-                        new_layers[layer_ct] = *layer;
-                        layer_ct += 1;
-                    }
-                })
-            });
+        tui.separator();
+        self.color_layers.render_edit_ui(ctx, tui);
+        tui.separator();
+        self.lighting_kind.render_edit_ui(ctx, tui);
+        if self.lighting_kind != LightingKind::Flat {
+            self.light_layers.render_edit_ui(ctx, tui);
         }
-        self.color_layers = new_layers;
-        if layer_ct < 8
-            && tui
-                .button(|tui| {
-                    tui.label("Add Layer");
-                })
-                .clicked()
-        {
-            self.color_layers[layer_ct] = Layer {
-                kind: LayerKind::Step,
-                strength: 1.0,
-                param: 0.0,
-            };
+        if self.lighting_kind == LightingKind::Shaded {
+            for light in self.lights.iter_mut() {
+                light.render_edit_ui(ctx, tui);
+            }
         }
         tui.separator();
         tui.label("Overlays");
@@ -105,7 +71,7 @@ impl EditUI for Gradient {
         let flat = discriminant(&Gradient::Flat([0.0; 3]));
         let procedural = discriminant(&Gradient::Procedural([[0.0; 3]; 4]));
         let manual = discriminant(&Gradient::Manual([[0.0; 4]; 3]));
-        let hue = discriminant(&Gradient::Hue);
+        let hue = discriminant(&Gradient::Hsv(0.0, 0.0));
         let label = match discriminant(self) {
             x if x == flat => "Flat",
             x if x == procedural => "Procedural",
@@ -128,15 +94,14 @@ impl EditUI for Gradient {
             },
             |res, _ui| res,
         );
-        tui.separator();
         if tmp != discriminant(self) {
             *self = match tmp {
                 x if x == flat => Gradient::Flat([1.0; 3]),
                 x if x == procedural => {
                     Gradient::Procedural([[0.5; 3], [0.5; 3], [1.0; 3], [0.0, 0.1, 0.2]])
                 }
-                x if x == manual => Gradient::Manual([[0.7; 4], [0.5; 4], [0.0; 4]]),
-                x if x == hue => Gradient::Hue,
+                x if x == manual => Gradient::Manual([[0.1; 4], [0.5; 4], [0.7; 4]]),
+                x if x == hue => Gradient::Hsv(0.7, 1.0),
                 _ => unreachable!(),
             };
         }
@@ -195,7 +160,20 @@ impl EditUI for Gradient {
                     );
                 });
             }
-            Gradient::Hue => {}
+            Gradient::Hsv(saturation, value) => {
+                input_with_label(
+                    tui,
+                    "Saturation",
+                    egui::DragValue::new(saturation)
+                        .speed(0.003)
+                        .range(0.0..=1.0),
+                );
+                input_with_label(
+                    tui,
+                    "Value",
+                    egui::DragValue::new(value).speed(0.003).range(0.0..=1.0),
+                );
+            }
         };
     }
 }
@@ -324,5 +302,104 @@ impl EditUI for Overlays {
             );
             tui.ui_add(egui::DragValue::new(&mut a[0]).speed(0.003));
         });
+    }
+}
+
+impl EditUI for LightingKind {
+    fn render_edit_ui(&mut self, _ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
+        tui.ui_add_manual(
+            |ui| {
+                egui::ComboBox::from_label("Lighting")
+                    .selected_text(format!("{self:?}"))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(self, LightingKind::Flat, "Flat");
+                        ui.selectable_value(self, LightingKind::Gradient, "Gradient");
+                        ui.selectable_value(self, LightingKind::Shaded, "Shaded");
+                    })
+                    .response
+            },
+            |res, _ui| res,
+        );
+    }
+}
+
+impl EditUI for [Layer; 8] {
+    fn render_edit_ui(&mut self, ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
+        let mut layer_ct = 0;
+        let mut new_layers = [Layer::default(); 8];
+        for layer in self.iter_mut() {
+            if layer.kind == LayerKind::None {
+                break;
+            }
+            tui.style(Style {
+                flex_direction: FlexDirection::Row,
+                ..Default::default()
+            })
+            .add(|tui| {
+                tui.label(layer_ct.to_string());
+                tui.style(Style {
+                    flex_direction: FlexDirection::Column,
+                    align_items: Some(AlignItems::Start),
+                    padding: Rect {
+                        left: length(5.0),
+                        right: length(5.0),
+                        top: length(0.0),
+                        bottom: length(0.0),
+                    },
+                    gap: length(5.0),
+                    ..Default::default()
+                })
+                .add(|tui| {
+                    layer.render_edit_ui(ctx, tui);
+                    if !tui.button(|tui| tui.label("Remove")).clicked() {
+                        new_layers[layer_ct] = *layer;
+                        layer_ct += 1;
+                    }
+                })
+            });
+        }
+        *self = new_layers;
+        if layer_ct < 8
+            && tui
+                .button(|tui| {
+                    tui.label("Add Layer");
+                })
+                .clicked()
+        {
+            self[layer_ct] = Layer {
+                kind: LayerKind::Step,
+                strength: 1.0,
+                param: 0.0,
+            };
+        }
+    }
+}
+
+impl EditUI for Light {
+    fn render_edit_ui(&mut self, _ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
+        tui.style(Style {
+            flex_direction: FlexDirection::Row,
+            ..Default::default()
+        })
+        .add(|tui| {
+            color_edit(tui, &mut self.color);
+            input_with_label(
+                tui,
+                "Strength",
+                egui::DragValue::new(&mut self.strength).speed(0.003),
+            );
+        });
+        tui.style(Style {
+            flex_direction: FlexDirection::Row,
+            ..Default::default()
+        })
+        .add(|tui| {
+            tui.label("Direction");
+            tui.separator();
+            tui.ui_add(egui::DragValue::new(&mut self.direction[0]).speed(0.003));
+            tui.ui_add(egui::DragValue::new(&mut self.direction[1]).speed(0.003));
+            tui.ui_add(egui::DragValue::new(&mut self.direction[2]).speed(0.003));
+        });
+        self.normalize()
     }
 }

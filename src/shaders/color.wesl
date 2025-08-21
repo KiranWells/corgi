@@ -228,7 +228,7 @@ fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
         }
         case GRADIENT_HUE {
-            color = hsv2rgb(vec3(fract(color_value), 1.0, 1.0));
+            color = hsv2rgb(vec3(fract(color_value * color_params.color_frequency + color_params.color_offset), color_params.gradient[0].x, color_params.gradient[0].y));
         }
         default {}
     }

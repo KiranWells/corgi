@@ -1,7 +1,4 @@
-use eframe::{
-    egui::{Direction, Vec2},
-    wgpu::Extent3d,
-};
+use eframe::{egui::Vec2, wgpu::Extent3d};
 use nanoserde::{DeJson, SerJson};
 use rug::{
     Float,
@@ -127,6 +124,20 @@ impl Light {
             padding: 0.0,
         }
     }
+
+    pub fn normalize(&mut self) {
+        let direction = self.direction;
+        let direction_length = (direction[0] * direction[0]
+            + direction[1] * direction[1]
+            + direction[2] * direction[2])
+            .sqrt();
+        let direction = [
+            direction[0] / direction_length,
+            direction[1] / direction_length,
+            direction[2] / direction_length,
+        ];
+        self.direction = direction;
+    }
 }
 
 impl Default for Light {
@@ -134,7 +145,7 @@ impl Default for Light {
         Self {
             color: [1.0; 3],
             strength: 1.0,
-            direction: [0.0, 1.0, 0.0],
+            direction: [0.0, 0.0, 1.0],
             padding: 0.0,
         }
     }
@@ -194,7 +205,7 @@ pub enum Gradient {
     Flat([f32; 3]),
     Procedural([[f32; 3]; 4]),
     Manual([[f32; 4]; 3]),
-    Hue,
+    Hsv(f32, f32),
 }
 
 #[repr(C)]
@@ -228,26 +239,14 @@ impl From<&Coloring2> for ColorParams {
             }
             Gradient::Procedural(data) => (1, data.concat()),
             Gradient::Manual(data) => (2, data.concat()),
-            Gradient::Hue => (3, vec![0.0; 12]),
+            Gradient::Hsv(saturation, value) => {
+                let mut new_data = vec![saturation, value];
+                new_data.extend_from_slice(&[0.0; 10]);
+                (3, new_data)
+            }
         };
         let mut gradient = [0.0; 12];
         gradient.copy_from_slice(&gradient_vec);
-        // let (lighting_type, lighting_data) = match value.lighting {
-        //     LightingKind::Flat => (0, [0u8; 80]),
-        //     LightingKind::Layers(data) => {
-        //         let mut new_data = [0u8; 80];
-        //         let kinds = data.map(|x| x.kind as u8);
-        //         let strengths = data.map(|x| x.strength);
-        //         let strengths = bytemuck::cast::<[f32; 8], [u8; 32]>(strengths);
-        //         let params = data.map(|x| x.param);
-        //         let params = bytemuck::cast::<[f32; 8], [u8; 32]>(params);
-        //         new_data[..8].copy_from_slice(&kinds);
-        //         new_data[8..40].copy_from_slice(&strengths);
-        //         new_data[40..72].copy_from_slice(&params);
-        //         (1, new_data)
-        //     }
-        //     LightingKind::Diffuse(data) => (2, bytemuck::cast(data)),
-        // };
         ColorParams {
             saturation: value.saturation,
             brightness: value.brightness,
@@ -371,7 +370,11 @@ impl Default for Coloring2 {
                 Layer::default(),
                 Layer::default(),
             ],
-            lights: [Light::default(); 3],
+            lights: [
+                Light::new([1.0, 1.0, 1.0], 1.0, [0.0, 0.5, 0.8]),
+                Light::new([0.5, 0.6, 1.0], 1.0, [0.8, 0.0, 0.6]),
+                Light::new([1.0, 0.8, 0.4], 1.0, [0.0, 0.8, 0.5]),
+            ],
             overlays: Overlays {
                 iteration_outline_color: [0.0; 4],
                 set_outline_color: [0.0; 4],
@@ -405,9 +408,9 @@ impl Coloring2 {
                 Layer::default(),
             ],
             lights: [
-                Light::default(),
-                Light::new([1.0, 0.0, 0.0], 1.0, [1.0, 0.5, 0.3]),
-                Light::new([0.0, 1.0, 0.0], 1.0, [0.0, 0.2, 0.7]),
+                Light::new([1.0, 1.0, 1.0], 1.5, [0.0, 0.6, 0.4]),
+                Light::new([0.5, 0.6, 1.0], 1.5, [0.0, 0.3, 1.0]),
+                Light::new([1.0, 0.8, 0.4], 1.0, [0.0, 0.3, 1.0]),
             ],
             overlays: Overlays {
                 iteration_outline_color: [0.0; 4],
