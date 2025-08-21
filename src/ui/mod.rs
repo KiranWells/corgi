@@ -6,13 +6,14 @@ This module contains the main UI state struct and its implementation, which
 contains the code necessary to update internal state and render the ui.
  */
 
+use coloring::EditUI;
 use eframe::egui::{Button, Color32, Sense, Stroke, UiBuilder, Vec2};
 use egui_taffy::{TuiBuilderLogic, TuiWidget, tui};
 use nanoserde::{DeJson, SerJson};
 use std::fs::{OpenOptions, read_to_string};
 use std::io::Write;
 use std::sync::mpsc;
-use taffy::prelude::*;
+use taffy::{Overflow, prelude::*};
 
 use eframe::egui_wgpu::CallbackTrait;
 use eframe::{egui, egui_wgpu};
@@ -21,6 +22,8 @@ use rug::{Float, ops::PowAssign};
 use crate::types::{
     Image, Message, PreviewRenderResources, ProbeLocation, Status, Viewport, get_precision,
 };
+
+mod coloring;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ViewState {
@@ -53,6 +56,10 @@ fn input_with_label(tui: &mut egui_taffy::Tui, label: &str, widget: impl TuiWidg
         flex_direction: taffy::FlexDirection::Row,
         // flex_grow: 1.0,
         justify_content: Some(taffy::AlignContent::Stretch),
+        size: Size {
+            width: percent(1.0),
+            height: auto(),
+        },
         ..Default::default()
     })
     .add(|tui| {
@@ -118,7 +125,7 @@ impl CorgiUI {
         egui::SidePanel::right("settings_panel").show(ctx, |ui| {
             tui(ui, ui.id().with("side"))
                 .reserve_available_space()
-                // .reserve_width(300.0)
+                .reserve_width(250.0)
                 .style(taffy::Style {
                     flex_direction: taffy::FlexDirection::Column,
                     // min_size: taffy::Size {
@@ -131,6 +138,10 @@ impl CorgiUI {
                     // align_items: Some(taffy::AlignItems::Stretch),
                     // max_size: percent(1.),
                     gap: length(8.),
+                    overflow: taffy::Point {
+                        x: Overflow::Hidden,
+                        y: Overflow::Scroll,
+                    },
                     ..Default::default()
                 })
                 .show(|tui| {
@@ -235,58 +246,15 @@ impl CorgiUI {
                             .update_while_editing(false),
                     );
                     tui.separator();
-                    tui.label("Coloring");
-                    input_with_label(
-                        tui,
-                        "Saturation",
-                        egui::DragValue::new(&mut self.image_settings.coloring.saturation)
-                            .speed(0.003)
-                            .range(0.0..=f32::MAX),
-                    );
-                    input_with_label(
-                        tui,
-                        "Color frequency",
-                        egui::DragValue::new(&mut self.image_settings.coloring.color_frequency)
-                            .speed(0.003),
-                    );
-
-                    input_with_label(
-                        tui,
-                        "Color offset",
-                        egui::DragValue::new(&mut self.image_settings.coloring.color_offset)
-                            .speed(0.003)
-                            .range(0.0..=1.0),
-                    );
-
-                    input_with_label(
-                        tui,
-                        "Glow spread",
-                        egui::DragValue::new(&mut self.image_settings.coloring.glow_spread)
-                            .speed(0.01),
-                    );
-
-                    input_with_label(
-                        tui,
-                        "Glow intensity",
-                        egui::DragValue::new(&mut self.image_settings.coloring.glow_intensity)
-                            .speed(0.005),
-                    );
-
-                    input_with_label(
-                        tui,
-                        "Brightness",
-                        egui::DragValue::new(&mut self.image_settings.coloring.brightness)
-                            .speed(0.003)
-                            .range(0.0..=f32::MAX),
-                    );
-
-                    input_with_label(
-                        tui,
-                        "Internal brightness",
-                        egui::DragValue::new(&mut self.image_settings.coloring.internal_brightness)
-                            .speed(0.03)
-                            .range(0.0..=f32::MAX),
-                    );
+                    tui.heading("Coloring");
+                    tui.label("External");
+                    self.image_settings
+                        .external_coloring
+                        .render_edit_ui(ctx, tui);
+                    tui.label("Internal");
+                    self.image_settings
+                        .internal_coloring
+                        .render_edit_ui(ctx, tui);
 
                     tui.separator();
                     input_with_label(

@@ -22,8 +22,8 @@ use std::time::Instant;
 use tracing::debug;
 
 use crate::types::{
-    Algorithm, ColorParams, Coloring2, ComputeParams, Image, ImageDiff, MAX_GPU_GROUP_ITER,
-    Message, RenderParams, StatusMessage,
+    Algorithm, ColorParams, ComputeParams, Image, ImageDiff, MAX_GPU_GROUP_ITER, Message,
+    RenderParams, StatusMessage,
 };
 use probe::probe;
 
@@ -403,12 +403,12 @@ fn run_render_step(image: &Image, gpu_data: &GPUData) {
     queue.write_buffer(
         &buffers.external_coloring,
         0,
-        bytemuck::cast_slice(&[ColorParams::from(&Coloring2::default())]),
+        bytemuck::cast_slice(&[ColorParams::from(&image.external_coloring)]),
     );
     queue.write_buffer(
         &buffers.internal_coloring,
         0,
-        bytemuck::cast_slice(&[ColorParams::from(&Coloring2::internal_default())]),
+        bytemuck::cast_slice(&[ColorParams::from(&image.internal_coloring)]),
     );
     queue.write_buffer(
         &buffers.render_parameters,

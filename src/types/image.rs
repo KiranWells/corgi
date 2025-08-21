@@ -57,7 +57,8 @@ pub struct Image {
     pub viewport: Viewport,
     pub max_iter: u64,
     pub probe_location: ProbeLocation,
-    pub coloring: Coloring,
+    pub external_coloring: Coloring2,
+    pub internal_coloring: Coloring2,
     pub misc: f32,
     pub debug_shutter: f32,
 }
@@ -74,7 +75,7 @@ pub struct Coloring {
     pub internal_brightness: f32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, DeJson, SerJson)]
 pub struct Coloring2 {
     pub saturation: f32,
     pub brightness: f32,
@@ -86,7 +87,7 @@ pub struct Coloring2 {
     pub overlays: Overlays,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, DeJson, SerJson)]
 pub enum Lighting {
     Flat,
     Layers([Layer; 8]),
@@ -94,14 +95,14 @@ pub enum Lighting {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, Debug, PartialEq, DeJson, SerJson, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Light {
     pub strength: f32,
     pub direction: [f32; 2],
     pub color: [f32; 3],
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, DeJson, SerJson)]
 pub struct Layer {
     pub kind: LayerKind,
     pub strength: f32,
@@ -119,14 +120,14 @@ impl Default for Layer {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, Debug, PartialEq, DeJson, SerJson, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Overlays {
     pub iteration_outline_color: [f32; 4],
     pub set_outline_color: [f32; 4],
 }
 
 #[repr(u8)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, DeJson, SerJson)]
 pub enum LayerKind {
     None = 0,
     Step,
@@ -150,7 +151,7 @@ pub enum LayerKind {
 // pub struct NormalLayer {}
 // pub struct StripeLayer {}
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, DeJson, SerJson)]
 pub enum Gradient {
     Flat([f32; 3]),
     Procedural([[f32; 3]; 4]),
@@ -487,7 +488,8 @@ impl Image {
         let recompute =
             self.max_iter != other.max_iter || self.viewport != other.viewport || reprobe;
         // if the image coloring parameters have changed, re-run the image render
-        let recolor = self.coloring != other.coloring
+        let recolor = self.external_coloring != other.external_coloring
+            || self.internal_coloring != other.internal_coloring
             || recompute
             || self.misc != other.misc
             || self.debug_shutter != other.debug_shutter;
@@ -532,7 +534,8 @@ impl Default for Image {
                 y: Float::with_val(53, 0.0),
             },
             max_iter: 10000,
-            coloring: Coloring::default(),
+            external_coloring: Coloring2::default(),
+            internal_coloring: Coloring2::internal_default(),
             misc: 1.0,
             debug_shutter: 0.0,
         }
