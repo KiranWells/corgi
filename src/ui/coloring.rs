@@ -100,7 +100,11 @@ impl EditUI for Gradient {
                 x if x == procedural => {
                     Gradient::Procedural([[0.5; 3], [0.5; 3], [1.0; 3], [0.0, 0.1, 0.2]])
                 }
-                x if x == manual => Gradient::Manual([[0.1; 4], [0.5; 4], [0.7; 4]]),
+                x if x == manual => Gradient::Manual([
+                    [0.6, 0.9, 0.8, 0.1],
+                    [0.2, 0.2, 0.3, 0.5],
+                    [1.0, 1.0, 1.0, 1.0],
+                ]),
                 x if x == hue => Gradient::Hsv(0.7, 1.0),
                 _ => unreachable!(),
             };
@@ -203,24 +207,18 @@ impl EditUI for Layer {
         match self.kind {
             LayerKind::None => unreachable!(),
             LayerKind::Step => {}
-            LayerKind::SmoothStep => {}
+            LayerKind::SmoothStep => input_with_label(
+                tui,
+                "Offset",
+                egui::DragValue::new(&mut self.param).speed(0.01),
+            ),
             LayerKind::Distance => input_with_label(
                 tui,
                 "Boost",
                 egui::DragValue::new(&mut self.param).speed(0.01),
             ),
-            LayerKind::OrbitTrap => {
+            LayerKind::OrbitTrap | LayerKind::Stripe => {
                 let mut index = self.param as i32 + 1;
-
-                input_with_label(
-                    tui,
-                    "Version",
-                    egui::DragValue::new(&mut index).speed(0.03).range(1..=4),
-                );
-                self.param = index as f32 - 1.0;
-            }
-            LayerKind::Stripe => {
-                let mut index = self.param.floor() as i32 + 1;
                 let mut offset = self.param.fract();
 
                 input_with_label(
@@ -232,7 +230,7 @@ impl EditUI for Layer {
                     tui,
                     "Offset",
                     egui::DragValue::new(&mut offset)
-                        .speed(0.01)
+                        .speed(0.003)
                         .range(0.0..=0.99),
                 );
 
@@ -248,8 +246,9 @@ impl EditUI for Overlays {
             self.iteration_outline_color[0],
             self.iteration_outline_color[1],
             self.iteration_outline_color[2],
-            self.iteration_outline_color[3],
+            self.iteration_outline_color[3].fract(),
         );
+        let mut steps = self.iteration_outline_color[3] as i32;
         tui.style(taffy::Style {
             flex_direction: taffy::FlexDirection::Row,
             // flex_grow: 1.0,
@@ -276,10 +275,26 @@ impl EditUI for Overlays {
                 },
                 |res, _ui| res,
             );
+            tui.ui_add(
+                egui::DragValue::new(&mut steps)
+                    .speed(0.1)
+                    .range(1..=i32::MAX),
+            );
         });
         self.iteration_outline_color = rgba.to_rgba_unmultiplied();
+        if self.iteration_outline_color[3] > 0.999 {
+            self.iteration_outline_color[3] = 0.999;
+        }
+        self.iteration_outline_color[3] += steps as f32;
 
-        let (rgb, a) = self.set_outline_color.split_first_chunk_mut().unwrap();
+        let set_col = self.set_outline_color;
+        let mut rgba = egui::Rgba::from_rgba_unmultiplied(
+            set_col[0],
+            set_col[1],
+            set_col[2],
+            set_col[3].fract(),
+        );
+        let mut scale = set_col[3].floor() / 10.0;
         tui.style(taffy::Style {
             flex_direction: taffy::FlexDirection::Row,
             // flex_grow: 1.0,
@@ -297,11 +312,27 @@ impl EditUI for Overlays {
             })
             .label("Set Outline");
             tui.ui_add_manual(
-                |ui| egui::widgets::color_picker::color_edit_button_rgb(ui, rgb),
+                |ui| {
+                    egui::widgets::color_picker::color_edit_button_rgba(
+                        ui,
+                        &mut rgba,
+                        egui::color_picker::Alpha::BlendOrAdditive,
+                    )
+                },
                 |res, _ui| res,
             );
-            tui.ui_add(egui::DragValue::new(&mut a[0]).speed(0.003));
+            tui.ui_add(
+                egui::DragValue::new(&mut scale)
+                    .speed(0.03)
+                    .range(0.1..=f32::MAX)
+                    .max_decimals(1),
+            );
         });
+        self.set_outline_color = rgba.to_rgba_unmultiplied();
+        if self.set_outline_color[3] > 0.999 {
+            self.set_outline_color[3] = 0.999;
+        }
+        self.set_outline_color[3] += scale * 10.0;
     }
 }
 
@@ -314,6 +345,11 @@ impl EditUI for LightingKind {
                     .show_ui(ui, |ui| {
                         ui.selectable_value(self, LightingKind::Flat, "Flat");
                         ui.selectable_value(self, LightingKind::Gradient, "Gradient");
+                        ui.selectable_value(
+                            self,
+                            LightingKind::RepeatingGradient,
+                            "Repeating Gradient",
+                        );
                         ui.selectable_value(self, LightingKind::Shaded, "Shaded");
                     })
                     .response

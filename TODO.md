@@ -54,6 +54,7 @@
 
 ### Research
 
+
 https://gbillotey.github.io/Fractalshades-doc/math.html
 - precision loss fixes
 - Billinear approximations
@@ -65,12 +66,32 @@ https://persianney.com/fractal/fractalNotes.pdf
 - explains the above in more detail
 https://mathr.co.uk/blog/2021-05-14_deep_zoom_theory_and_practice.html
 - describes some methods for optimizing floatexp form
+https://mathr.co.uk/blog/2022-02-21_deep_zoom_theory_and_practice_again.html
+- gives more detail on rebasing and a better approximation definition
 https://www.fractalforums.com/general-discussion/stripe-average-coloring/msg42797/?PHPSESSID=1c149a35846c66e0c53aacdc63bc9843#msg42797
 - stripe average coloring
 https://iquilezles.org/articles/ftrapsgeometric/
 - orbit traps
 https://iquilezles.org/articles/palettes/
 - generated palettes
+https://web.archive.org/web/20190922070007/http://www.jussiharkonen.com/files/on_fractal_coloring_techniques(hi-res).pdf
+- smooth coloring formulas
+https://mathr.co.uk/web/stripe-colouring.html
+- stripe averaging optimization
+https://www.acsu.buffalo.edu/~adamcunn/downloads/MandelbrotSet.pdf
+- internal visualization techniques
+https://www.mrob.com/pub/muency/newtonraphsonzooming.html
+- locating julia sets to look at
+
+#### Other Renderers
+http://www.chillheimer.de/kallesfraktaler/
+- Kalles Fraktaler 2
+https://mathr.co.uk/kf/kf.html
+- Kalles Fraktaler 2 +, and a list of others
+https://github.com/mattsaccount364/FractalShark
+- has some interesting notes on high-precision CUDA floats
+https://gbillotey.github.io/Fractalshades-doc/math.html#f1
+- most comprehensive list of mathematics used for deep zooms
 
 ### Features
 
@@ -92,6 +113,7 @@ https://iquilezles.org/articles/palettes/
     - [ ] 64-bit probed point
     - [ ] extended range floating point
         - https://andrewthall.org/papers/df64_qf128.pdf
+        - https://github.com/clickingbuttons/jeditrader/blob/a921a0e/shaders/src/fp64.wgsl
             - could be used for f64 polyfill as well
         - or entended exponent (floatexp):
             - (f32, i32)

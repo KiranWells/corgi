@@ -360,6 +360,8 @@ fn run_compute_step(
             iter_offset: (i * MAX_GPU_GROUP_ITER) as u32,
             x,
             y,
+            cx: image.probe_location.x.to_f32(),
+            cy: image.probe_location.y.to_f32(),
             zoom: image.viewport.zoom as f32,
         };
         if parameters.probe_len == 0 {

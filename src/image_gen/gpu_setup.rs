@@ -64,7 +64,6 @@ pub struct Buffers {
     // compute input
     pub probe: Buffer,
     // pub probe_prime: Buffer,
-    pub delta_0: Buffer,
     pub delta_n: Buffer,
     pub delta_prime: Buffer,
     // parameters
@@ -331,7 +330,6 @@ impl Buffers {
         let image_size = viewport.width * viewport.height;
         Self {
             probe: Self::create_buffer::<f32>(device, MAX_GPU_GROUP_ITER * 2 * 2, HostWritable),
-            delta_0: Self::create_buffer::<f32>(device, image_size * 2, ShaderOnly),
             delta_n: Self::create_buffer::<f32>(device, image_size * 2, ShaderOnly),
             delta_prime: Self::create_buffer::<f32>(device, image_size * 2, ShaderOnly),
             compute_parameters: Self::create_buffer::<ComputeParams>(device, 1, Uniform),
@@ -366,7 +364,6 @@ impl Buffers {
         use BuffType::*;
         // replace all sized buffers (not uniforms or probe)
         let image_size = new_view.width * new_view.height;
-        self.delta_0 = Self::create_buffer::<f32>(device, image_size * 2, ShaderOnly);
         self.delta_n = Self::create_buffer::<f32>(device, image_size * 2, ShaderOnly);
         self.delta_prime = Self::create_buffer::<f32>(device, image_size * 2, ShaderOnly);
         self.step = Self::create_buffer::<u32>(device, image_size, ShaderOnly);
@@ -385,7 +382,6 @@ impl BindGroups {
     ) -> (Self, PipelineLayout, PipelineLayout) {
         let Buffers {
             probe,
-            delta_0,
             delta_n,
             delta_prime,
             step,
@@ -407,7 +403,6 @@ impl BindGroups {
                 Self::create_buffer_layout_entry(3, false),
                 Self::create_buffer_layout_entry(4, false),
                 Self::create_buffer_layout_entry(5, false),
-                Self::create_buffer_layout_entry(6, false),
             ],
         });
 
@@ -420,26 +415,22 @@ impl BindGroups {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: delta_0.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
                     resource: delta_n.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 3,
+                    binding: 2,
                     resource: delta_prime.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 4,
+                    binding: 3,
                     resource: step.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 5,
+                    binding: 4,
                     resource: orbits.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 6,
+                    binding: 5,
                     resource: stripes.as_entire_binding(),
                 },
             ],

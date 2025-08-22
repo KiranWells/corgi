@@ -1,3 +1,8 @@
+const PI = 3.1415926535897932384626433832795028841971693993751058209749445923078164062862089986280348253421170679;
+const TAU = 2.0 * PI;
+const ESCAPE_RADIUS = 1000.0;
+const EPSILON = 1.1920929E-17;
+
 fn hsv2rgb(hsv: vec3<f32>) -> vec3<f32> {
     var rgb: vec3<f32>;
 
@@ -54,5 +59,9 @@ fn isinf(x: f32) -> bool {
     let exp = (bits >> 23) & 0xffu;
     let frac = bits & 0x7fffffu;
     return exp == 0xffu && frac == 0u;
+}
+
+fn debug(x: u32) -> bool {
+    return x < u32(f32(render_params.width) * render_params.debug_shutter);
 }
 

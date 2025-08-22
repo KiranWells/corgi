@@ -94,6 +94,7 @@ pub struct Coloring2 {
 pub enum LightingKind {
     Flat,
     Gradient,
+    RepeatingGradient,
     Shaded,
 }
 
@@ -280,6 +281,8 @@ pub struct ComputeParams {
     pub iter_offset: u32,
     pub x: f32,
     pub y: f32,
+    pub cx: f32,
+    pub cy: f32,
     pub zoom: f32,
 }
 
@@ -288,7 +291,8 @@ pub struct ComputeParams {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct RenderParams {
-    pub image_width: u32,
+    pub width: u32,
+    pub height: u32,
     pub max_step: u32,
     pub zoom: f32,
     pub misc: f32,
@@ -336,18 +340,14 @@ impl Default for Coloring2 {
             brightness: 1.0,
             color_frequency: 1.0,
             color_offset: 0.0,
-            gradient: Gradient::Procedural([[0.5; 3], [0.5; 3], [1.0; 3], [0.0, 0.1, 0.2]]),
+            gradient: Gradient::Hsv(0.7, 1.0),
             color_layers: [
                 Layer {
                     kind: LayerKind::SmoothStep,
-                    strength: 1.0,
+                    strength: 2.0,
                     param: 0.0,
                 },
-                Layer {
-                    kind: LayerKind::Stripe,
-                    strength: 1.0,
-                    param: 0.5,
-                },
+                Layer::default(),
                 Layer::default(),
                 Layer::default(),
                 Layer::default(),
@@ -359,8 +359,8 @@ impl Default for Coloring2 {
             light_layers: [
                 Layer {
                     kind: LayerKind::Distance,
-                    strength: 1.0,
-                    param: 2.0,
+                    strength: 0.8,
+                    param: 0.5,
                 },
                 Layer::default(),
                 Layer::default(),
@@ -377,7 +377,7 @@ impl Default for Coloring2 {
             ],
             overlays: Overlays {
                 iteration_outline_color: [0.0; 4],
-                set_outline_color: [0.0; 4],
+                set_outline_color: [1.0; 4],
             },
         }
     }
@@ -392,12 +392,12 @@ impl Coloring2 {
             color_offset: 0.0,
             gradient: Gradient::Flat([1.0; 3]),
             color_layers: [Layer::default(); 8],
-            lighting_kind: LightingKind::Shaded,
+            lighting_kind: LightingKind::Gradient,
             light_layers: [
                 Layer {
-                    kind: LayerKind::Stripe,
+                    kind: LayerKind::OrbitTrap,
                     strength: 1.0,
-                    param: 0.5,
+                    param: 0.0,
                 },
                 Layer::default(),
                 Layer::default(),
@@ -500,7 +500,8 @@ impl From<&Viewport> for Extent3d {
 impl From<&Image> for RenderParams {
     fn from(image: &Image) -> Self {
         RenderParams {
-            image_width: image.viewport.width as u32,
+            width: image.viewport.width as u32,
+            height: image.viewport.height as u32,
             max_step: image.max_iter as u32,
             zoom: image.viewport.zoom as f32,
             misc: image.misc,
@@ -589,7 +590,7 @@ impl Default for Image {
             viewport: Viewport {
                 width: 512,
                 height: 512,
-                zoom: -2.0,
+                zoom: -1.0,
                 x: Float::with_val(53, -0.5),
                 y: Float::with_val(53, 0.0),
             },
