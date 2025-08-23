@@ -17,7 +17,7 @@ use eframe::{
         Queue, Texture, TextureView,
     },
 };
-use wgpu::{Extent3d, ShaderModule};
+use wgpu::ShaderModule;
 
 use crate::types::{ColorParams, ComputeParams, MAX_GPU_GROUP_ITER, RenderParams, Viewport};
 
