@@ -17,7 +17,7 @@ use eframe::{
         Queue, Texture, TextureView,
     },
 };
-use wgpu::ShaderModule;
+use wgpu::{Extent3d, ShaderModule};
 
 use crate::types::{ColorParams, ComputeParams, MAX_GPU_GROUP_ITER, RenderParams, Viewport};
 
@@ -255,7 +255,6 @@ impl GPUData {
 
     pub fn get_texture_data(&self) -> Option<Vec<u8>> {
         let ext = self.texture.read().size();
-        // let padded_width = ext.width * 4;
         let padded_width = ((ext.width * 4) as f32 / 256.0).ceil() as u32 * 256;
         let tmp_buffer = self.shared.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
@@ -327,7 +326,7 @@ impl Buffers {
     /// Creates all of the buffers used by the image renderer.
     fn init(device: &Device, viewport: &Viewport) -> Self {
         use BuffType::*;
-        let image_size = viewport.width * viewport.height;
+        let image_size = viewport.buffer_size();
         Self {
             probe: Self::create_buffer::<f32>(device, MAX_GPU_GROUP_ITER * 2 * 2, HostWritable),
             delta_n: Self::create_buffer::<f32>(device, image_size * 2, ShaderOnly),
@@ -363,7 +362,7 @@ impl Buffers {
     pub fn resize(&mut self, new_view: &Viewport, device: &Device) {
         use BuffType::*;
         // replace all sized buffers (not uniforms or probe)
-        let image_size = new_view.width * new_view.height;
+        let image_size = new_view.buffer_size();
         self.delta_n = Self::create_buffer::<f32>(device, image_size * 2, ShaderOnly);
         self.delta_prime = Self::create_buffer::<f32>(device, image_size * 2, ShaderOnly);
         self.step = Self::create_buffer::<u32>(device, image_size, ShaderOnly);

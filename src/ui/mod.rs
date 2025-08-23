@@ -21,6 +21,7 @@ use std::fs::{OpenOptions, read_to_string};
 use std::io::Write;
 use std::sync::mpsc;
 use taffy::{Overflow, prelude::*};
+use wgpu::Extent3d;
 
 use crate::image_gen::is_metadata_supported;
 use crate::types::{
@@ -40,6 +41,7 @@ pub enum ViewState {
 /// The main UI state struct.
 pub struct CorgiUI {
     image_settings: Image,
+    preview_scaling: f64,
     pub status: Status,
     pub rendered_viewport: Viewport,
     pub output_viewport: Viewport,
@@ -82,9 +84,11 @@ impl CorgiUI {
         Self {
             status: Status::default(),
             rendered_viewport: image.viewport.clone(),
+            preview_scaling: 0.5,
             output_viewport: Viewport {
                 width: 1920,
                 height: 1080,
+                scaling: image.viewport.scaling,
                 zoom: image.viewport.zoom,
                 x: image.viewport.x.clone(),
                 y: image.viewport.y.clone(),
@@ -249,6 +253,17 @@ impl CorgiUI {
                             .range(100..=u32::MAX)
                             .update_while_editing(false),
                     );
+
+                    let mut scaling = (1.0 / self.preview_scaling) as u32;
+                    input_with_label(
+                        tui,
+                        "Viewport Downscaling",
+                        egui::DragValue::new(&mut scaling)
+                            .speed(0.01)
+                            .range(1..=8)
+                            .update_while_editing(false),
+                    );
+                    self.preview_scaling = 1.0 / scaling as f64;
                     tui.separator();
                     tui.heading("Coloring");
                     tui.label("External");
@@ -496,7 +511,11 @@ impl CorgiUI {
     /// Get the image settings
     pub fn image(&self) -> Image {
         match self.view_state {
-            ViewState::Viewport => self.image_settings.clone(),
+            ViewState::Viewport => {
+                let mut output = self.image_settings.clone();
+                output.viewport.scaling = self.preview_scaling;
+                output
+            }
             ViewState::OutputView | ViewState::OutputLock | ViewState::Output => {
                 let mut output = self.image_settings.clone();
                 output.viewport.x = self.output_viewport.x.clone();
@@ -550,7 +569,8 @@ impl CallbackTrait for PaintCallback {
             res.swap(device, queue);
         }
 
-        let size = (self.rendered_viewport.width, self.rendered_viewport.height);
+        let extents = Extent3d::from(&self.rendered_viewport);
+        let size = (extents.width, extents.height);
         if size != *res.size() {
             // resize the render resources, refreshing the texture reference
             res.resize(device, queue, size)

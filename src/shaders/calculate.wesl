@@ -59,7 +59,8 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let y_0 = c + delta_0;
     var delta_n: vec2<f32>;
     var delta_n_prime: vec2<f32>;
-    var y_old = vec2f(ESCAPE_RADIUS);
+    var x_old = vec2f(ESCAPE_RADIUS);
+    var delta_old = vec2f(-ESCAPE_RADIUS);
     var orbits = vec4f(1.0);
     var stripes = vec4f(0.0);
     var prev_stripes: vec4f;
@@ -99,7 +100,7 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         // test if the point is already outside the escape radius
         let radius_squared = y_n.x * y_n.x + y_n.y * y_n.y;
-        if radius_squared > ESCAPE_RADIUS {
+        if radius_squared > ESCAPE_RADIUS || all(x_n - x_old == delta_n - delta_old) {
             // update the output values
             if radius_squared > ESCAPE_RADIUS {
                 intermediate_step[buffer_index] = i32(params.iter_offset + step);
@@ -117,7 +118,8 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
             return;
         }
         if (step >= 100u && (step - 100u) % 1024u == 0) {
-            y_old = y_n;
+            x_old = x_n;
+            delta_old = delta_n;
         }
 
         // calculate the next iteration according to the perturbation formula

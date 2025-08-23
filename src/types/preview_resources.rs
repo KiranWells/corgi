@@ -19,7 +19,7 @@ pub struct PreviewRenderResources {
     texture: wgpu::Texture,
     preview_texture: Arc<RwLock<wgpu::Texture>>,
     output_texture: Arc<RwLock<wgpu::Texture>>,
-    size: (usize, usize),
+    size: (u32, u32),
 }
 
 impl PreviewRenderResources {
@@ -29,14 +29,14 @@ impl PreviewRenderResources {
         format: wgpu::TextureFormat,
         preview_texture: Arc<RwLock<wgpu::Texture>>,
         output_texture: Arc<RwLock<wgpu::Texture>>,
-        size: (usize, usize),
+        size: (u32, u32),
     ) -> Result<Self> {
         let shader = device.create_shader_module(include_wgsl!("../shaders/preview.wgsl"));
 
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             size: Extent3d {
-                width: size.0 as u32,
-                height: size.1 as u32,
+                width: size.0,
+                height: size.1,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -141,7 +141,10 @@ impl PreviewRenderResources {
             }),
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: 4,
+                ..Default::default()
+            },
             multiview: None,
             cache: None,
         });
@@ -180,12 +183,7 @@ impl PreviewRenderResources {
 
     /// Resize the render resources. This must be called when the render thread resizes,
     /// and will refresh the texture view and the uniform buffer.
-    pub fn resize(
-        &mut self,
-        device: &Device,
-        queue: &Queue,
-        new_size: (usize, usize),
-    ) -> Result<()> {
+    pub fn resize(&mut self, device: &Device, queue: &Queue, new_size: (u32, u32)) -> Result<()> {
         *self = Self::init(
             device,
             self.format,
@@ -225,7 +223,7 @@ impl PreviewRenderResources {
     }
 
     /// Get the size of the preview
-    pub fn size(&self) -> &(usize, usize) {
+    pub fn size(&self) -> &(u32, u32) {
         &self.size
     }
 }

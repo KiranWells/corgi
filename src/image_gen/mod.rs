@@ -340,7 +340,7 @@ fn run_compute_step(
             cpass.set_bind_group(1, &bind_groups.compute_parameters, &[]);
             cpass.set_pipeline(compute_pipeline);
             cpass.dispatch_workgroups(
-               (texture_size.width as f64 / 16.0).ceil() as u32,
+                (texture_size.width as f64 / 16.0).ceil() as u32,
                 (texture_size.height as f64 / 16.0).ceil() as u32,
                 1,
             );
@@ -444,6 +444,7 @@ fn run_render_step(image: &Image, gpu_data: &GPUData) {
     let mut encoder =
         device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
+    let texture_size: Extent3d = (&image.viewport).into();
     // begin render dispatch
     {
         let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -455,8 +456,8 @@ fn run_render_step(image: &Image, gpu_data: &GPUData) {
         cpass.set_bind_group(2, &bind_groups.render_parameters, &[]);
         cpass.set_pipeline(color_pipeline);
         cpass.dispatch_workgroups(
-            (image.viewport.width as f64 / 16.0).ceil() as u32,
-            (image.viewport.height as f64 / 16.0).ceil() as u32,
+            (texture_size.width as f64 / 16.0).ceil() as u32,
+            (texture_size.height as f64 / 16.0).ceil() as u32,
             1,
         );
     }

@@ -8,6 +8,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
+use wgpu::Extent3d;
 
 use crate::image_gen::WorkerState;
 use crate::types::Debouncer;
@@ -68,12 +69,13 @@ impl CorgiApp {
             cancelled,
             ctx,
         );
+        let extents = Extent3d::from(&initial_image.viewport);
         let resources = PreviewRenderResources::init(
             &wgpu.device,
             wgpu.target_format,
             worker_state.preview_texture(),
             worker_state.output_texture(),
-            (initial_image.viewport.width, initial_image.viewport.height),
+            (extents.width as u32, extents.height as u32),
         )?;
         wgpu.renderer.write().callback_resources.insert(resources);
         thread::spawn(move || {

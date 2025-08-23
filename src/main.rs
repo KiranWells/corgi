@@ -1,7 +1,7 @@
 use std::{env, str::FromStr};
 
 use clap::Parser;
-use color_eyre::{Result, eyre::eyre};
+use color_eyre::Result;
 use corgi::app::{CorgiApp, CorgiCliOptions};
 use eframe::{egui, egui_wgpu, wgpu};
 use tracing::Level;
@@ -28,6 +28,7 @@ fn main() -> Result<()> {
         vsync: true,
         hardware_acceleration: eframe::HardwareAcceleration::Preferred,
         renderer: eframe::Renderer::Wgpu,
+        multisampling: 4,
         wgpu_options: egui_wgpu::WgpuConfiguration {
             present_mode: wgpu::PresentMode::AutoVsync,
             desired_maximum_frame_latency: None,
@@ -39,7 +40,6 @@ fn main() -> Result<()> {
         "Corgi",
         eframe_options,
         Box::new(|cc| CorgiApp::new_dyn(cc, cli_options)),
-    )
-    .or(Err(eyre!("Error in eframe application")))?;
+    )?;
     Ok(())
 }

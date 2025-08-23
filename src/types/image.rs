@@ -35,6 +35,7 @@ impl From<&Float> for FloatParser {
 pub struct Viewport {
     pub width: usize,
     pub height: usize,
+    pub scaling: f64,
     pub zoom: f64,
     #[nserde(proxy = "FloatParser")]
     pub x: Float,
@@ -485,13 +486,17 @@ impl Viewport {
             _ => Algorithm::Perturbedf32,
         }
     }
+
+    pub fn buffer_size(&self) -> usize {
+        (self.width as f64 * self.scaling) as usize * (self.height as f64 * self.scaling) as usize
+    }
 }
 
 impl From<&Viewport> for Extent3d {
     fn from(viewport: &Viewport) -> Self {
         Self {
-            width: viewport.width as u32,
-            height: viewport.height as u32,
+            width: (viewport.width as f64 * viewport.scaling) as u32,
+            height: (viewport.height as f64 * viewport.scaling) as u32,
             depth_or_array_layers: 1,
         }
     }
@@ -500,8 +505,8 @@ impl From<&Viewport> for Extent3d {
 impl From<&Image> for RenderParams {
     fn from(image: &Image) -> Self {
         RenderParams {
-            width: image.viewport.width as u32,
-            height: image.viewport.height as u32,
+            width: (image.viewport.width as f64 * image.viewport.scaling) as u32,
+            height: (image.viewport.height as f64 * image.viewport.scaling) as u32,
             max_step: image.max_iter as u32,
             zoom: image.viewport.zoom as f32,
             misc: image.misc,
@@ -543,7 +548,8 @@ impl Image {
     pub fn comp(&self, other: &Self) -> ImageDiff {
         // if the viewport has changed, resize the GPU data
         let resize = self.viewport.width != other.viewport.width
-            || self.viewport.height != other.viewport.height;
+            || self.viewport.height != other.viewport.height
+            || self.viewport.scaling != other.viewport.scaling;
         // if the max iteration or probe location has changed, re-run the probe
         let reprobe = self.max_iter != other.max_iter
             || self.probe_location.x != other.probe_location.x
@@ -590,6 +596,7 @@ impl Default for Image {
             viewport: Viewport {
                 width: 512,
                 height: 512,
+                scaling: 1.0,
                 zoom: -1.0,
                 x: Float::with_val(53, -0.5),
                 y: Float::with_val(53, 0.0),
