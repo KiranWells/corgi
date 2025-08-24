@@ -38,6 +38,7 @@ pub enum Message {
 pub enum StatusMessage {
     Progress(String, f64),
     NewPreviewViewport(Duration, Viewport),
+    NewOutputViewport(Duration, Viewport),
 }
 
 /// Shared status between the main thread and the render thread

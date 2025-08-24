@@ -146,6 +146,7 @@ impl WorkerState {
                 self.ctx.request_repaint();
             }
             if let Some(image) = new_output {
+                let start = Instant::now();
                 // TODO: move to separate thread
                 render_image(
                     &mut self.output_state,
@@ -156,61 +157,60 @@ impl WorkerState {
                     self.cancelled.clone(),
                     self.ctx.clone(),
                 );
-                self.output_settings = Some(image);
-                // let _ = self.send.send(StatusMessage::New(image.viewport.clone()));
-                let _ = self.send.send(StatusMessage::Progress(
-                    "Finished rendering output".into(),
-                    100.0,
+                let _ = self.send.send(StatusMessage::NewOutputViewport(
+                    Instant::now() - start,
+                    image.viewport.clone(),
                 ));
+                self.output_settings = Some(image);
                 self.ctx.request_repaint();
             }
             if let Some(path) = file_save {
                 // copy output buffer to CPU
-                let output_settings = self.output_settings.as_ref().unwrap();
-                let _ = self
-                    .send
-                    .send(StatusMessage::Progress("Fetching image data".into(), 0.0));
-                self.ctx.request_repaint();
-                if let Some(data) = self.output_state.get_texture_data() {
+                if let Some(output_settings) = self.output_settings.as_ref() {
                     let _ = self
                         .send
-                        .send(StatusMessage::Progress("Saving image".into(), 0.0));
+                        .send(StatusMessage::Progress("Fetching image data".into(), 0.0));
                     self.ctx.request_repaint();
-                    let mut img = image::DynamicImage::ImageRgba8(
-                        ImageBuffer::from_raw(
-                            output_settings.viewport.width as u32,
-                            output_settings.viewport.height as u32,
-                            data,
-                        )
-                        .expect("image data to be properly formatted"),
-                    );
-                    img = image::DynamicImage::ImageRgb8(img.flipv().into_rgb8());
-                    if let Err(err) = img.save(path.clone()) {
-                        tracing::error!("Failed to save image: {err}");
-                        let _ = self.send.send(StatusMessage::Progress(
-                            format!("Failed to save image: {err}"),
-                            0.0,
-                        ));
-                        self.ctx.request_repaint();
-                    } else {
-                        // add metadata
-                        if is_metadata_supported(&path) {
-                            let mut meta = Metadata::new();
-                            meta.set_tag(ExifTag::ImageDescription(
-                                self.output_settings.as_ref().unwrap().serialize_json(),
-                            ));
-                            meta.set_tag(ExifTag::Software("Corgi".into()));
-                            if let Err(err) = meta.write_to_file(&path) {
-                                tracing::error!("Failed to write metadata to file: {err:?}");
-                            }
-                        }
+                    if let Some(data) = self.output_state.get_texture_data() {
                         let _ = self
                             .send
-                            .send(StatusMessage::Progress("Image save complete".into(), 100.0));
+                            .send(StatusMessage::Progress("Saving image".into(), 0.0));
                         self.ctx.request_repaint();
+                        let mut img = image::DynamicImage::ImageRgba8(
+                            ImageBuffer::from_raw(
+                                output_settings.viewport.width as u32,
+                                output_settings.viewport.height as u32,
+                                data,
+                            )
+                            .expect("image data to be properly formatted"),
+                        );
+                        img = image::DynamicImage::ImageRgb8(img.flipv().into_rgb8());
+                        if let Err(err) = img.save(path.clone()) {
+                            tracing::error!("Failed to save image: {err}");
+                            let _ = self.send.send(StatusMessage::Progress(
+                                format!("Failed to save image: {err}"),
+                                0.0,
+                            ));
+                            self.ctx.request_repaint();
+                        } else {
+                            // add metadata
+                            if is_metadata_supported(&path) {
+                                let mut meta = Metadata::new();
+                                meta.set_tag(ExifTag::ImageDescription(
+                                    self.output_settings.as_ref().unwrap().serialize_json(),
+                                ));
+                                meta.set_tag(ExifTag::Software("Corgi".into()));
+                                if let Err(err) = meta.write_to_file(&path) {
+                                    tracing::error!("Failed to write metadata to file: {err:?}");
+                                }
+                            }
+                            let _ = self
+                                .send
+                                .send(StatusMessage::Progress("Image save complete".into(), 100.0));
+                            self.ctx.request_repaint();
+                        }
                     }
                 }
-                // write to file
             }
         }
     }

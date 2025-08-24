@@ -161,7 +161,6 @@ fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     // first, calculate color layers
     var color_value = 0.0;
-    var dbg = 0.0;
     for (var i = 0u; i < 8u; i += 1) {
         let layer_kind_big = color_params.color_layer_types[i / 4];
         let layer_kind = (layer_kind_big >> ((i % 4u) * 8u)) & 255u;

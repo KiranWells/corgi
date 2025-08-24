@@ -306,7 +306,8 @@ pub struct RenderParams {
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Transform {
     pub angle: f32,
-    pub scale: f32,
+    pub _padding: f32,
+    pub scale: [f32; 2],
     pub offset: [f32; 2],
 }
 
@@ -314,7 +315,8 @@ impl Default for Transform {
     fn default() -> Self {
         Self {
             angle: 0.0,
-            scale: 1.0,
+            _padding: 0.0,
+            scale: [1.0, 1.0],
             offset: [0.0, 0.0],
         }
     }
@@ -419,6 +421,76 @@ impl Coloring2 {
             },
         }
     }
+
+    pub fn external_opt_default() -> Self {
+        Self {
+            saturation: 1.0,
+            brightness: 1.0,
+            color_frequency: 1.0,
+            color_offset: 0.0,
+            gradient: Gradient::Hsv(0.7, 1.0),
+            color_layers: [
+                Layer {
+                    kind: LayerKind::SmoothStep,
+                    strength: 2.0,
+                    param: 0.0,
+                },
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+            ],
+            lighting_kind: LightingKind::Flat,
+            light_layers: [Layer::default(); 8],
+            lights: [
+                Light::new([1.0, 1.0, 1.0], 1.0, [0.0, 0.5, 0.8]),
+                Light::new([0.5, 0.6, 1.0], 1.0, [0.8, 0.0, 0.6]),
+                Light::new([1.0, 0.8, 0.4], 1.0, [0.0, 0.8, 0.5]),
+            ],
+            overlays: Overlays {
+                iteration_outline_color: [0.0; 4],
+                set_outline_color: [1.0; 4],
+            },
+        }
+    }
+
+    pub fn internal_opt_default() -> Self {
+        Self {
+            saturation: 1.0,
+            brightness: 1.0,
+            color_frequency: 1.0,
+            color_offset: 0.0,
+            gradient: Gradient::Flat([1.0; 3]),
+            color_layers: [Layer::default(); 8],
+            lighting_kind: LightingKind::Gradient,
+            light_layers: [
+                Layer {
+                    kind: LayerKind::OrbitTrap,
+                    strength: 1.0,
+                    param: 0.0,
+                },
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+            ],
+            lights: [
+                Light::new([1.0, 1.0, 1.0], 1.0, [0.0, 0.5, 0.8]),
+                Light::new([0.5, 0.6, 1.0], 1.0, [0.8, 0.0, 0.6]),
+                Light::new([1.0, 0.8, 0.4], 1.0, [0.0, 0.8, 0.5]),
+            ],
+            overlays: Overlays {
+                iteration_outline_color: [0.0; 4],
+                set_outline_color: [1.0; 4],
+            },
+        }
+    }
 }
 
 impl Viewport {
@@ -427,14 +499,15 @@ impl Viewport {
         let scale = f32::powf(2.0, -(self.zoom - other.zoom) as f32);
         let mut this_scale = Float::with_val(get_precision(self.zoom), 2.0);
         this_scale.pow_assign(-self.zoom);
-        let aspect_scale = self.aspect_scale();
+        let aspect_scale = self.aspect_scale() / other.aspect_scale();
         let offset: [Float; 2] = [
             (self.x.clone() - other.x.clone()) / this_scale.clone() / aspect_scale.x,
             (self.y.clone() - other.y.clone()) / this_scale / aspect_scale.y,
         ];
         Transform {
             angle: 0.0,
-            scale,
+            _padding: 0.0,
+            scale: [scale * aspect_scale.x, scale * aspect_scale.y],
             offset: [offset[0].to_f32(), offset[1].to_f32()],
         }
     }
@@ -489,6 +562,19 @@ impl Viewport {
 
     pub fn buffer_size(&self) -> usize {
         (self.width as f64 * self.scaling) as usize * (self.height as f64 * self.scaling) as usize
+    }
+}
+
+impl Default for Viewport {
+    fn default() -> Self {
+        Viewport {
+            width: 512,
+            height: 512,
+            scaling: 1.0,
+            zoom: -1.0,
+            x: Float::with_val(53, -0.5),
+            y: Float::with_val(53, 0.0),
+        }
     }
 }
 
@@ -593,14 +679,7 @@ impl Image {
 impl Default for Image {
     fn default() -> Self {
         Self {
-            viewport: Viewport {
-                width: 512,
-                height: 512,
-                scaling: 1.0,
-                zoom: -1.0,
-                x: Float::with_val(53, -0.5),
-                y: Float::with_val(53, 0.0),
-            },
+            viewport: Viewport::default(),
             probe_location: ProbeLocation {
                 x: Float::with_val(53, -0.5),
                 y: Float::with_val(53, 0.0),

@@ -1,6 +1,6 @@
 use std::mem::discriminant;
 
-use super::input_with_label;
+use super::{EditUI, input_with_label};
 use crate::types::{Coloring2, Gradient, Layer, LayerKind, Light, LightingKind, Overlays};
 use eframe::egui;
 use egui_taffy::TuiBuilderLogic;
@@ -11,10 +11,6 @@ fn color_edit(tui: &mut egui_taffy::Tui, color: &mut [f32; 3]) {
         |ui| egui::widgets::color_picker::color_edit_button_rgb(ui, color),
         |res, _ui| res,
     );
-}
-
-pub trait EditUI {
-    fn render_edit_ui(&mut self, ctx: &egui::Context, tui: &mut egui_taffy::Tui);
 }
 
 impl EditUI for Coloring2 {

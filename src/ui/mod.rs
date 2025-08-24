@@ -8,9 +8,7 @@ contains the code necessary to update internal state and render the ui.
 
 use color_eyre::Result;
 use color_eyre::eyre::eyre;
-use coloring::EditUI;
-use eframe::egui::{Button, Color32, Sense, Stroke, UiBuilder, Vec2};
-use eframe::egui_wgpu::CallbackTrait;
+use eframe::egui::{Button, CollapsingHeader, Color32, Sense, Stroke, UiBuilder, Vec2};
 use eframe::{egui, egui_wgpu};
 use egui_taffy::{TuiBuilderLogic, TuiWidget, tui};
 use little_exif::exif_tag::ExifTag;
@@ -21,15 +19,17 @@ use std::fs::{OpenOptions, read_to_string};
 use std::io::Write;
 use std::sync::mpsc;
 use taffy::{Overflow, prelude::*};
-use wgpu::Extent3d;
 
 use crate::image_gen::is_metadata_supported;
 use crate::types::{
-    Image, Message, PreviewRenderResources, ProbeLocation, Status, Viewport, get_precision,
+    Coloring2, Image, Message, PaintCallback, ProbeLocation, Status, Viewport, get_precision,
 };
 
 mod coloring;
 
+pub trait EditUI {
+    fn render_edit_ui(&mut self, ctx: &egui::Context, tui: &mut egui_taffy::Tui);
+}
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ViewState {
     Viewport,
@@ -38,13 +38,21 @@ pub enum ViewState {
     Output,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum UITab {
+    Explore,
+    Color,
+    Render,
+}
+
 /// The main UI state struct.
 pub struct CorgiUI {
     image_settings: Image,
-    preview_scaling: f64,
     pub status: Status,
     pub rendered_viewport: Viewport,
+    pub rendered_output_viewport: Viewport,
     pub output_viewport: Viewport,
+    output_preview_viewport: Viewport,
     view_state: ViewState,
     render_zoom_offset: f64,
     x_text_buff: String,
@@ -55,6 +63,8 @@ pub struct CorgiUI {
     mouse_down: bool,
     pub swap: bool,
     send: mpsc::Sender<Message>,
+    tab: UITab,
+    optimized_settings: Image,
 }
 
 fn input_with_label(tui: &mut egui_taffy::Tui, label: &str, widget: impl TuiWidget) {
@@ -84,8 +94,23 @@ impl CorgiUI {
         Self {
             status: Status::default(),
             rendered_viewport: image.viewport.clone(),
-            preview_scaling: 0.5,
+            rendered_output_viewport: Viewport {
+                width: 1920,
+                height: 1080,
+                scaling: image.viewport.scaling,
+                zoom: image.viewport.zoom,
+                x: image.viewport.x.clone(),
+                y: image.viewport.y.clone(),
+            },
             output_viewport: Viewport {
+                width: 1920,
+                height: 1080,
+                scaling: image.viewport.scaling,
+                zoom: image.viewport.zoom,
+                x: image.viewport.x.clone(),
+                y: image.viewport.y.clone(),
+            },
+            output_preview_viewport: Viewport {
                 width: 1920,
                 height: 1080,
                 scaling: image.viewport.scaling,
@@ -104,194 +129,26 @@ impl CorgiUI {
             mouse_down: false,
             swap: false,
             send,
+            tab: UITab::Explore,
+            optimized_settings: Image {
+                viewport: Viewport {
+                    scaling: 0.5,
+                    ..Default::default()
+                },
+                external_coloring: Coloring2::external_opt_default(),
+                internal_coloring: Coloring2::internal_opt_default(),
+                ..Default::default()
+            },
         }
     }
 
     /// Generate the UI and handle any events. This function will do some blocking
     /// to access shared data
     pub fn generate_ui(&mut self, ctx: &egui::Context) {
-        // update the image settings from the text buffers
-        let precision = get_precision(self.image().viewport.zoom);
-        if let Ok(res) = Float::parse(&self.x_text_buff) {
-            self.image_settings.viewport.x = Float::with_val(precision, res)
-        }
-        if let Ok(res) = Float::parse(&self.y_text_buff) {
-            self.image_settings.viewport.y = Float::with_val(precision, res)
-        }
-        // probe
-        if let Ok(res) = Float::parse(&self.x_probe_buff) {
-            self.image_settings.probe_location.x = Float::with_val(precision, res)
-        }
-        if let Ok(res) = Float::parse(&self.y_probe_buff) {
-            self.image_settings.probe_location.y = Float::with_val(precision, res)
-        }
-
-        ctx.style_mut(|style| {
-            style.wrap_mode = Some(egui::TextWrapMode::Extend);
-        });
-        // create the right side settings panel
         egui::SidePanel::right("settings_panel").show(ctx, |ui| {
-            tui(ui, ui.id().with("side"))
-                .reserve_available_space()
-                .reserve_width(250.0)
-                .style(taffy::Style {
-                    flex_direction: taffy::FlexDirection::Column,
-                    // min_size: taffy::Size {
-                    //     width: percent(1.0),
-                    //     height: auto(),
-                    // },
-                    size: percent(1.0),
-                    // flex_wrap: FlexWrap::NoWrap,
-                    flex_grow: 1.0,
-                    // align_items: Some(taffy::AlignItems::Stretch),
-                    // max_size: percent(1.),
-                    gap: length(8.),
-                    overflow: taffy::Point {
-                        x: Overflow::Hidden,
-                        y: Overflow::Scroll,
-                    },
-                    ..Default::default()
-                })
-                .show(|tui| {
-                    tui.heading("Corgi");
-                    tui.separator();
-                    tui.label("Viewport");
-                    if tui
-                        .enabled_ui(self.view_state == ViewState::Viewport)
-                        .ui_add(Button::new("Set Camera to View"))
-                        .clicked()
-                    {
-                        self.output_viewport.x = self.image_settings.viewport.x.clone();
-                        self.output_viewport.y = self.image_settings.viewport.y.clone();
-                        self.output_viewport.zoom = self.image_settings.viewport.zoom + 0.5;
-                        self.render_zoom_offset = -0.5;
-                        if self.view_state == ViewState::Viewport {
-                            self.view_state = ViewState::OutputView;
-                        }
-                    }
-                    if tui
-                        .ui_add(Button::new(if self.view_state == ViewState::Viewport {
-                            "Preview Camera"
-                        } else {
-                            "Exit Preview"
-                        }))
-                        .clicked()
-                    {
-                        if self.view_state == ViewState::Viewport {
-                            self.view_state = ViewState::OutputView;
-                        } else {
-                            self.view_state = ViewState::Viewport;
-                        }
-                    }
-                    if tui
-                        .ui_add(Button::new(if self.view_state != ViewState::OutputLock {
-                            "Lock Camera to View"
-                        } else {
-                            "Unlock Camera"
-                        }))
-                        .clicked()
-                    {
-                        if self.view_state == ViewState::OutputLock {
-                            self.view_state = ViewState::OutputView;
-                        } else {
-                            self.view_state = ViewState::OutputLock;
-                        }
-                    }
-                    tui.style(taffy::Style {
-                        // overflow: taffy::Point {
-                        //     x: taffy::Overflow::Scroll,
-                        //     y: taffy::Overflow::Scroll,
-                        // },
-                        size: Size {
-                            width: percent(1.0),
-                            height: auto(),
-                        },
-                        display: taffy::Display::Grid,
-                        align_items: Some(taffy::AlignItems::Stretch),
-                        justify_items: Some(taffy::AlignItems::Stretch),
-                        grid_template_rows: vec![min_content(); 4],
-                        grid_template_columns: vec![auto(), auto()],
-                        gap: length(8.),
-                        ..Default::default()
-                    })
-                    .add(|tui| {
-                        for (label, reference) in [
-                            ("real offset", &mut self.x_text_buff),
-                            ("imaginary offset", &mut self.y_text_buff),
-                            ("probe real", &mut self.x_probe_buff),
-                            ("probe imaginary", &mut self.y_probe_buff),
-                        ] {
-                            tui.label(label);
-                            tui.ui_add(egui::TextEdit::singleline(reference));
-                        }
-                    });
-                    input_with_label(
-                        tui,
-                        "Camera width",
-                        egui::DragValue::new(&mut self.output_viewport.width).speed(10.0),
-                    );
-                    input_with_label(
-                        tui,
-                        "Camera height",
-                        egui::DragValue::new(&mut self.output_viewport.height).speed(10.0),
-                    );
-                    tui.ui_add(Button::new("Set probe"))
-                        .clicked()
-                        .then(|| self.setting_probe = !self.setting_probe);
-                    input_with_label(
-                        tui,
-                        "Zoom",
-                        egui::DragValue::new(&mut self.image_settings.viewport.zoom)
-                            .speed(0.03)
-                            .update_while_editing(false),
-                    );
-                    input_with_label(
-                        tui,
-                        "Max iteration",
-                        egui::DragValue::new(&mut self.image_settings.max_iter)
-                            .speed(100.0)
-                            .range(100..=u32::MAX)
-                            .update_while_editing(false),
-                    );
-
-                    let mut scaling = (1.0 / self.preview_scaling) as u32;
-                    input_with_label(
-                        tui,
-                        "Viewport Downscaling",
-                        egui::DragValue::new(&mut scaling)
-                            .speed(0.01)
-                            .range(1..=8)
-                            .update_while_editing(false),
-                    );
-                    self.preview_scaling = 1.0 / scaling as f64;
-                    tui.separator();
-                    tui.heading("Coloring");
-                    tui.label("External");
-                    self.image_settings
-                        .external_coloring
-                        .render_edit_ui(ctx, tui);
-                    tui.label("Internal");
-                    self.image_settings
-                        .internal_coloring
-                        .render_edit_ui(ctx, tui);
-
-                    tui.separator();
-                    input_with_label(
-                        tui,
-                        "Debug parameter",
-                        egui::DragValue::new(&mut self.image_settings.misc),
-                    );
-
-                    input_with_label(
-                        tui,
-                        "Debug shutter",
-                        egui::DragValue::new(&mut self.image_settings.debug_shutter)
-                            .speed(0.003)
-                            .range(0.0..=1.0),
-                    );
-
-                    tui.separator();
-                    if tui.ui_add(Button::new("Save Image Settings")).clicked() {
+            ui.horizontal(|ui| {
+                ui.menu_button("=", |ui| {
+                    if ui.add(Button::new("Save Image Settings")).clicked() {
                         if let Some(path) = rfd::FileDialog::new()
                             .set_file_name("saved_fractal.corg")
                             .add_filter("corg", &["corg"])
@@ -319,7 +176,7 @@ impl CorgiUI {
                             }
                         }
                     }
-                    if tui.ui_add(Button::new("Load Image Settings")).clicked() {
+                    if ui.add(Button::new("Load Image Settings")).clicked() {
                         if let Some(path) = rfd::FileDialog::new()
                             .add_filter("corg", &["corg"])
                             .add_filter("image with metadata", &["jpg", "jpeg", "webp", "png"])
@@ -352,175 +209,434 @@ impl CorgiUI {
                             };
                         }
                     }
-
-                    if tui.ui_add(Button::new("Render to file")).clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("image with metadata", &["jpg", "jpeg", "webp", "png"])
-                            .add_filter(
-                                "image without metadata",
-                                &["avif", "gif", "qoi", "tiff", "exr"],
-                            )
-                            .set_file_name("fractal.png")
-                            .save_file()
+                });
+                ui.separator();
+                ui.selectable_value(&mut self.tab, UITab::Explore, "Explore");
+                ui.selectable_value(&mut self.tab, UITab::Color, "Color");
+                ui.selectable_value(&mut self.tab, UITab::Render, "Render");
+            });
+            tui(ui, ui.id().with("side"))
+                .reserve_available_space()
+                .reserve_width(250.0)
+                .style(taffy::Style {
+                    flex_direction: taffy::FlexDirection::Column,
+                    size: percent(1.0),
+                    flex_grow: 1.0,
+                    gap: length(8.),
+                    overflow: taffy::Point {
+                        x: Overflow::Hidden,
+                        y: Overflow::Scroll,
+                    },
+                    ..Default::default()
+                })
+                .show(|tui| match self.tab {
+                    UITab::Explore => {
+                        tui.heading("Viewport");
+                        tui.style(taffy::Style {
+                            size: Size {
+                                width: percent(1.0),
+                                height: auto(),
+                            },
+                            display: taffy::Display::Grid,
+                            align_items: Some(taffy::AlignItems::Stretch),
+                            justify_items: Some(taffy::AlignItems::Stretch),
+                            grid_template_rows: vec![min_content(); 4],
+                            grid_template_columns: vec![auto(), auto()],
+                            gap: length(8.),
+                            ..Default::default()
+                        })
+                        .add(|tui| {
+                            for (label, reference) in [
+                                ("real offset", &mut self.x_text_buff),
+                                ("imaginary offset", &mut self.y_text_buff),
+                                ("probe real", &mut self.x_probe_buff),
+                                ("probe imaginary", &mut self.y_probe_buff),
+                            ] {
+                                tui.label(label);
+                                tui.ui_add(egui::TextEdit::singleline(reference));
+                            }
+                        });
+                        tui.ui_add(Button::new("Set probe"))
+                            .clicked()
+                            .then(|| self.setting_probe = !self.setting_probe);
+                        input_with_label(
+                            tui,
+                            "Zoom",
+                            egui::DragValue::new(&mut self.image_settings.viewport.zoom)
+                                .speed(0.03)
+                                .update_while_editing(false),
+                        );
+                        input_with_label(
+                            tui,
+                            "Max iteration",
+                            egui::DragValue::new(&mut self.image_settings.max_iter)
+                                .speed(100.0)
+                                .range(100..=u32::MAX)
+                                .update_while_editing(false),
+                        );
+                        let mut scaling = (1.0 / self.optimized_settings.viewport.scaling) as u32;
+                        input_with_label(
+                            tui,
+                            "Viewport Downscaling",
+                            egui::DragValue::new(&mut scaling)
+                                .speed(0.01)
+                                .range(1..=8)
+                                .update_while_editing(false),
+                        );
+                        self.optimized_settings.viewport.scaling = 1.0 / scaling as f64;
+                        tui.heading("Camera");
+                        if tui
+                            .enabled_ui(self.view_state == ViewState::Viewport)
+                            .ui_add(Button::new("Set Camera to View"))
+                            .clicked()
                         {
+                            self.output_viewport.x = self.image_settings.viewport.x.clone();
+                            self.output_viewport.y = self.image_settings.viewport.y.clone();
+                            self.output_viewport.zoom = self.image_settings.viewport.zoom + 0.5;
+                            self.render_zoom_offset = -0.5;
+                            if self.view_state == ViewState::Viewport {
+                                self.view_state = ViewState::OutputView;
+                            }
+                        }
+                        if tui
+                            .ui_add(Button::new(if self.view_state == ViewState::Viewport {
+                                "Preview Camera"
+                            } else {
+                                "Exit Preview"
+                            }))
+                            .clicked()
+                        {
+                            if self.view_state == ViewState::Viewport {
+                                self.view_state = ViewState::OutputView;
+                            } else {
+                                self.view_state = ViewState::Viewport;
+                            }
+                        }
+                        if tui
+                            .ui_add(Button::new(if self.view_state != ViewState::OutputLock {
+                                "Lock Camera to View"
+                            } else {
+                                "Unlock Camera"
+                            }))
+                            .clicked()
+                        {
+                            if self.view_state == ViewState::OutputLock {
+                                self.view_state = ViewState::OutputView;
+                            } else {
+                                if self.view_state == ViewState::Viewport {
+                                    self.output_viewport.x = self.image_settings.viewport.x.clone();
+                                    self.output_viewport.y = self.image_settings.viewport.y.clone();
+                                    self.output_viewport.zoom =
+                                        self.image_settings.viewport.zoom + 0.5;
+                                    self.render_zoom_offset = -0.5;
+                                }
+                                self.view_state = ViewState::OutputLock;
+                            }
+                        }
+                        input_with_label(
+                            tui,
+                            "Camera width",
+                            egui::DragValue::new(&mut self.output_viewport.width).speed(10.0),
+                        );
+                        input_with_label(
+                            tui,
+                            "Camera height",
+                            egui::DragValue::new(&mut self.output_viewport.height).speed(10.0),
+                        );
+                    }
+                    UITab::Color => {
+                        tui.ui_add_manual(
+                            |ui| {
+                                let cr = CollapsingHeader::new("External").default_open(true).show(
+                                    ui,
+                                    |ui| {
+                                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                                        egui_taffy::tui(ui, ui.id().with("ext"))
+                                            .reserve_available_space()
+                                            .style(taffy::Style {
+                                                flex_direction: taffy::FlexDirection::Column,
+                                                size: percent(1.0),
+                                                flex_grow: 1.0,
+                                                gap: length(8.),
+                                                overflow: taffy::Point {
+                                                    x: Overflow::Hidden,
+                                                    y: Overflow::Scroll,
+                                                },
+                                                ..Default::default()
+                                            })
+                                            .show(|tui| {
+                                                self.image_settings
+                                                    .external_coloring
+                                                    .render_edit_ui(ctx, tui);
+                                            })
+                                    },
+                                );
+                                let res = cr.header_response.clone();
+                                if let Some(br) = cr.body_response {
+                                    res.union(br)
+                                } else {
+                                    res
+                                }
+                            },
+                            |res, _ui| res,
+                        );
+                        tui.ui_add_manual(
+                            |ui| {
+                                let cr = CollapsingHeader::new("Internal").default_open(true).show(
+                                    ui,
+                                    |ui| {
+                                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                                        egui_taffy::tui(ui, ui.id().with("ext"))
+                                            .reserve_available_space()
+                                            .style(taffy::Style {
+                                                flex_direction: taffy::FlexDirection::Column,
+                                                size: percent(1.0),
+                                                flex_grow: 1.0,
+                                                gap: length(8.),
+                                                overflow: taffy::Point {
+                                                    x: Overflow::Hidden,
+                                                    y: Overflow::Scroll,
+                                                },
+                                                ..Default::default()
+                                            })
+                                            .show(|tui| {
+                                                self.image_settings
+                                                    .internal_coloring
+                                                    .render_edit_ui(ctx, tui);
+                                            })
+                                    },
+                                );
+                                let res = cr.header_response.clone();
+                                if let Some(br) = cr.body_response {
+                                    res.union(br)
+                                } else {
+                                    res
+                                }
+                            },
+                            |res, _ui| res,
+                        );
+                    }
+                    UITab::Render => {
+                        input_with_label(
+                            tui,
+                            "Camera width",
+                            egui::DragValue::new(&mut self.output_viewport.width).speed(10.0),
+                        );
+                        input_with_label(
+                            tui,
+                            "Camera height",
+                            egui::DragValue::new(&mut self.output_viewport.height).speed(10.0),
+                        );
+                        if tui.ui_add(Button::new("Render")).clicked() {
                             let mut image = self.image_settings.clone();
                             image.viewport = self.output_viewport.clone();
                             let _ = self.send.send(Message::NewOutputSettings(image));
-                            let _ = self.send.send(Message::SaveToFile(path));
                         }
-                    }
-                    tui.separator();
-                    tui.label("Status");
-                    tui.label(format!("Status: {:?}", self.status.message));
-                    if let Some(progress) = self.status.progress {
-                        tui.ui_add(egui::ProgressBar::new(progress as f32));
+                        if tui.ui_add(Button::new("Save to file")).clicked() {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .add_filter("image with metadata", &["jpg", "jpeg", "webp", "png"])
+                                .add_filter(
+                                    "image without metadata",
+                                    &["avif", "gif", "qoi", "tiff", "exr"],
+                                )
+                                .set_file_name("fractal.png")
+                                .save_file()
+                            {
+                                let _ = self.send.send(Message::SaveToFile(path));
+                            }
+                        }
                     }
                 });
         });
-
-        // create the main canvas
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.scope_builder(UiBuilder::new().sense(Sense::drag()), |ui| {
-                let size = ui.available_size();
-                let (_id, rect) = ui.allocate_space(size);
+            let mut new_max_rect = ui.max_rect();
+            new_max_rect.set_height(new_max_rect.height() - 20.0);
+            ui.scope_builder(
+                UiBuilder::new().sense(Sense::drag()).max_rect(new_max_rect),
+                |ui| {
+                    let size = ui.available_size();
+                    let (_id, rect) = ui.allocate_space(size);
 
-                // handle mouse events
+                    // handle mouse events
 
-                // get input beforehand
-                let pointer_in_rect = ui.rect_contains_pointer(rect);
-                let (primary_down, pointer_pos) = ctx.input(|i| {
-                    (
-                        i.pointer.button_down(egui::PointerButton::Primary),
-                        i.pointer.interact_pos(),
-                    )
-                });
+                    // get input beforehand
+                    let pointer_in_rect = ui.rect_contains_pointer(rect);
+                    let (primary_down, pointer_pos) = ctx.input(|i| {
+                        (
+                            i.pointer.button_down(egui::PointerButton::Primary),
+                            i.pointer.interact_pos(),
+                        )
+                    });
 
-                let view_image = self.image();
-                // update image settings
-                let response = ui.response();
-                self.mouse_down = response.dragged();
-                if self.setting_probe {
-                    // probe setting mode, set the probe location to the mouse position
-                    // on click
-                    if primary_down && pointer_in_rect {
-                        if let Some(pos) = pointer_pos {
-                            let (x, y) = view_image
-                                .viewport
-                                .get_real_coords((pos.x) as f64, (size.y - pos.y) as f64);
-                            self.x_probe_buff = x.to_string_radix(10, None);
-                            self.y_probe_buff = y.to_string_radix(10, None);
-                            self.image_settings.probe_location = ProbeLocation { x, y };
-                            self.setting_probe = false;
+                    let view_image = self.image();
+                    // update image settings
+                    let response = ui.response();
+                    if self.setting_probe {
+                        // probe setting mode, set the probe location to the mouse position
+                        // on click
+                        if primary_down && pointer_in_rect {
+                            if let Some(pos) = pointer_pos {
+                                let (x, y) = view_image
+                                    .viewport
+                                    .get_real_coords((pos.x) as f64, (size.y - pos.y) as f64);
+                                self.x_probe_buff = x.to_string_radix(10, None);
+                                self.y_probe_buff = y.to_string_radix(10, None);
+                                self.image_settings.probe_location = ProbeLocation { x, y };
+                                self.setting_probe = false;
+                            }
                         }
-                    }
-                } else {
-                    // get scroll and drag inputs to change the viewport
-                    let (mut scroll, pixel_scale) =
-                        ui.input(|i| (i.smooth_scroll_delta, i.pixels_per_point));
-                    if !pointer_in_rect {
-                        scroll = Vec2::ZERO;
-                    }
-                    let drag = response.drag_delta();
+                    } else {
+                        // get scroll and drag inputs to change the viewport
+                        let (mut scroll, pixel_scale) =
+                            ui.input(|i| (i.smooth_scroll_delta, i.pixels_per_point));
+                        if !pointer_in_rect {
+                            scroll = Vec2::ZERO;
+                        }
+                        let drag = response.drag_delta();
 
-                    // scroll
-                    let precision = get_precision(view_image.viewport.zoom);
-                    let mut scale = Float::with_val(precision, 2.0);
-                    scale.pow_assign(-view_image.viewport.zoom);
-                    let aspect_scale = view_image.viewport.aspect_scale();
-                    let x_offset = -(drag.x as f64
+                        // scroll
+                        let precision = get_precision(view_image.viewport.zoom);
+                        let mut scale = Float::with_val(precision, 2.0);
+                        scale.pow_assign(-view_image.viewport.zoom);
+                        let aspect_scale = view_image.viewport.aspect_scale();
+                        let x_offset = -(drag.x as f64
                             / view_image.viewport.width as f64
                             * aspect_scale.x as f64
                             * pixel_scale as f64
                             * 1.715) // TODO: why this value? and does this work on other screens?
                             * scale.clone();
-                    let y_offset = (drag.y as f64 / view_image.viewport.height as f64
-                        * aspect_scale.y as f64
-                        * pixel_scale as f64
-                        * 1.715)
-                        * scale;
-                    match self.view_state {
-                        ViewState::Viewport => {
-                            self.image_settings.viewport.x += x_offset;
-                            self.image_settings.viewport.y += y_offset;
-                            self.image_settings.viewport.zoom +=
-                                scroll.y as f64 * pixel_scale as f64 * 0.005;
-                        }
-                        ViewState::OutputView => {
-                            if drag.x != 0.0 || drag.y != 0.0 {
-                                self.image_settings.viewport.x =
-                                    self.output_viewport.x.clone() + x_offset;
-                                self.image_settings.viewport.y =
-                                    self.output_viewport.y.clone() + y_offset;
-                                self.image_settings.viewport.zoom = view_image.viewport.zoom;
-                                self.view_state = ViewState::Viewport;
+                        let y_offset = (drag.y as f64 / view_image.viewport.height as f64
+                            * aspect_scale.y as f64
+                            * pixel_scale as f64
+                            * 1.715)
+                            * scale;
+                        match if self.tab == UITab::Render {
+                            ViewState::Output
+                        } else {
+                            self.view_state
+                        } {
+                            ViewState::Viewport => {
+                                self.image_settings.viewport.x += x_offset;
+                                self.image_settings.viewport.y += y_offset;
+                                self.image_settings.viewport.zoom +=
+                                    scroll.y as f64 * pixel_scale as f64 * 0.005;
                             }
-                            self.render_zoom_offset += scroll.y as f64 * pixel_scale as f64 * 0.005;
+                            ViewState::OutputView => {
+                                if drag.x != 0.0 || drag.y != 0.0 {
+                                    self.image_settings.viewport.x =
+                                        self.output_viewport.x.clone() + x_offset;
+                                    self.image_settings.viewport.y =
+                                        self.output_viewport.y.clone() + y_offset;
+                                    self.image_settings.viewport.zoom = view_image.viewport.zoom;
+                                    self.view_state = ViewState::Viewport;
+                                }
+                                self.render_zoom_offset +=
+                                    scroll.y as f64 * pixel_scale as f64 * 0.005;
+                            }
+                            ViewState::OutputLock => {
+                                self.output_viewport.x += x_offset;
+                                self.output_viewport.y += y_offset;
+                                self.output_viewport.zoom +=
+                                    scroll.y as f64 * pixel_scale as f64 * 0.005;
+                            }
+                            ViewState::Output => {
+                                self.output_preview_viewport.x += x_offset;
+                                self.output_preview_viewport.y += y_offset;
+                                self.output_preview_viewport.zoom +=
+                                    scroll.y as f64 * pixel_scale as f64 * 0.005;
+                            }
                         }
-                        ViewState::OutputLock => {
-                            self.output_viewport.x += x_offset;
-                            self.output_viewport.y += y_offset;
-                            self.output_viewport.zoom +=
-                                scroll.y as f64 * pixel_scale as f64 * 0.005;
-                        }
-                        ViewState::Output => {
-                            self.render_zoom_offset += scroll.y as f64 * pixel_scale as f64 * 0.005;
-                        }
+                        self.x_text_buff = self.image_settings.viewport.x.to_string_radix(10, None);
+                        self.y_text_buff = self.image_settings.viewport.y.to_string_radix(10, None);
                     }
-                    self.x_text_buff = self.image_settings.viewport.x.to_string_radix(10, None);
-                    self.y_text_buff = self.image_settings.viewport.y.to_string_radix(10, None);
-                }
 
-                self.image_settings.viewport.width = size.x as usize;
-                self.image_settings.viewport.height = size.y as usize;
+                    self.image_settings.viewport.width = size.x as usize;
+                    self.image_settings.viewport.height = size.y as usize;
 
-                // render the image
+                    // render the image
 
-                let view_image = self.image();
-                let mut render_rect = rect.scale_from_center2(
-                    egui::Vec2::splat(1.0) / view_image.viewport.aspect_scale(),
+                    let view_image = self.image();
+                    let mut render_rect = rect.scale_from_center2(
+                        egui::Vec2::splat(1.0) / view_image.viewport.aspect_scale(),
+                    );
+                    let (x, y) = view_image
+                        .viewport
+                        .coords_to_px_offset(&self.output_viewport.x, &self.output_viewport.y);
+                    render_rect = render_rect.translate(Vec2::new(x as f32, -y as f32));
+                    render_rect = render_rect.scale_from_center(f32::powf(
+                        2.0,
+                        -(self.output_viewport.zoom - view_image.viewport.zoom) as f32,
+                    ));
+                    render_rect =
+                        render_rect.scale_from_center2(self.output_viewport.aspect_scale());
+                    let cb = PaintCallback {
+                        rendered_viewport: if self.tab == UITab::Render {
+                            self.rendered_output_viewport.clone()
+                        } else {
+                            self.rendered_viewport.clone()
+                        },
+                        view: view_image.viewport,
+                        swap: self.swap,
+                        output: self.tab == UITab::Render,
+                    };
+                    self.swap = false;
+
+                    let callback = egui_wgpu::Callback::new_paint_callback(rect, cb);
+
+                    ui.painter().add(callback);
+                    if self.tab != UITab::Render {
+                        ui.painter().rect_stroke(
+                            render_rect.intersect(rect),
+                            0.0,
+                            Stroke::new(2.0, Color32::from_gray(255)),
+                            egui::StrokeKind::Outside,
+                        );
+                    }
+                },
+            );
+            ui.horizontal_centered(|ui| {
+                ui.scope_builder(
+                    UiBuilder::new().max_rect(ui.max_rect().with_max_x(100.0)),
+                    |ui| {
+                        if let Some(progress) = self.status.progress {
+                            ui.add(egui::ProgressBar::new(progress as f32));
+                        } else {
+                            ui.add_space(ui.available_width() + ui.spacing().item_spacing.x / 2.0);
+                        }
+                    },
                 );
-                let (x, y) = view_image
-                    .viewport
-                    .coords_to_px_offset(&self.output_viewport.x, &self.output_viewport.y);
-                render_rect = render_rect.translate(Vec2::new(x as f32, -y as f32));
-                render_rect = render_rect.scale_from_center(f32::powf(
-                    2.0,
-                    -(self.output_viewport.zoom - view_image.viewport.zoom) as f32,
-                ));
-                render_rect = render_rect.scale_from_center2(self.output_viewport.aspect_scale());
-                let cb = PaintCallback {
-                    rendered_viewport: self.rendered_viewport.clone(),
-                    view: view_image.viewport,
-                    swap: self.swap,
-                };
-                self.swap = false;
-
-                let callback = egui_wgpu::Callback::new_paint_callback(rect, cb);
-
-                ui.painter().add(callback);
-                ui.painter().rect_stroke(
-                    render_rect.intersect(rect),
-                    0.0,
-                    Stroke::new(2.0, Color32::from_gray(255)),
-                    egui::StrokeKind::Outside,
-                );
-            });
+                ui.separator();
+                ui.label(&self.status.message)
+            })
         });
     }
 
     /// Get the image settings
     pub fn image(&self) -> Image {
-        match self.view_state {
-            ViewState::Viewport => {
-                let mut output = self.image_settings.clone();
-                output.viewport.scaling = self.preview_scaling;
+        match self.tab {
+            UITab::Explore | UITab::Color => {
+                let mut output = match self.view_state {
+                    ViewState::Viewport => self.image_settings.clone(),
+                    ViewState::OutputView | ViewState::OutputLock | ViewState::Output => {
+                        let mut output = self.image_settings.clone();
+                        output.viewport.x = self.output_viewport.x.clone();
+                        output.viewport.y = self.output_viewport.y.clone();
+                        output.viewport.zoom = self.output_viewport.zoom + self.render_zoom_offset;
+                        output
+                    }
+                };
+                if self.tab == UITab::Explore {
+                    output.viewport.scaling = self.optimized_settings.viewport.scaling;
+                    output.external_coloring = self.optimized_settings.external_coloring.clone();
+                    output.internal_coloring = self.optimized_settings.internal_coloring.clone();
+                }
                 output
             }
-            ViewState::OutputView | ViewState::OutputLock | ViewState::Output => {
+            UITab::Render => {
                 let mut output = self.image_settings.clone();
-                output.viewport.x = self.output_viewport.x.clone();
-                output.viewport.y = self.output_viewport.y.clone();
-                output.viewport.zoom = self.output_viewport.zoom + self.render_zoom_offset;
+                output.viewport.x = self.output_preview_viewport.x.clone();
+                output.viewport.y = self.output_preview_viewport.y.clone();
+                output.viewport.zoom = self.output_preview_viewport.zoom;
                 output
             }
         }
@@ -529,6 +645,10 @@ impl CorgiUI {
     /// Get the mouse down state
     pub fn mouse_down(&self) -> bool {
         self.mouse_down
+    }
+
+    pub fn is_render(&self) -> bool {
+        self.tab == UITab::Render
     }
 }
 
@@ -543,54 +663,4 @@ fn read_settings_from_image(path: &std::path::Path) -> Result<Image> {
     };
     let image = Image::deserialize_json(desc)?;
     Ok(image)
-}
-
-struct PaintCallback {
-    rendered_viewport: crate::types::Viewport,
-    view: crate::types::Viewport,
-    swap: bool,
-}
-
-impl CallbackTrait for PaintCallback {
-    fn prepare(
-        &self,
-        device: &eframe::wgpu::Device,
-        queue: &eframe::wgpu::Queue,
-        _screen_descriptor: &egui_wgpu::ScreenDescriptor,
-        _egui_encoder: &mut eframe::wgpu::CommandEncoder,
-        callback_resources: &mut egui_wgpu::CallbackResources,
-    ) -> Vec<eframe::wgpu::CommandBuffer> {
-        let res = callback_resources
-            .get_mut::<PreviewRenderResources>()
-            .expect("Failed to get render resources");
-        if self.swap {
-            // copy the preview texture to the used texture
-            tracing::debug!("Swapping");
-            res.swap(device, queue);
-        }
-
-        let extents = Extent3d::from(&self.rendered_viewport);
-        let size = (extents.width, extents.height);
-        if size != *res.size() {
-            // resize the render resources, refreshing the texture reference
-            res.resize(device, queue, size)
-                .expect("Failed to resize render resources");
-        }
-        let transforms = self.rendered_viewport.transforms_from(&self.view);
-
-        res.prepare(device, queue, transforms);
-        Vec::new()
-    }
-
-    fn paint(
-        &self,
-        _info: egui::PaintCallbackInfo,
-        render_pass: &mut eframe::wgpu::RenderPass<'static>,
-        callback_resources: &egui_wgpu::CallbackResources,
-    ) {
-        callback_resources
-            .get::<PreviewRenderResources>()
-            .expect("Failed to get render resources")
-            .paint(render_pass);
-    }
 }

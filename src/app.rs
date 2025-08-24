@@ -63,7 +63,7 @@ impl CorgiApp {
         let mut worker_state = WorkerState::new(
             wgpu,
             initial_image.clone(),
-            output_image,
+            output_image.clone(),
             worker_recv,
             worker_send,
             cancelled,
@@ -75,7 +75,11 @@ impl CorgiApp {
             wgpu.target_format,
             worker_state.preview_texture(),
             worker_state.output_texture(),
-            (extents.width as u32, extents.height as u32),
+            (extents.width, extents.height),
+            (
+                output_image.viewport.width as u32,
+                output_image.viewport.height as u32,
+            ),
         )?;
         wgpu.renderer.write().callback_resources.insert(resources);
         thread::spawn(move || {
@@ -115,6 +119,13 @@ impl eframe::App for CorgiApp {
                         Instant::now() - self.last_send_time
                     );
                 }
+                StatusMessage::NewOutputViewport(calc_time, viewport) => {
+                    self.ui_state.status.message = "Finished rendering output".into();
+                    self.ui_state.status.progress = None;
+                    self.ui_state.rendered_output_viewport = viewport;
+                    self.ui_state.swap = true;
+                    tracing::debug!("Finished in {calc_time:?}");
+                }
             }
         }
         self.ui_state.generate_ui(ctx);
@@ -128,7 +139,7 @@ impl eframe::App for CorgiApp {
             // - the image is different
             // - the image has not changed for a full frame
             let mouse_down = ctx.input(|is| is.pointer.primary_down());
-            if self.last_rendered != image {
+            if !self.ui_state.is_render() && self.last_rendered != image {
                 let diff = image.comp(&self.last_rendered);
                 let calc_time = if diff.reprobe || diff.recompute {
                     self.last_calc_time

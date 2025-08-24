@@ -1,8 +1,9 @@
-use std::{num::NonZeroU64, sync::Arc};
+use std::sync::Arc;
 
 use color_eyre::Result;
 use eframe::{
-    egui::mutex::RwLock,
+    egui::{self, mutex::RwLock},
+    egui_wgpu::{self, CallbackTrait},
     wgpu::{self, Device, include_wgsl, util::DeviceExt},
 };
 use wgpu::{Extent3d, Queue};
@@ -10,25 +11,43 @@ use wgpu::{Extent3d, Queue};
 use super::Transform;
 
 /// Resources necessary for rendering the preview image
-pub struct PreviewRenderResources {
+struct SubResources {
     format: wgpu::TextureFormat,
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     texture_bind_group: wgpu::BindGroup,
     uniform_buffer: wgpu::Buffer,
     texture: wgpu::Texture,
-    preview_texture: Arc<RwLock<wgpu::Texture>>,
-    output_texture: Arc<RwLock<wgpu::Texture>>,
+    shared_texture: Arc<RwLock<wgpu::Texture>>,
     size: (u32, u32),
 }
 
+pub struct PreviewRenderResources {
+    preview: SubResources,
+    output: SubResources,
+}
+
 impl PreviewRenderResources {
-    /// Create a new set of preview render resources
     pub fn init(
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
         preview_texture: Arc<RwLock<wgpu::Texture>>,
         output_texture: Arc<RwLock<wgpu::Texture>>,
+        preview_size: (u32, u32),
+        output_size: (u32, u32),
+    ) -> Result<Self> {
+        let preview = SubResources::init(device, format, preview_texture, preview_size)?;
+        let output = SubResources::init(device, format, output_texture, output_size)?;
+        Ok(Self { preview, output })
+    }
+}
+
+impl SubResources {
+    /// Create a new set of preview render resources
+    pub fn init(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        shared_texture: Arc<RwLock<wgpu::Texture>>,
         size: (u32, u32),
     ) -> Result<Self> {
         let shader = device.create_shader_module(include_wgsl!("../shaders/preview.wgsl"));
@@ -56,7 +75,7 @@ impl PreviewRenderResources {
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
-                    min_binding_size: NonZeroU64::new(16),
+                    min_binding_size: None,
                 },
                 count: None,
             }],
@@ -153,7 +172,8 @@ impl PreviewRenderResources {
             label: Some("Preview Uniform Buffer"),
             contents: bytemuck::cast_slice(&[Transform {
                 angle: 0.0,
-                scale: 0.0,
+                _padding: 0.0,
+                scale: [1.0; 2],
                 offset: [0.0; 2],
             }]),
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
@@ -175,8 +195,7 @@ impl PreviewRenderResources {
             texture_bind_group,
             uniform_buffer,
             texture,
-            preview_texture,
-            output_texture,
+            shared_texture,
             size,
         })
     }
@@ -187,8 +206,7 @@ impl PreviewRenderResources {
         *self = Self::init(
             device,
             self.format,
-            self.preview_texture.clone(),
-            self.output_texture.clone(),
+            self.shared_texture.clone(),
             new_size,
         )?;
         self.swap(device, queue);
@@ -196,13 +214,13 @@ impl PreviewRenderResources {
     }
 
     pub fn swap(&self, device: &Device, queue: &Queue) {
-        if self.texture.size() != self.preview_texture.read().size() {
+        if self.texture.size() != self.shared_texture.read().size() {
             return;
         }
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         encoder.copy_texture_to_texture(
-            self.preview_texture.read().as_image_copy(),
+            self.shared_texture.read().as_image_copy(),
             self.texture.as_image_copy(),
             self.texture.size(),
         );
@@ -225,5 +243,66 @@ impl PreviewRenderResources {
     /// Get the size of the preview
     pub fn size(&self) -> &(u32, u32) {
         &self.size
+    }
+}
+
+pub struct PaintCallback {
+    pub rendered_viewport: crate::types::Viewport,
+    pub view: crate::types::Viewport,
+    pub swap: bool,
+    pub output: bool,
+}
+
+impl CallbackTrait for PaintCallback {
+    fn prepare(
+        &self,
+        device: &eframe::wgpu::Device,
+        queue: &eframe::wgpu::Queue,
+        _screen_descriptor: &egui_wgpu::ScreenDescriptor,
+        _egui_encoder: &mut eframe::wgpu::CommandEncoder,
+        callback_resources: &mut egui_wgpu::CallbackResources,
+    ) -> Vec<eframe::wgpu::CommandBuffer> {
+        let res = callback_resources
+            .get_mut::<PreviewRenderResources>()
+            .expect("Failed to get render resources");
+        let res = if self.output {
+            &mut res.output
+        } else {
+            &mut res.preview
+        };
+        if self.swap {
+            // copy the preview texture to the used texture
+            tracing::debug!("Swapping");
+            res.swap(device, queue);
+        }
+
+        let extents = Extent3d::from(&self.rendered_viewport);
+        let size = (extents.width, extents.height);
+        if size != *res.size() {
+            // resize the render resources, refreshing the texture reference
+            res.resize(device, queue, size)
+                .expect("Failed to resize render resources");
+        }
+        let transforms = self.rendered_viewport.transforms_from(&self.view);
+
+        res.prepare(device, queue, transforms);
+        Vec::new()
+    }
+
+    fn paint(
+        &self,
+        _info: egui::PaintCallbackInfo,
+        render_pass: &mut eframe::wgpu::RenderPass<'static>,
+        callback_resources: &egui_wgpu::CallbackResources,
+    ) {
+        let res = callback_resources
+            .get::<PreviewRenderResources>()
+            .expect("Failed to get render resources");
+        let res = if self.output {
+            &res.output
+        } else {
+            &res.preview
+        };
+        res.paint(render_pass);
     }
 }
