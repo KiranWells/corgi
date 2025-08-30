@@ -6,6 +6,7 @@ use std::{
 
 use color_eyre::eyre::{Result, eyre};
 use eframe::{egui::Vec2, wgpu::Extent3d};
+use egui_material_icons::icons;
 use little_exif::{exif_tag::ExifTag, metadata::Metadata};
 use nanoserde::{DeJson, SerJson};
 use rug::{
@@ -200,6 +201,29 @@ pub enum LayerKind {
     // OrbitTrap(OrbitTrapLayer),
     // Normal(NormalLayer),
     // Stripe(StripeLayer),
+}
+
+impl LayerKind {
+    pub fn text(self) -> &'static str {
+        match self {
+            LayerKind::None => "None",
+            LayerKind::Step => "Step Count",
+            LayerKind::SmoothStep => "Smooth Step Count",
+            LayerKind::Distance => "Distance Estimate",
+            LayerKind::OrbitTrap => "Orbit Trap",
+            LayerKind::Stripe => "Stripe Average",
+        }
+    }
+    pub fn icon_text(self) -> String {
+        match self {
+            LayerKind::None => format!("{} None", icons::ICON_REMOVE_SELECTION),
+            LayerKind::Step => format!("{} Step Count", icons::ICON_STAIRS_2),
+            LayerKind::SmoothStep => format!("{} Smooth Step Count", icons::ICON_ELEVATION),
+            LayerKind::Distance => format!("{} Distance Estimate", icons::ICON_TARGET),
+            LayerKind::OrbitTrap => format!("{} Orbit Trap", icons::ICON_ORBIT),
+            LayerKind::Stripe => format!("{} Stripe Average", icons::ICON_AIRWAVE),
+        }
+    }
 }
 
 // pub struct StepLayer {}

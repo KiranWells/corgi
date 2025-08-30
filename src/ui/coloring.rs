@@ -1,8 +1,12 @@
 use std::mem::discriminant;
 
-use super::{EditUI, input_with_label};
+use super::{
+    EditUI, input_with_label,
+    utils::{collapsible, ui_with_label},
+};
 use crate::types::{Coloring2, Gradient, Layer, LayerKind, Light, LightingKind, Overlays};
-use eframe::egui;
+use eframe::egui::{self, RichText};
+use egui_material_icons::icons;
 use egui_taffy::TuiBuilderLogic;
 use taffy::prelude::*;
 
@@ -11,6 +15,34 @@ fn color_edit(tui: &mut egui_taffy::Tui, color: &mut [f32; 3]) {
         |ui| egui::widgets::color_picker::color_edit_button_rgb(ui, color),
         |res, _ui| res,
     );
+}
+
+fn pseudo_color_edit(tui: &mut egui_taffy::Tui, color: &mut [f32; 3]) {
+    tui.style(Style {
+        flex_direction: FlexDirection::Row,
+        gap: length(8.0),
+        ..Default::default()
+    })
+    .add(|tui| {
+        tui.ui_add(
+            egui::DragValue::new(&mut color[0])
+                .speed(0.003)
+                .fixed_decimals(3),
+        );
+        tui.ui_add(
+            egui::DragValue::new(&mut color[1])
+                .speed(0.003)
+                .fixed_decimals(3),
+        );
+        tui.ui_add(
+            egui::DragValue::new(&mut color[2])
+                .speed(0.003)
+                .fixed_decimals(3),
+        );
+        if color.map(|x| (0.0..=1.0).contains(&x)).iter().all(|x| *x) {
+            color_edit(tui, color);
+        }
+    });
 }
 
 impl EditUI for Coloring2 {
@@ -29,36 +61,39 @@ impl EditUI for Coloring2 {
                 .speed(0.003)
                 .range(0.0..=f32::MAX),
         );
-        input_with_label(
-            tui,
-            "Color frequency",
-            egui::DragValue::new(&mut self.color_frequency).speed(0.003),
-        );
-        input_with_label(
-            tui,
-            "Color offset",
-            egui::DragValue::new(&mut self.color_offset)
-                .speed(0.003)
-                .range(0.0..=1.0),
-        );
         tui.separator();
-
-        self.gradient.render_edit_ui(ctx, tui);
-        tui.separator();
-        self.color_layers.render_edit_ui(ctx, tui);
-        tui.separator();
-        self.lighting_kind.render_edit_ui(ctx, tui);
-        if self.lighting_kind != LightingKind::Flat {
-            self.light_layers.render_edit_ui(ctx, tui);
-        }
-        if self.lighting_kind == LightingKind::Shaded {
-            for light in self.lights.iter_mut() {
-                light.render_edit_ui(ctx, tui);
+        collapsible(tui, "Colors", |tui| {
+            input_with_label(
+                tui,
+                "Gradient repeat frequency",
+                egui::DragValue::new(&mut self.color_frequency).speed(0.003),
+            );
+            input_with_label(
+                tui,
+                "Gradient offset",
+                egui::DragValue::new(&mut self.color_offset)
+                    .speed(0.003)
+                    .range(0.0..=1.0),
+            );
+            self.gradient.render_edit_ui(ctx, tui);
+            self.color_layers.render_edit_ui(ctx, tui);
+            tui.separator();
+        });
+        collapsible(tui, "Lighting", |tui| {
+            self.lighting_kind.render_edit_ui(ctx, tui);
+            if self.lighting_kind != LightingKind::Flat {
+                self.light_layers.render_edit_ui(ctx, tui);
             }
-        }
-        tui.separator();
-        tui.label("Overlays");
-        self.overlays.render_edit_ui(ctx, tui);
+            if self.lighting_kind == LightingKind::Shaded {
+                for light in self.lights.iter_mut() {
+                    light.render_edit_ui(ctx, tui);
+                }
+            }
+            tui.separator();
+        });
+        collapsible(tui, "Overlays", |tui| {
+            self.overlays.render_edit_ui(ctx, tui);
+        });
     }
 }
 
@@ -78,7 +113,7 @@ impl EditUI for Gradient {
         let mut tmp = discriminant(self);
         tui.ui_add_manual(
             |ui| {
-                egui::ComboBox::from_label("Gradient")
+                egui::ComboBox::from_label("Gradient Type")
                     .selected_text(label)
                     .show_ui(ui, |ui| {
                         ui.selectable_value(&mut tmp, flat, "Flat");
@@ -108,21 +143,15 @@ impl EditUI for Gradient {
 
         match self {
             Gradient::Flat(color) => {
-                tui.add(|tui| {
+                ui_with_label(tui, "Color", |tui| {
                     color_edit(tui, color);
                 });
             }
             Gradient::Procedural(colors) => {
-                tui.style(taffy::Style {
-                    flex_direction: FlexDirection::Row,
-                    ..Default::default()
-                })
-                .add(|tui| {
-                    color_edit(tui, &mut colors[0]);
-                    color_edit(tui, &mut colors[1]);
-                    color_edit(tui, &mut colors[2]);
-                    color_edit(tui, &mut colors[3]);
-                });
+                pseudo_color_edit(tui, &mut colors[0]);
+                pseudo_color_edit(tui, &mut colors[1]);
+                pseudo_color_edit(tui, &mut colors[2]);
+                pseudo_color_edit(tui, &mut colors[3]);
             }
             Gradient::Manual(colors) => {
                 let [a, b, c] = colors;
@@ -130,19 +159,19 @@ impl EditUI for Gradient {
                 let (b_stop, b) = b.split_first_chunk_mut::<3>().unwrap();
                 let (c_stop, c) = c.split_first_chunk_mut::<3>().unwrap();
                 tui.style(taffy::Style {
-                    flex_direction: FlexDirection::Row,
+                    display: taffy::Display::Grid,
+                    // align_items: Some(taffy::AlignItems::Stretch),
+                    // justify_items: Some(taffy::AlignItems::Stretch),
+                    grid_template_rows: vec![min_content(); 2],
+                    grid_template_columns: vec![min_content(); 3],
+                    align_items: Some(AlignItems::Center),
+                    gap: length(8.),
                     ..Default::default()
                 })
                 .add(move |tui| {
                     color_edit(tui, a_stop);
                     color_edit(tui, b_stop);
                     color_edit(tui, c_stop);
-                });
-                tui.style(taffy::Style {
-                    flex_direction: FlexDirection::Row,
-                    ..Default::default()
-                })
-                .add(move |tui| {
                     tui.ui_add(
                         egui::DragValue::new(&mut a[0])
                             .speed(0.003)
@@ -357,47 +386,75 @@ impl EditUI for LightingKind {
 
 impl EditUI for [Layer; 8] {
     fn render_edit_ui(&mut self, ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
+        let valid_ct = self.iter().filter(|l| l.kind == LayerKind::None).count();
+        let mut add = false;
+        tui.style(Style {
+            justify_content: Some(AlignContent::SpaceBetween),
+            ..Default::default()
+        })
+        .add(|tui| {
+            tui.label(RichText::new("Layers").strong());
+            if valid_ct < 8 {
+                add = tui
+                    .button(|tui| {
+                        tui.label(format!("{} Add Layer", icons::ICON_ADD));
+                    })
+                    .clicked();
+            }
+        });
         let mut layer_ct = 0;
         let mut new_layers = [Layer::default(); 8];
         for layer in self.iter_mut() {
             if layer.kind == LayerKind::None {
                 break;
             }
-            tui.style(Style {
-                flex_direction: FlexDirection::Row,
-                ..Default::default()
-            })
-            .add(|tui| {
-                tui.label(layer_ct.to_string());
+            let mut remove = false;
+            let mut dup = false;
+            collapsible(tui, &layer.kind.icon_text(), |tui| {
+                layer.render_edit_ui(ctx, tui);
                 tui.style(Style {
-                    flex_direction: FlexDirection::Column,
-                    align_items: Some(AlignItems::Start),
-                    padding: Rect {
-                        left: length(5.0),
-                        right: length(5.0),
-                        top: length(0.0),
-                        bottom: length(0.0),
+                    flex_direction: FlexDirection::Row,
+                    gap: length(4.0),
+                    size: Size {
+                        width: percent(1.0),
+                        height: auto(),
                     },
-                    gap: length(5.0),
                     ..Default::default()
                 })
                 .add(|tui| {
-                    layer.render_edit_ui(ctx, tui);
-                    if !tui.button(|tui| tui.label("Remove")).clicked() {
-                        new_layers[layer_ct] = *layer;
-                        layer_ct += 1;
+                    remove = tui
+                        .style(Style {
+                            flex_grow: 1.0,
+                            ..Default::default()
+                        })
+                        .button(|tui| {
+                            tui.label(format!("{} Remove", icons::ICON_REMOVE_CIRCLE_OUTLINE))
+                        })
+                        .clicked();
+                    if valid_ct < 8 {
+                        dup = tui
+                            .style(Style {
+                                flex_grow: 1.0,
+                                ..Default::default()
+                            })
+                            .button(|tui| {
+                                tui.label(format!("{} Duplicate", icons::ICON_TAB_DUPLICATE))
+                            })
+                            .clicked();
                     }
-                })
+                });
             });
+            if !remove {
+                new_layers[layer_ct] = *layer;
+                layer_ct += 1;
+            }
+            if dup {
+                new_layers[layer_ct] = *layer;
+                layer_ct += 1;
+            }
         }
         *self = new_layers;
-        if layer_ct < 8
-            && tui
-                .button(|tui| {
-                    tui.label("Add Layer");
-                })
-                .clicked()
-        {
+        if layer_ct < 8 && add {
             self[layer_ct] = Layer {
                 kind: LayerKind::Step,
                 strength: 1.0,

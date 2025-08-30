@@ -46,6 +46,7 @@ impl CorgiApp {
             .wgpu_render_state
             .as_ref()
             .expect("Eframe must be launched with the wgpu backend");
+        egui_material_icons::initialize(&cc.egui_ctx);
         let (ui_send, worker_recv) = mpsc::channel::<Message>();
         let (worker_send, ui_recv) = mpsc::channel::<StatusMessage>();
         let cancelled = Arc::new(AtomicBool::new(false));

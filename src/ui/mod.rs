@@ -6,8 +6,9 @@ This module contains the main UI state struct and its implementation, which
 contains the code necessary to update internal state and render the ui.
  */
 
-use eframe::egui::{Button, Color32, ScrollArea, Sense, Stroke, UiBuilder, Vec2};
+use eframe::egui::{Button, Color32, ScrollArea, Sense, Stroke, TextStyle, UiBuilder, Vec2};
 use eframe::{egui, egui_wgpu};
+use egui_material_icons::icons;
 use egui_taffy::{TuiBuilderLogic, tui};
 use rug::{Float, ops::PowAssign};
 use std::sync::mpsc;
@@ -99,7 +100,8 @@ impl CorgiUI {
     pub fn generate_ui(&mut self, ctx: &egui::Context) {
         egui::SidePanel::right("settings_panel").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.menu_button("=", |ui| {
+                ui.style_mut().override_text_style = Some(TextStyle::Heading);
+                ui.menu_button(icons::ICON_MENU, |ui| {
                     if ui.add(Button::new("Save Image Settings")).clicked() {
                         if let Some(path) = rfd::FileDialog::new()
                             .set_file_name("saved_fractal.corg")
@@ -134,14 +136,26 @@ impl CorgiUI {
                         }
                     }
                 });
-                ui.separator();
-                ui.selectable_value(&mut self.tab, UITab::Explore, "Explore");
-                ui.selectable_value(&mut self.tab, UITab::Color, "Color");
-                ui.selectable_value(&mut self.tab, UITab::Render, "Render");
+                ui.selectable_value(
+                    &mut self.tab,
+                    UITab::Explore,
+                    format!("{} Explore", icons::ICON_EXPLORE),
+                );
+                ui.selectable_value(
+                    &mut self.tab,
+                    UITab::Color,
+                    format!("{} Style", icons::ICON_STYLE),
+                );
+                ui.selectable_value(
+                    &mut self.tab,
+                    UITab::Render,
+                    format!("{} Render", icons::ICON_IMAGE),
+                );
             });
+            ui.separator();
             ScrollArea::vertical().show(ui, |ui| {
                 tui(ui, ui.id().with("side"))
-                    .reserve_width(250.0)
+                    .reserve_available_width()
                     .style(taffy::Style {
                         flex_direction: taffy::FlexDirection::Column,
                         size: percent(1.0),
@@ -165,13 +179,16 @@ impl CorgiUI {
                                 );
                                 point_edit(
                                     tui,
-                                    "Probe Location",
+                                    "Probe Point",
                                     get_precision(self.image().viewport.zoom),
                                     &mut self.image_settings.probe_location,
                                 );
-                                tui.ui_add(Button::new("Set probe"))
-                                    .clicked()
-                                    .then(|| self.setting_probe = !self.setting_probe);
+                                tui.ui_add(Button::new(format!(
+                                    "{} Pick new probe point",
+                                    icons::ICON_POINT_SCAN
+                                )))
+                                .clicked()
+                                .then(|| self.setting_probe = !self.setting_probe);
                                 input_with_label(
                                     tui,
                                     "Zoom",
@@ -202,7 +219,10 @@ impl CorgiUI {
                             collapsible(tui, "Camera", |tui| {
                                 if tui
                                     .enabled_ui(self.view_state == ViewState::Viewport)
-                                    .ui_add(Button::new("Set Camera to View"))
+                                    .ui_add(Button::new(format!(
+                                        "{} Set Camera to View",
+                                        icons::ICON_CROP_FREE
+                                    )))
                                     .clicked()
                                 {
                                     self.output_viewport.center =
@@ -217,9 +237,9 @@ impl CorgiUI {
                                 if tui
                                     .ui_add(Button::new(
                                         if self.view_state == ViewState::Viewport {
-                                            "Preview Camera"
+                                            format!("{} Preview Camera", icons::ICON_FRAME_INSPECT)
                                         } else {
-                                            "Exit Preview"
+                                            format!("{} Exit Preview", icons::ICON_BACK_TO_TAB)
                                         },
                                     ))
                                     .clicked()
@@ -233,9 +253,9 @@ impl CorgiUI {
                                 if tui
                                     .ui_add(Button::new(
                                         if self.view_state != ViewState::OutputLock {
-                                            "Lock Camera to View"
+                                            format!("{} Lock Camera to View", icons::ICON_LOCK)
                                         } else {
-                                            "Unlock Camera"
+                                            format!("{} Unlock Camera", icons::ICON_LOCK_OPEN)
                                         },
                                     ))
                                     .clicked()
@@ -268,16 +288,14 @@ impl CorgiUI {
                             });
                         }
                         UITab::Color => {
-                            collapsible(tui, "External", |tui| {
-                                self.image_settings
-                                    .external_coloring
-                                    .render_edit_ui(ctx, tui);
-                            });
-                            collapsible(tui, "Internal", |tui| {
-                                self.image_settings
-                                    .internal_coloring
-                                    .render_edit_ui(ctx, tui);
-                            });
+                            tui.heading("External");
+                            self.image_settings
+                                .external_coloring
+                                .render_edit_ui(ctx, tui);
+                            tui.heading("Internal");
+                            self.image_settings
+                                .internal_coloring
+                                .render_edit_ui(ctx, tui);
                         }
                         UITab::Render => {
                             input_with_label(

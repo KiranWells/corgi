@@ -10,6 +10,7 @@ bytemuck = { version = "1.23", features = ["derive"] }
 clap = { version = "4.5.43", features = ["derive"] }
 color-eyre = "0.6"
 eframe = { version = "0.32.0", default-features = false, features = ["default_fonts","wayland","wgpu","x11"] }
+egui_material_icons = "0.4.0"
 egui_taffy = "0.8.0"
 image = "0.25"
 little_exif = "0.6.14"
