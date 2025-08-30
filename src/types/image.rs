@@ -1,9 +1,19 @@
+use std::{
+    fs::{OpenOptions, read_to_string},
+    io::Write,
+    path::PathBuf,
+};
+
+use color_eyre::eyre::{Result, eyre};
 use eframe::{egui::Vec2, wgpu::Extent3d};
+use little_exif::{exif_tag::ExifTag, metadata::Metadata};
 use nanoserde::{DeJson, SerJson};
 use rug::{
     Float,
     ops::{CompleteRound, PowAssign},
 };
+
+use crate::image_gen::is_metadata_supported;
 
 use super::get_precision;
 
@@ -37,14 +47,11 @@ pub struct Viewport {
     pub height: usize,
     pub scaling: f64,
     pub zoom: f64,
-    #[nserde(proxy = "FloatParser")]
-    pub x: Float,
-    #[nserde(proxy = "FloatParser")]
-    pub y: Float,
+    pub center: ComplexPoint,
 }
 
 #[derive(Debug, Clone, PartialEq, DeJson, SerJson)]
-pub struct ProbeLocation {
+pub struct ComplexPoint {
     #[nserde(proxy = "FloatParser")]
     pub x: Float,
     #[nserde(proxy = "FloatParser")]
@@ -57,7 +64,7 @@ pub struct ProbeLocation {
 pub struct Image {
     pub viewport: Viewport,
     pub max_iter: u64,
-    pub probe_location: ProbeLocation,
+    pub probe_location: ComplexPoint,
     pub external_coloring: Coloring2,
     pub internal_coloring: Coloring2,
     pub misc: f32,
@@ -499,10 +506,11 @@ impl Viewport {
         let scale = f32::powf(2.0, -(self.zoom - other.zoom) as f32);
         let mut this_scale = Float::with_val(get_precision(self.zoom), 2.0);
         this_scale.pow_assign(-self.zoom);
-        let aspect_scale = self.aspect_scale() / other.aspect_scale();
+        let self_aspect = self.aspect_scale();
+        let aspect_scale = self_aspect / other.aspect_scale();
         let offset: [Float; 2] = [
-            (self.x.clone() - other.x.clone()) / this_scale.clone() / aspect_scale.x,
-            (self.y.clone() - other.y.clone()) / this_scale / aspect_scale.y,
+            (self.center.x.clone() - other.center.x.clone()) / this_scale.clone() / self_aspect.x,
+            (self.center.y.clone() - other.center.y.clone()) / this_scale / self_aspect.y,
         ];
         Transform {
             angle: 0.0,
@@ -534,9 +542,9 @@ impl Viewport {
         let aspect_scale = self.aspect_scale();
 
         let r = ((x / self.width as f64) * 2.0 - 1.0) * scale.clone() * aspect_scale.x
-            + Float::with_val(precision, &self.x);
+            + Float::with_val(precision, &self.center.x);
         let i = ((y / self.height as f64) * 2.0 - 1.0) * scale.clone() * aspect_scale.y
-            + Float::with_val(precision, &self.y);
+            + Float::with_val(precision, &self.center.y);
         (r, i)
     }
 
@@ -548,8 +556,9 @@ impl Viewport {
         scale.pow_assign(-self.zoom);
         let aspect_scale = self.aspect_scale();
 
-        let x = ((r.clone() - self.x.clone()) / scale.clone()).to_f64() / aspect_scale.x as f64;
-        let y = ((i.clone() - self.y.clone()) / scale).to_f64() / aspect_scale.y as f64;
+        let x =
+            ((r.clone() - self.center.x.clone()) / scale.clone()).to_f64() / aspect_scale.x as f64;
+        let y = ((i.clone() - self.center.y.clone()) / scale).to_f64() / aspect_scale.y as f64;
         (x * 0.5 * self.width as f64, y * 0.5 * self.height as f64)
     }
 
@@ -572,8 +581,10 @@ impl Default for Viewport {
             height: 512,
             scaling: 1.0,
             zoom: -1.0,
-            x: Float::with_val(53, -0.5),
-            y: Float::with_val(53, 0.0),
+            center: ComplexPoint {
+                x: Float::with_val(53, -0.5),
+                y: Float::with_val(53, 0.0),
+            },
         }
     }
 }
@@ -658,21 +669,38 @@ impl Image {
         }
     }
 
-    pub fn estimate_calc_time(&self, previous: Option<&Self>) -> std::time::Duration {
-        let diff = previous
-            .map(|img| self.comp(img))
-            .unwrap_or(ImageDiff::full());
-        let mut calc_time_ms = 0;
-        if diff.reprobe {
-            calc_time_ms += self.max_iter / 1000;
+    pub fn load_from_file(path: &PathBuf) -> Result<Self> {
+        let image = if is_metadata_supported(path) {
+            let meta = Metadata::new_from_path(path)?;
+            let tag = meta
+                .get_tag(&ExifTag::ImageDescription(String::new()))
+                .next()
+                .ok_or(eyre!("No Description tag"))?;
+            let ExifTag::ImageDescription(desc) = tag else {
+                return Err(eyre!("Tag is not a Description"));
+            };
+            Image::deserialize_json(desc)?
+        } else {
+            read_to_string(path)
+                .map_err(color_eyre::Report::from)
+                .and_then(|s| Image::deserialize_json(&s).map_err(color_eyre::Report::from))?
+        };
+        Ok(image)
+    }
+
+    pub fn save_to_file(&self, path: &PathBuf) -> Result<()> {
+        let mut file = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(path)?;
+        let serialized = self.serialize_json();
+        let written_amt = file.write(serialized.as_bytes())?;
+        if written_amt < serialized.len() {
+            Err(eyre!("Failed to write all of the image!"))
+        } else {
+            Ok(())
         }
-        if diff.recompute {
-            calc_time_ms += self.max_iter / 1000 + (self.viewport.zoom / 2.0) as u64;
-        }
-        if diff.resize {
-            calc_time_ms += 1;
-        }
-        std::time::Duration::from_millis(calc_time_ms)
     }
 }
 
@@ -680,7 +708,7 @@ impl Default for Image {
     fn default() -> Self {
         Self {
             viewport: Viewport::default(),
-            probe_location: ProbeLocation {
+            probe_location: ComplexPoint {
                 x: Float::with_val(53, -0.5),
                 y: Float::with_val(53, 0.0),
             },

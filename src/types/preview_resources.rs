@@ -203,12 +203,7 @@ impl SubResources {
     /// Resize the render resources. This must be called when the render thread resizes,
     /// and will refresh the texture view and the uniform buffer.
     pub fn resize(&mut self, device: &Device, queue: &Queue, new_size: (u32, u32)) -> Result<()> {
-        *self = Self::init(
-            device,
-            self.format,
-            self.shared_texture.clone(),
-            new_size,
-        )?;
+        *self = Self::init(device, self.format, self.shared_texture.clone(), new_size)?;
         self.swap(device, queue);
         Ok(())
     }

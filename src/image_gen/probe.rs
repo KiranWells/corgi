@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use crate::types::{ESCAPE_RADIUS, ProbeLocation, get_precision};
+use crate::types::{ComplexPoint, ESCAPE_RADIUS, get_precision};
 use rug::Float;
 
 /// # FromFloat
@@ -26,7 +26,7 @@ impl FromFloat for f32 {
 /// Generates a vector of iterated points for a given complex number in the mandelbrot set.
 /// The resulting vector will be of length `max_iter` or less if the point escapes.
 pub fn probe<T>(
-    ProbeLocation { x, y }: &ProbeLocation,
+    ComplexPoint { x, y }: &ComplexPoint,
     max_iter: u64,
     zoom: f64,
 ) -> (Vec<[T; 2]>, Vec<[T; 2]>)

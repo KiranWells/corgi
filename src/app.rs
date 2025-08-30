@@ -1,6 +1,4 @@
 use clap::Parser;
-use nanoserde::DeJson;
-use std::fs::read_to_string;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -54,7 +52,7 @@ impl CorgiApp {
         let mut initial_image = Image::default();
         let output_image = Image::default();
         if let Some(image_file) = &cli_options.image_file {
-            initial_image = Image::deserialize_json(read_to_string(image_file)?.as_str())?
+            initial_image = Image::load_from_file(image_file)?
         }
         let ctx = cc.egui_ctx.clone();
         ctx.options_mut(|options| {

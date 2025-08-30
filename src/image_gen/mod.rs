@@ -308,14 +308,14 @@ fn run_compute_step(
     let (compute_pipeline, x, y, probe_len) = match image.algorithm() {
         crate::types::Algorithm::Directf32 => (
             direct_f32_pipeline,
-            image.viewport.x.to_f32(),
-            image.viewport.y.to_f32(),
+            image.viewport.center.x.to_f32(),
+            image.viewport.center.y.to_f32(),
             image.max_iter as usize,
         ),
         crate::types::Algorithm::Perturbedf32 => (
             perturbed_f32_pipeline,
-            (image.viewport.x.clone() - image.probe_location.x.clone()).to_f32(),
-            (image.viewport.y.clone() - image.probe_location.y.clone()).to_f32(),
+            (image.viewport.center.x.clone() - image.probe_location.x.clone()).to_f32(),
+            (image.viewport.center.y.clone() - image.probe_location.y.clone()).to_f32(),
             probed_data.0.len(),
         ),
     };
