@@ -121,7 +121,9 @@ impl eframe::App for CorgiApp {
                 StatusMessage::NewOutputViewport(calc_time, viewport) => {
                     self.ui_state.status.message = "Finished rendering output".into();
                     self.ui_state.status.progress = None;
-                    self.ui_state.rendered_output_viewport = viewport;
+                    self.ui_state.rendered_output_viewport = viewport.clone();
+                    self.ui_state.output_preview_viewport = viewport;
+                    self.ui_state.output_preview_viewport.zoom -= 1.0;
                     self.ui_state.swap = true;
                     tracing::debug!("Finished in {calc_time:?}");
                 }

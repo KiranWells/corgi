@@ -48,7 +48,7 @@ pub struct CorgiUI {
     pub rendered_viewport: Viewport,
     pub rendered_output_viewport: Viewport,
     pub output_viewport: Viewport,
-    output_preview_viewport: Viewport,
+    pub output_preview_viewport: Viewport,
     view_state: ViewState,
     render_zoom_offset: f64,
     setting_probe: bool,
