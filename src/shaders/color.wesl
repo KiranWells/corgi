@@ -4,8 +4,8 @@ import super::utils::{hsv2rgb, rgb2hsv, isnan, isinf, debug, TAU};
 @group(0) @binding(0) var<storage> step_buffer : array<i32>;
 @group(0) @binding(1) var<storage> orbit_buffer : array<vec4f>;
 @group(0) @binding(2) var<storage> stripe_buffer : array<vec4f>;
-@group(0) @binding(3) var<storage> z_buffer : array<vec2f>;
-@group(0) @binding(4) var<storage> dz_buffer : array<vec2f>;
+@group(0) @binding(3) var<storage> z_buffer : array<vec3f>;
+@group(0) @binding(4) var<storage> dz_buffer : array<vec3f>;
 
 // texture
 @group(1) @binding(0) var final_texture: texture_storage_2d<rgba8unorm, write>;
@@ -76,8 +76,8 @@ fn calculate_lighting_layers(x: u32, y: u32, color_params: ColorParams) -> f32 {
     let pixel_index = x + y * render_params.width;
     var step = step_buffer[pixel_index];
     let orbits = orbit_buffer[pixel_index];
-    let z = z_buffer[pixel_index];
-    let dz = dz_buffer[pixel_index];
+    let z = z_buffer[pixel_index].xy;
+    let dz = dz_buffer[pixel_index].xy;
     let stripes = stripe_buffer[pixel_index];
 
     let r = length(z);
@@ -140,8 +140,8 @@ fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let pixel_index = global_id.x + global_id.y * render_params.width;
     var step = step_buffer[pixel_index];
     let orbits = orbit_buffer[pixel_index];
-    let z = z_buffer[pixel_index];
-    let dz = dz_buffer[pixel_index];
+    let z = z_buffer[pixel_index].xy;
+    let dz = dz_buffer[pixel_index].xy;
     let stripes = stripe_buffer[pixel_index];
 
     let r = length(z);

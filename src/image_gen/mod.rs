@@ -312,12 +312,17 @@ fn run_compute_step(
             image.viewport.center.y.to_f32(),
             image.max_iter as usize,
         ),
-        crate::types::Algorithm::Perturbedf32 => (
-            perturbed_f32_pipeline,
-            (image.viewport.center.x.clone() - image.probe_location.x.clone()).to_f32(),
-            (image.viewport.center.y.clone() - image.probe_location.y.clone()).to_f32(),
-            probed_data.0.len(),
-        ),
+        crate::types::Algorithm::Perturbedf32 => {
+            let (x, y) = image
+                .viewport
+                .coords_to_px_offset(&image.probe_location.x, &image.probe_location.y);
+            (
+                perturbed_f32_pipeline,
+                x as f32 / image.viewport.width as f32,
+                y as f32 / image.viewport.height as f32,
+                probed_data.0.len(),
+            )
+        }
     };
 
     // Compute passes have encountered timeouts on some GPUs, so we split the compute passes into

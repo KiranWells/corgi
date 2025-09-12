@@ -109,15 +109,15 @@ https://gbillotey.github.io/Fractalshades-doc/math.html#f1
     - [x] 32-bit direct calculation
     - [ ] 64-bit floating precision - requires a shading language other than wgsl (unless the extension gets supported)
     - [x] 32-bit probed point
-        - [ ] with floatexp for derivative, since it underflows sooner
+        - [-] with floatexp for derivative, since it underflows sooner
     - [ ] 64-bit probed point
-    - [ ] extended range floating point
+    - [x] extended range floating point
         - https://andrewthall.org/papers/df64_qf128.pdf
         - https://github.com/clickingbuttons/jeditrader/blob/a921a0e/shaders/src/fp64.wgsl
             - could be used for f64 polyfill as well
         - or entended exponent (floatexp):
             - (f32, i32)
-- [ ] use floatexp for exported data for coloring shader, since it can handle the reduced performance regardless of whether it is needed
+- [x] use floatexp for exported data for coloring shader, since it can handle the reduced performance regardless of whether it is needed
 - [?] hdr
 - [ ] additional coloring algorithms
     - [x] non-smooth iteration
@@ -131,8 +131,8 @@ https://gbillotey.github.io/Fractalshades-doc/math.html#f1
     - interior:
         - [/] orbit traps
         - [ ] interior distance estimation
-- [ ] more flexible color formulas:
-    - [ ] user-defined gradient
+- [x] more flexible color formulas:
+    - [x] user-defined gradient
         - [x] generated gradients
         - non-smooth/smooth iteration, stripe-average, distance estimation, gradient
     - [x] togglable overlays:
@@ -195,9 +195,10 @@ https://gbillotey.github.io/Fractalshades-doc/math.html#f1
     - [x] import/export text
     - [x] CLI import
     - [ ] drag and drop
-    - [ ] rendered image metadata for reproduction    - little_exif library
+    - [x] rendered image metadata for reproduction    - little_exif library
 - [x] Add rendering controls
     - width, height, output location, format
+    - [x] explore viewport downscaling
     - [ ] anti-aliasing
 - [x] ~Add custom controls~ - egui has a native drag input
     - unbounded inputs - drag up or down for adjusting (or scroll), shift for higher precision

@@ -25,7 +25,7 @@ pub const MAX_GPU_GROUP_ITER: usize = 10000;
 
 /// Get the precision for a given zoom level
 pub fn get_precision(zoom: f64) -> u32 {
-    ((zoom * 1.5) as u32).max(53)
+    ((zoom * 1.25) as u32).max(53)
 }
 
 #[derive(Debug)]

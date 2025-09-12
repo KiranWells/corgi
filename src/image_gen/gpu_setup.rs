@@ -329,8 +329,8 @@ impl Buffers {
         let image_size = viewport.buffer_size();
         Self {
             probe: Self::create_buffer::<f32>(device, MAX_GPU_GROUP_ITER * 2 * 2, HostWritable),
-            delta_n: Self::create_buffer::<f32>(device, image_size * 2, ShaderOnly),
-            delta_prime: Self::create_buffer::<f32>(device, image_size * 2, ShaderOnly),
+            delta_n: Self::create_buffer::<f32>(device, image_size * 4, ShaderOnly),
+            delta_prime: Self::create_buffer::<f32>(device, image_size * 4, ShaderOnly),
             compute_parameters: Self::create_buffer::<ComputeParams>(device, 1, Uniform),
             external_coloring: Self::create_buffer::<ColorParams>(device, 1, Uniform),
             internal_coloring: Self::create_buffer::<ColorParams>(device, 1, Uniform),
@@ -363,8 +363,8 @@ impl Buffers {
         use BuffType::*;
         // replace all sized buffers (not uniforms or probe)
         let image_size = new_view.buffer_size();
-        self.delta_n = Self::create_buffer::<f32>(device, image_size * 2, ShaderOnly);
-        self.delta_prime = Self::create_buffer::<f32>(device, image_size * 2, ShaderOnly);
+        self.delta_n = Self::create_buffer::<f32>(device, image_size * 4, ShaderOnly);
+        self.delta_prime = Self::create_buffer::<f32>(device, image_size * 4, ShaderOnly);
         self.step = Self::create_buffer::<u32>(device, image_size, ShaderOnly);
         self.orbits = Self::create_buffer::<f32>(device, image_size * 4, ShaderOnly);
         self.stripes = Self::create_buffer::<f32>(device, image_size * 4, ShaderOnly);

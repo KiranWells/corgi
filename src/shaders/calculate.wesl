@@ -1,11 +1,11 @@
-import super::utils::{ESCAPE_RADIUS};
+import super::utils::{ESCAPE_RADIUS, isnan, isinf};
 
 // inputs
 @group(0) @binding(0) var<storage> probed_point : array<vec2<f32>>;
 
 // intermediate buffers
-@group(0) @binding(1) var<storage, read_write> delta_grid_iter : array<vec2<f32>>;
-@group(0) @binding(2) var<storage, read_write> delta_grid_prime : array<vec2<f32>>;
+@group(0) @binding(1) var<storage, read_write> delta_grid_iter : array<vec3<f32>>;
+@group(0) @binding(2) var<storage, read_write> delta_grid_prime : array<vec3<f32>>;
 
 // outputs
 @group(0) @binding(3) var<storage, read_write> intermediate_step : array<i32>;
@@ -26,6 +26,8 @@ struct Params {
 };
 @group(1) @binding(0) var<uniform> params : Params;
 
+const SCALE_FACTOR = 5.0;
+
 @compute @workgroup_size(16, 16, 1)
 fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let i = global_id.x;
@@ -44,7 +46,6 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if params.iter_offset != 0u && intermediate_step[buffer_index] != 0 {
         return;
     }
-    let scale = pow(2.0, -params.zoom);
     var aspect_scale = vec2<f32>(1.0, 1.0);
     let aspect = f32(params.width) / f32(params.height);
     if aspect< 1.0 {
@@ -52,15 +53,19 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
     } else {
         aspect_scale.y = 1.0 / aspect;
     }
-    let offset = vec2<f32>(f32(i) / f32(params.width), f32(j) / f32(params.height));
+    let offset = vec2(-params.x, -params.y) + vec2<f32>(f32(i) / f32(params.width), f32(j) / f32(params.height));
 
-    let delta_0 = vec2<f32>(params.x, params.y) + (offset - 0.5) * 2.0 * scale * aspect_scale;
+    var delta_0 = ((offset - 0.5) * 2.0) * aspect_scale;
+    var zoom_0 = -params.zoom;
+    var zoom = zoom_0;
+    var zoom_prime = 0.0;
     let c = vec2(params.cx, params.cy);
-    let y_0 = c + delta_0;
+    let y_0 = c + delta_0 * pow(2.0, zoom_0);
     var delta_n: vec2<f32>;
     var delta_n_prime: vec2<f32>;
-    var x_old = vec2f(ESCAPE_RADIUS);
+    var x_old = vec2f(ESCAPE_RADIUS * 2);
     var delta_old = vec2f(-ESCAPE_RADIUS);
+    var zoom_old = 0.0;
     var orbits = vec4f(1.0);
     var stripes = vec4f(0.0);
     var prev_stripes: vec4f;
@@ -69,8 +74,10 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
         delta_n_prime = vec2(0.0);
         intermediate_step[buffer_index] = 0;
     } else {
-        delta_n = delta_grid_iter[buffer_index];
-        delta_n_prime = delta_grid_prime[buffer_index];
+        delta_n = delta_grid_iter[buffer_index].xy;
+        zoom = delta_grid_iter[buffer_index].z;
+        delta_n_prime = delta_grid_prime[buffer_index].xy;
+        zoom_prime = delta_grid_prime[buffer_index].z;
         orbits = orbit_traps[buffer_index];
         stripes = stripes_buffer[buffer_index];
     };
@@ -84,12 +91,15 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
     for (var step = 0u; step < params.probe_len; step = step + 1u) {
         let x_n = probed_point[step];
         let x_n_prime = probed_point[step + params.probe_len];
+        var scale = pow(2.0, zoom);
+        var scale_0 = pow(2.0, zoom_0 - zoom);
+        var scale_prime = pow(2.0, - zoom_prime);
 
-        let y_n = x_n + delta_n;
+        let y_n = x_n + delta_n * scale;
         if !(step < 2u && params.iter_offset == 0) {
             angles += acos(dot(normalize(y_n - previous), line));
             line = normalize(previous - y_n);
-            let distance = length(((x_n - c)-delta_0) + delta_n);
+            let distance = length(x_n + delta_n * scale - (c + delta_0 * pow(2.0, zoom_0)));
             if distance < closest {
                 total_angle = angles;
                 min_iter = step + params.iter_offset;
@@ -100,26 +110,28 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         // test if the point is already outside the escape radius
         let radius_squared = y_n.x * y_n.x + y_n.y * y_n.y;
-        if radius_squared > ESCAPE_RADIUS || all(x_n - x_old == delta_n - delta_old) {
+        if radius_squared > ESCAPE_RADIUS || (step > 100u && all((x_n - x_old) * pow(2.0, -zoom) == delta_n - delta_old * pow(2.0, zoom_old-zoom))) {
             // update the output values
             if radius_squared > ESCAPE_RADIUS {
                 intermediate_step[buffer_index] = i32(params.iter_offset + step);
                 let frac = -1.0 + log2(2.0 * log(ESCAPE_RADIUS)) - log2(0.5 * log(radius_squared));
                 stripes_buffer[buffer_index] = stripes / f32(params.iter_offset + step) * frac + prev_stripes / f32(params.iter_offset + step - 1) * (1.0 - frac);
-                let y_n_prime = x_n_prime + delta_n_prime;
-                delta_grid_prime[buffer_index] = y_n_prime;
+                let y_n_prime = x_n_prime + delta_n_prime * scale / scale_prime;
+                delta_grid_prime[buffer_index] = vec3(delta_n_prime * pow(2.0, zoom_prime + zoom_0), -zoom_0);
             } else {
                 intermediate_step[buffer_index] = -i32(min_iter);
                 stripes_buffer[buffer_index] = stripes / f32(params.iter_offset + step);
-                delta_grid_prime[buffer_index] = vec2(total_angle, 0.0);
+                // TODO: calculate second derivative for internal distance est.
+                delta_grid_prime[buffer_index] = vec3(total_angle);
             }
-            delta_grid_iter[buffer_index] = y_n;
+            delta_grid_iter[buffer_index] = vec3(y_n, zoom);
             orbit_traps[buffer_index] = orbits;
             return;
         }
         if (step >= 100u && (step - 100u) % 1024u == 0) {
             x_old = x_n;
             delta_old = delta_n;
+            zoom_old = zoom;
         }
 
         // calculate the next iteration according to the perturbation formula
@@ -127,17 +139,33 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // delta_n_prime = 2 * x_n * delta_n_prime + 2 * x_n_prime * delta_n + 2 * delta_n_prime * delta_n
         // Δₙ'_real = (2×xₙ_r×Δₙ'_r - 2×xₙ_i×Δₙ'_i) + (2×xₙ'_r×Δₙ_r - 2×xₙ'_i×Δₙ_i) + (2×Δₙ'_r×Δₙ_r - 2×Δₙ'_i×Δₙ_i);
         // Δₙ'_imag = 2(xₙ_r×Δₙ'_i + xₙ_i×Δₙ'_r) + 2(xₙ'_r×Δₙ_i + xₙ'_i×Δₙ_r) + 2(Δₙ'_r×Δₙ_i + Δₙ'_i×Δₙ_r);
-        delta_n_prime = vec2<f32>(
-            2.0 * (x_n.x * delta_n_prime.x - x_n.y * delta_n_prime.y + x_n_prime.x * delta_n.x - x_n_prime.y * delta_n.y + delta_n_prime.x * delta_n.x - delta_n_prime.y * delta_n.y),
-            2.0 * (x_n.x * delta_n_prime.y + x_n.y * delta_n_prime.x + x_n_prime.x * delta_n.y + x_n_prime.y * delta_n.x + delta_n_prime.x * delta_n.y + delta_n_prime.y * delta_n.x)
+        delta_n_prime = vec2(
+            2.0 * (y_n.x * delta_n_prime.x - y_n.y * delta_n_prime.y) + 1.0 * scale_prime,
+            2.0 * (y_n.y * delta_n_prime.x + y_n.x * delta_n_prime.y)
         );
         // delta_n = 2 * x_n * delta_n - delta_n^2 + delta_0
         // Δₙ_real = 2×xₙ_r×Δₙ_r - 2×xₙ_i×Δₙ_i + Δₙ_r×Δₙ_r - Δₙ_i×Δₙ_i + Δ₀_r;
         // Δₙ_imag = 2×xₙ_r×Δₙ_i + 2×xₙ_i×Δₙ_r + 2×Δₙ_r×Δₙ_i + Δ₀_i;
         delta_n = vec2<f32>(
-            2.0 * x_n.x * delta_n.x - 2.0 * x_n.y * delta_n.y + delta_n.x * delta_n.x - delta_n.y * delta_n.y + delta_0.x,
-            2.0 * x_n.x * delta_n.y + 2.0 * x_n.y * delta_n.x + 2.0 * delta_n.x * delta_n.y + delta_0.y
+            2.0 * x_n.x * delta_n.x - 2.0 * x_n.y * delta_n.y + (delta_n.x * delta_n.x - delta_n.y * delta_n.y) * scale + delta_0.x * scale_0,
+            2.0 * x_n.x * delta_n.y + 2.0 * x_n.y * delta_n.x + (2.0 * delta_n.x * delta_n.y) * scale + delta_0.y * scale_0
         );
+        if all(abs(delta_n) < vec2(pow(2.0, -SCALE_FACTOR))) {
+            delta_n *= pow(2.0, SCALE_FACTOR);
+            zoom -= SCALE_FACTOR;
+        }
+        if all(abs(delta_n) > vec2(pow(2.0, SCALE_FACTOR))) {
+            delta_n *= pow(2.0, -SCALE_FACTOR);
+            zoom += SCALE_FACTOR;
+        }
+        if all(abs(delta_n_prime) < vec2(pow(2.0, -SCALE_FACTOR))) {
+            delta_n_prime *= pow(2.0, SCALE_FACTOR);
+            zoom_prime -= SCALE_FACTOR;
+        }
+        if all(abs(delta_n_prime) > vec2(pow(2.0, SCALE_FACTOR))) {
+            delta_n_prime *= pow(2.0, -SCALE_FACTOR);
+            zoom_prime += SCALE_FACTOR;
+        }
 
         // orbit trap around origin
         if !(step == 0u && params.iter_offset == 0) {
@@ -154,16 +182,24 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
     stripes_buffer[buffer_index] = stripes;
     let x_n = probed_point[params.probe_len - 1u];
     let x_n_prime = probed_point[params.probe_len * 2u - 1u];
-    let y_n = x_n + delta_n;
-    let y_n_prime = x_n_prime + delta_n_prime;
+    var scale = pow(2.0, zoom);
+    var scale_prime = pow(2.0, zoom_prime);
+    if isnan(scale) {
+        scale = 0.0;
+    }
+    if isnan(scale_prime) {
+        scale_prime = 0.0;
+    }
+    let y_n = x_n + delta_n * scale;
+    let y_n_prime = x_n_prime + delta_n_prime * scale_prime;
     if params.iter_offset + params.probe_len >= params.max_iter {
         // this is the last iter
         intermediate_step[buffer_index] = -i32(min_iter);
         stripes_buffer[buffer_index] = stripes / f32(params.max_iter);
-        delta_grid_iter[buffer_index] = y_n;
-        delta_grid_prime[buffer_index] = vec2(total_angle, 0.0);
+        delta_grid_iter[buffer_index] = vec3(y_n, 0.0);
+        delta_grid_prime[buffer_index] = vec3(delta_n_prime * pow(2.0, zoom_prime + zoom_0), zoom_0);
     } else {
-        delta_grid_iter[buffer_index] = delta_n;
-        delta_grid_prime[buffer_index] = delta_n_prime;
+        delta_grid_iter[buffer_index] = vec3(delta_n, zoom);
+        delta_grid_prime[buffer_index] = vec3(delta_n_prime, zoom_prime);
     }
 }

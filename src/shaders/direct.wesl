@@ -4,8 +4,8 @@ import super::utils::{ESCAPE_RADIUS};
 @group(0) @binding(0) var<storage> probed_point : array<vec2<f32>>;
 
 // intermediate buffers
-@group(0) @binding(1) var<storage, read_write> z_grid_iter : array<vec2<f32>>;
-@group(0) @binding(2) var<storage, read_write> z_grid_prime : array<vec2<f32>>;
+@group(0) @binding(1) var<storage, read_write> z_grid_iter : array<vec3<f32>>;
+@group(0) @binding(2) var<storage, read_write> z_grid_prime : array<vec3<f32>>;
 
 // outputs
 @group(0) @binding(3) var<storage, read_write> intermediate_step : array<i32>;
@@ -66,8 +66,8 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
         z_n_prime = vec2f(1.0, 0.0);
         intermediate_step[buffer_index] = 0;
     } else {
-        z_n = z_grid_iter[buffer_index];
-        z_n_prime = z_grid_prime[buffer_index];
+        z_n = z_grid_iter[buffer_index].xy;
+        z_n_prime = z_grid_prime[buffer_index].xy;
         orbits = orbit_traps[buffer_index];
         stripes = stripes_buffer[buffer_index];
     };
@@ -81,20 +81,18 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // test if the point is already outside the escape radius
         let radius_squared = z_n.x * z_n.x + z_n.y * z_n.y;
         if radius_squared > ESCAPE_RADIUS || all(z_n == z_old) {
-            // set the sentinel value to indicate that the point has escaped
-            z_grid_iter[buffer_index] = vec2<f32>(-ESCAPE_RADIUS - 1.0, 0.0);
             // update the output values
             if radius_squared > ESCAPE_RADIUS {
                 intermediate_step[buffer_index] = i32(params.iter_offset + step);
                 let frac = -1.0 + log2(2.0 * log(ESCAPE_RADIUS)) - log2(0.5 * log(radius_squared));
                 stripes_buffer[buffer_index] = stripes / f32(params.iter_offset + step) * frac + prev_stripes / f32(params.iter_offset + step - 1) * (1.0 - frac);
-                z_grid_prime[buffer_index] = z_n_prime;
+                z_grid_prime[buffer_index] = vec3(z_n_prime * pow(2.0, -params.zoom), params.zoom);
             } else {
                 intermediate_step[buffer_index] = -i32(min_iter);
                 stripes_buffer[buffer_index] = stripes / f32(params.iter_offset + step);
-                z_grid_prime[buffer_index] = vec2(total_angle, 0.0);
+                z_grid_prime[buffer_index] = vec3(total_angle);
             }
-            z_grid_iter[buffer_index] = z_n;
+            z_grid_iter[buffer_index] = vec3(z_n, 0.0);
             orbit_traps[buffer_index] = orbits;
             return;
         }
@@ -141,12 +139,12 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // update the output values
     orbit_traps[buffer_index] = orbits;
     stripes_buffer[buffer_index] = stripes;
-    z_grid_iter[buffer_index] = z_n;
-    z_grid_prime[buffer_index] = z_n_prime;
+    z_grid_iter[buffer_index] = vec3(z_n, 0.0);
+    z_grid_prime[buffer_index] = vec3(z_n_prime, 0.0);
     if params.iter_offset + params.probe_len >= params.max_iter {
         // this is the last iter
         intermediate_step[buffer_index] = -i32(min_iter);
         stripes_buffer[buffer_index] = stripes / f32(params.max_iter);
-        z_grid_prime[buffer_index] = vec2(total_angle, 0.0);
+        z_grid_prime[buffer_index] = vec3(total_angle);
     }
 }
