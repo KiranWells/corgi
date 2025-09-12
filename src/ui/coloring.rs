@@ -386,7 +386,7 @@ impl EditUI for LightingKind {
 
 impl EditUI for [Layer; 8] {
     fn render_edit_ui(&mut self, ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
-        let valid_ct = self.iter().filter(|l| l.kind == LayerKind::None).count();
+        let valid_ct = self.iter().filter(|l| l.kind != LayerKind::None).count();
         let mut add = false;
         tui.style(Style {
             justify_content: Some(AlignContent::SpaceBetween),

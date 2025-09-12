@@ -596,6 +596,12 @@ impl Viewport {
     pub fn buffer_size(&self) -> usize {
         (self.width as f64 * self.scaling) as usize * (self.height as f64 * self.scaling) as usize
     }
+
+    pub fn update_prec(&mut self) {
+        let prec = get_precision(self.zoom);
+        self.center.x = Float::with_val(prec, self.center.x.clone());
+        self.center.y = Float::with_val(prec, self.center.y.clone());
+    }
 }
 
 impl Default for Viewport {

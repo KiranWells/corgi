@@ -405,6 +405,7 @@ impl CorgiUI {
                                     self.image_settings.viewport.center.y += y_offset;
                                     self.image_settings.viewport.zoom +=
                                         scroll.y as f64 * pixel_scale as f64 * 0.005;
+                                    self.image_settings.viewport.update_prec();
                                 }
                                 ViewState::OutputView => {
                                     if drag.x != 0.0 || drag.y != 0.0 {
@@ -414,6 +415,7 @@ impl CorgiUI {
                                             self.output_viewport.center.y.clone() + y_offset;
                                         self.image_settings.viewport.zoom =
                                             view_image.viewport.zoom;
+                                        self.image_settings.viewport.update_prec();
                                         self.view_state = ViewState::Viewport;
                                     }
                                     self.render_zoom_offset +=
@@ -424,12 +426,14 @@ impl CorgiUI {
                                     self.output_viewport.center.y += y_offset;
                                     self.output_viewport.zoom +=
                                         scroll.y as f64 * pixel_scale as f64 * 0.005;
+                                    self.output_viewport.update_prec();
                                 }
                                 ViewState::Output => {
                                     self.output_preview_viewport.center.x += x_offset;
                                     self.output_preview_viewport.center.y += y_offset;
                                     self.output_preview_viewport.zoom +=
                                         scroll.y as f64 * pixel_scale as f64 * 0.005;
+                                    self.output_viewport.update_prec();
                                 }
                             }
                         }
