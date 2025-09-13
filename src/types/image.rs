@@ -309,6 +309,7 @@ pub struct ComputeParams {
     pub width: u32,
     pub height: u32,
     pub max_iter: u32,
+    pub chunk_max_iter: u32,
     pub probe_len: u32,
     pub iter_offset: u32,
     pub x: f32,
@@ -474,10 +475,23 @@ impl Coloring2 {
                 Layer::default(),
                 Layer::default(),
             ],
-            lighting_kind: LightingKind::Flat,
-            light_layers: [Layer::default(); 8],
+            lighting_kind: LightingKind::Gradient,
+            light_layers: [
+                Layer {
+                    kind: LayerKind::Distance,
+                    strength: 0.6,
+                    param: 0.0,
+                },
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+                Layer::default(),
+            ],
             lights: [
-                Light::new([1.0, 1.0, 1.0], 1.0, [0.0, 0.5, 0.8]),
+                Light::new([1.0, 1.0, 1.0], 3.0, [0.0, 0.1, 0.9]),
                 Light::new([0.5, 0.6, 1.0], 1.0, [0.8, 0.0, 0.6]),
                 Light::new([1.0, 0.8, 0.4], 1.0, [0.0, 0.8, 0.5]),
             ],
@@ -676,11 +690,15 @@ impl Image {
         // if the viewport has changed, resize the GPU data
         let resize = self.viewport.width != other.viewport.width
             || self.viewport.height != other.viewport.height
-            || self.viewport.scaling != other.viewport.scaling;
+            || self.viewport.scaling != other.viewport.scaling
+            || self.max_iter != other.max_iter;
         // if the max iteration or probe location has changed, re-run the probe
         let reprobe = self.max_iter != other.max_iter
             || self.probe_location.x != other.probe_location.x
-            || self.probe_location.y != other.probe_location.y;
+            || self.probe_location.y != other.probe_location.y
+            || self.viewport.algorithm() == Algorithm::Perturbedf32
+                && other.viewport.algorithm() == Algorithm::Directf32
+            || resize;
         // if the probe location has changed or the image viewport has changed, re-generate the delta grid
         // if the image generation parameters have changed, re-run the compute shader
         let recompute =

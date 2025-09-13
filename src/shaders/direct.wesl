@@ -2,21 +2,23 @@ import super::utils::{ESCAPE_RADIUS};
 
 // inputs
 @group(0) @binding(0) var<storage> probed_point : array<vec2<f32>>;
+@group(0) @binding(1) var<storage> probed_point_prime : array<vec2<f32>>;
 
 // intermediate buffers
-@group(0) @binding(1) var<storage, read_write> z_grid_iter : array<vec3<f32>>;
-@group(0) @binding(2) var<storage, read_write> z_grid_prime : array<vec3<f32>>;
+@group(0) @binding(2) var<storage, read_write> z_grid_iter : array<vec3<f32>>;
+@group(0) @binding(3) var<storage, read_write> z_grid_prime : array<vec3<f32>>;
 
 // outputs
-@group(0) @binding(3) var<storage, read_write> intermediate_step : array<i32>;
-@group(0) @binding(4) var<storage, read_write> orbit_traps : array<vec4f>;
-@group(0) @binding(5) var<storage, read_write> stripes_buffer : array<vec4f>;
+@group(0) @binding(4) var<storage, read_write> intermediate_step : array<i32>;
+@group(0) @binding(5) var<storage, read_write> orbit_traps : array<vec4f>;
+@group(0) @binding(6) var<storage, read_write> stripes_buffer : array<vec4f>;
 
 struct Params {
     width: u32,
     height: u32,
     max_iter: u32,
     probe_len: u32,
+    chunk_max_iter: u32,
     iter_offset: u32,
     x: f32,
     y: f32,
@@ -77,7 +79,7 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var angles = 0.0;
     var total_angle = 0.0;
 
-    for (var step = 0u; step < params.probe_len; step = step + 1u) {
+    for (var step = 0u; step < params.chunk_max_iter; step = step + 1u) {
         // test if the point is already outside the escape radius
         let radius_squared = z_n.x * z_n.x + z_n.y * z_n.y;
         if radius_squared > ESCAPE_RADIUS || all(z_n == z_old) {
@@ -141,7 +143,7 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
     stripes_buffer[buffer_index] = stripes;
     z_grid_iter[buffer_index] = vec3(z_n, 0.0);
     z_grid_prime[buffer_index] = vec3(z_n_prime, 0.0);
-    if params.iter_offset + params.probe_len >= params.max_iter {
+    if params.iter_offset + params.chunk_max_iter >= params.max_iter {
         // this is the last iter
         intermediate_step[buffer_index] = -i32(min_iter);
         stripes_buffer[buffer_index] = stripes / f32(params.max_iter);

@@ -19,7 +19,7 @@ use eframe::{
 };
 use wgpu::ShaderModule;
 
-use crate::types::{ColorParams, ComputeParams, MAX_GPU_GROUP_ITER, RenderParams, Viewport};
+use crate::types::{ColorParams, ComputeParams, RenderParams, Viewport};
 
 /// A struct containing all of the GPU handles for the application
 /// and the data needed to render an image. Use the `init` function
@@ -63,7 +63,7 @@ pub struct SharedState {
 pub struct Buffers {
     // compute input
     pub probe: Buffer,
-    // pub probe_prime: Buffer,
+    pub probe_prime: Buffer,
     pub delta_n: Buffer,
     pub delta_prime: Buffer,
     // parameters
@@ -114,13 +114,13 @@ impl SharedState {
 
 impl GPUData {
     /// Initializes the GPU handles for use in rendering an image.
-    pub fn init(viewport: &Viewport, shared: SharedState, label: &str) -> Self {
+    pub fn init(viewport: &Viewport, max_iter: usize, shared: SharedState, label: &str) -> Self {
         let device = &shared.device;
 
         let texture = Self::create_texture(device, viewport);
         let final_texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let buffers = Buffers::init(device, viewport);
+        let buffers = Buffers::init(device, viewport, max_iter);
         let (bind_groups, compute_pipeline_layout, render_pipeline_layout) =
             BindGroups::init(device, &buffers, &final_texture_view);
 
@@ -177,12 +177,12 @@ impl GPUData {
 
     /// Resizes the image to the new viewport and recreates necessary handles.
     /// Any objects which created a texture view of the image will need to recreate it.
-    pub fn resize(&mut self, new_view: &Viewport) {
+    pub fn resize(&mut self, new_view: &Viewport, max_iter: usize) {
         // recreate the texture with the new size
         let texture = Self::create_texture(&self.shared.device, new_view);
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        self.buffers.resize(new_view, &self.shared.device);
+        self.buffers.resize(new_view, max_iter, &self.shared.device);
 
         let (bind_groups, compute_pipeline_layout, render_pipeline_layout) =
             BindGroups::init(&self.shared.device, &self.buffers, &texture_view);
@@ -324,11 +324,12 @@ enum BuffType {
 
 impl Buffers {
     /// Creates all of the buffers used by the image renderer.
-    fn init(device: &Device, viewport: &Viewport) -> Self {
+    fn init(device: &Device, viewport: &Viewport, max_iter: usize) -> Self {
         use BuffType::*;
         let image_size = viewport.buffer_size();
         Self {
-            probe: Self::create_buffer::<f32>(device, MAX_GPU_GROUP_ITER * 2 * 2, HostWritable),
+            probe: Self::create_buffer::<f32>(device, max_iter * 2 * 2, HostWritable),
+            probe_prime: Self::create_buffer::<f32>(device, max_iter * 2 * 2, HostWritable),
             delta_n: Self::create_buffer::<f32>(device, image_size * 4, ShaderOnly),
             delta_prime: Self::create_buffer::<f32>(device, image_size * 4, ShaderOnly),
             compute_parameters: Self::create_buffer::<ComputeParams>(device, 1, Uniform),
@@ -359,9 +360,11 @@ impl Buffers {
 
     /// Resizes the necessary buffers to the new viewport.
     /// Layouts generated from the buffers will need to be recreated.
-    pub fn resize(&mut self, new_view: &Viewport, device: &Device) {
+    pub fn resize(&mut self, new_view: &Viewport, max_iter: usize, device: &Device) {
         use BuffType::*;
-        // replace all sized buffers (not uniforms or probe)
+        // replace all sized buffers (not uniforms)
+        self.probe = Self::create_buffer::<f32>(device, max_iter * 2, HostWritable);
+        self.probe_prime = Self::create_buffer::<f32>(device, max_iter * 2, HostWritable);
         let image_size = new_view.buffer_size();
         self.delta_n = Self::create_buffer::<f32>(device, image_size * 4, ShaderOnly);
         self.delta_prime = Self::create_buffer::<f32>(device, image_size * 4, ShaderOnly);
@@ -381,6 +384,7 @@ impl BindGroups {
     ) -> (Self, PipelineLayout, PipelineLayout) {
         let Buffers {
             probe,
+            probe_prime,
             delta_n,
             delta_prime,
             step,
@@ -397,11 +401,12 @@ impl BindGroups {
             label: Some("Compute Bind Group Layout"),
             entries: &[
                 Self::create_buffer_layout_entry(0, true),
-                Self::create_buffer_layout_entry(1, false),
+                Self::create_buffer_layout_entry(1, true),
                 Self::create_buffer_layout_entry(2, false),
                 Self::create_buffer_layout_entry(3, false),
                 Self::create_buffer_layout_entry(4, false),
                 Self::create_buffer_layout_entry(5, false),
+                Self::create_buffer_layout_entry(6, false),
             ],
         });
 
@@ -414,22 +419,26 @@ impl BindGroups {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: delta_n.as_entire_binding(),
+                    resource: probe_prime.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: delta_prime.as_entire_binding(),
+                    resource: delta_n.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
-                    resource: step.as_entire_binding(),
+                    resource: delta_prime.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 4,
-                    resource: orbits.as_entire_binding(),
+                    resource: step.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 5,
+                    resource: orbits.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
                     resource: stripes.as_entire_binding(),
                 },
             ],

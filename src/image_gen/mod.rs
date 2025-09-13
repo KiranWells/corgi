@@ -27,7 +27,7 @@ use std::time::Instant;
 use tracing::debug;
 
 use crate::types::{
-    Algorithm, ColorParams, ComputeParams, Image, ImageDiff, MAX_GPU_GROUP_ITER, Message,
+    ColorParams, ComputeParams, Image, ImageDiff, MAX_GPU_GROUP_ITER, Message,
     RenderParams, StatusMessage,
 };
 use probe::probe;
@@ -77,8 +77,18 @@ impl WorkerState {
         let shared = SharedState::new(wgpu.device.clone(), wgpu.queue.clone());
 
         WorkerState {
-            preview_state: GPUData::init(&preview_settings.viewport, shared.clone(), "Preview"),
-            output_state: GPUData::init(&output_settings.viewport, shared, "Output"),
+            preview_state: GPUData::init(
+                &preview_settings.viewport,
+                preview_settings.max_iter as usize,
+                shared.clone(),
+                "Preview",
+            ),
+            output_state: GPUData::init(
+                &output_settings.viewport,
+                output_settings.max_iter as usize,
+                shared,
+                "Output",
+            ),
             probe_buffer: (vec![], vec![]),
             preview_settings: None,
             output_settings: None,
@@ -248,7 +258,7 @@ fn render_image(
     // - run the image render
 
     if diff.resize {
-        gpu_data.resize(&image.viewport);
+        gpu_data.resize(&image.viewport, image.max_iter as usize);
     }
 
     if diff.reprobe {
@@ -258,6 +268,17 @@ fn render_image(
         *probed_data = time!(
             "Probing point",
             probe::<f32>(&image.probe_location, image.max_iter, image.viewport.zoom)
+        );
+        // update the probe buffer
+        gpu_data.shared.queue.write_buffer(
+            &gpu_data.buffers.probe,
+            0,
+            bytemuck::cast_slice(&probed_data.0[..]),
+        );
+        gpu_data.shared.queue.write_buffer(
+            &gpu_data.buffers.probe_prime,
+            0,
+            bytemuck::cast_slice(&probed_data.1[..]),
         );
     }
 
@@ -327,7 +348,7 @@ fn run_compute_step(
 
     // Compute passes have encountered timeouts on some GPUs, so we split the compute passes into
     // multiple smaller passes.
-    for i in 0..=(probe_len / MAX_GPU_GROUP_ITER) {
+    for i in 0..=(image.max_iter as usize / MAX_GPU_GROUP_ITER) {
         let parameters;
         time! {
             "Compute step batch",
@@ -356,12 +377,13 @@ fn run_compute_step(
         parameters = ComputeParams {
             width: texture_size.width,
             height: texture_size.height,
-            max_iter: probe_len as u32,
-            probe_len: if probe_len >= (i + 1) * MAX_GPU_GROUP_ITER {
-                MAX_GPU_GROUP_ITER as u32
+            max_iter: image.max_iter as u32,
+            chunk_max_iter: if (MAX_GPU_GROUP_ITER + 1)  * i > image.max_iter as usize {
+                (image.max_iter as usize % MAX_GPU_GROUP_ITER) as u32
             } else {
-                (probe_len % MAX_GPU_GROUP_ITER) as u32
+                MAX_GPU_GROUP_ITER as u32
             },
+            probe_len: probe_len as u32,
             iter_offset: (i * MAX_GPU_GROUP_ITER) as u32,
             x,
             y,
@@ -369,7 +391,7 @@ fn run_compute_step(
             cy: image.probe_location.y.to_f32(),
             zoom: image.viewport.zoom as f32,
         };
-        if parameters.probe_len == 0 {
+        if parameters.chunk_max_iter == 0 {
             break;
         }
         queue.write_buffer(
@@ -378,25 +400,6 @@ fn run_compute_step(
             bytemuck::cast_slice(&[parameters]),
         );
 
-        // update the probe buffer
-        if image.algorithm() != Algorithm::Directf32 {
-            queue.write_buffer(
-                &buffers.probe,
-                0,
-                bytemuck::cast_slice(
-                    &probed_data.0[i * MAX_GPU_GROUP_ITER
-                        ..i * MAX_GPU_GROUP_ITER + parameters.probe_len as usize],
-                ),
-            );
-            queue.write_buffer(
-                &buffers.probe,
-                MAX_GPU_GROUP_ITER as u64 * 8,
-                bytemuck::cast_slice(
-                    &probed_data.1[i * MAX_GPU_GROUP_ITER
-                        ..i * MAX_GPU_GROUP_ITER + parameters.probe_len as usize],
-                ),
-            );
-        }
 
         // submit the compute shader command buffer
         let si = queue.submit(Some(command_buffer));
@@ -411,10 +414,11 @@ fn run_compute_step(
         let _ = send.send(StatusMessage::Progress(
             format!(
                 "Computing iteration {} of {}",
-                i * MAX_GPU_GROUP_ITER + parameters.probe_len as usize,
+                i * MAX_GPU_GROUP_ITER + parameters.chunk_max_iter as usize,
                 probe_len
             ),
-            (i * MAX_GPU_GROUP_ITER + parameters.probe_len as usize) as f64 / probe_len as f64,
+            (i * MAX_GPU_GROUP_ITER + parameters.chunk_max_iter as usize) as f64
+                / image.max_iter as f64,
         ));
         ctx.request_repaint();
     }

@@ -2,20 +2,22 @@ import super::utils::{ESCAPE_RADIUS, isnan, isinf};
 
 // inputs
 @group(0) @binding(0) var<storage> probed_point : array<vec2<f32>>;
+@group(0) @binding(1) var<storage> probed_point_prime : array<vec2<f32>>;
 
 // intermediate buffers
-@group(0) @binding(1) var<storage, read_write> delta_grid_iter : array<vec3<f32>>;
-@group(0) @binding(2) var<storage, read_write> delta_grid_prime : array<vec3<f32>>;
+@group(0) @binding(2) var<storage, read_write> delta_grid_iter : array<vec4<f32>>;
+@group(0) @binding(3) var<storage, read_write> delta_grid_prime : array<vec3<f32>>;
 
 // outputs
-@group(0) @binding(3) var<storage, read_write> intermediate_step : array<i32>;
-@group(0) @binding(4) var<storage, read_write> orbit_traps : array<vec4f>;
-@group(0) @binding(5) var<storage, read_write> stripes_buffer : array<vec4f>;
+@group(0) @binding(4) var<storage, read_write> intermediate_step : array<i32>;
+@group(0) @binding(5) var<storage, read_write> orbit_traps : array<vec4f>;
+@group(0) @binding(6) var<storage, read_write> stripes_buffer : array<vec4f>;
 
 struct Params {
     width: u32,
     height: u32,
     max_iter: u32,
+    chunk_max_iter: u32,
     probe_len: u32,
     iter_offset: u32,
     x: f32,
@@ -69,6 +71,7 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var orbits = vec4f(1.0);
     var stripes = vec4f(0.0);
     var prev_stripes: vec4f;
+    var ref_iteration = 0u;
     if params.iter_offset == 0u {
         delta_n = vec2(0.0);
         delta_n_prime = vec2(0.0);
@@ -76,6 +79,7 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
     } else {
         delta_n = delta_grid_iter[buffer_index].xy;
         zoom = delta_grid_iter[buffer_index].z;
+        ref_iteration = bitcast<u32>(delta_grid_iter[buffer_index].w);
         delta_n_prime = delta_grid_prime[buffer_index].xy;
         zoom_prime = delta_grid_prime[buffer_index].z;
         orbits = orbit_traps[buffer_index];
@@ -88,15 +92,16 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var total_angle = 0.0;
     var previous = vec2(0.0);
 
-    for (var step = 0u; step < params.probe_len; step = step + 1u) {
-        let x_n = probed_point[step];
-        let x_n_prime = probed_point[step + params.probe_len];
+    for (var step = 0u; step < params.chunk_max_iter; step = step + 1u) {
+        let x_n = probed_point[ref_iteration];
+        ref_iteration += 1;
+        let x_n_prime = probed_point_prime[params.iter_offset + step];
         var scale = pow(2.0, zoom);
         var scale_0 = pow(2.0, zoom_0 - zoom);
         var scale_prime = pow(2.0, - zoom_prime);
 
         let y_n = x_n + delta_n * scale;
-        if !(step < 2u && params.iter_offset == 0) {
+        if step + params.iter_offset > 1u {
             angles += acos(dot(normalize(y_n - previous), line));
             line = normalize(previous - y_n);
             let distance = length(x_n + delta_n * scale - (c + delta_0 * pow(2.0, zoom_0)));
@@ -124,11 +129,11 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 // TODO: calculate second derivative for internal distance est.
                 delta_grid_prime[buffer_index] = vec3(total_angle);
             }
-            delta_grid_iter[buffer_index] = vec3(y_n, zoom);
+            delta_grid_iter[buffer_index] = vec4(y_n, zoom, 0.0);
             orbit_traps[buffer_index] = orbits;
             return;
         }
-        if (step >= 100u && (step - 100u) % 1024u == 0) {
+        if (step + params.iter_offset >= 100u && (step - 100u) % 1024u == 0) {
             x_old = x_n;
             delta_old = delta_n;
             zoom_old = zoom;
@@ -175,13 +180,20 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
             prev_stripes = stripes;
             stripes.x += 0.5+0.5*sin(5.0*atan2(y_n.x, y_n.y));
         }
+        let x_n1 = probed_point[ref_iteration];
+        scale = pow(2.0, -zoom);
+        let y_n1 = x_n1 * scale + delta_n;
+        if length(y_n1) < length(delta_n) || ref_iteration == params.probe_len {
+            delta_n = y_n1;
+            ref_iteration = 0;
+        }
     }
 
     // update the output values
     orbit_traps[buffer_index] = orbits;
     stripes_buffer[buffer_index] = stripes;
-    let x_n = probed_point[params.probe_len - 1u];
-    let x_n_prime = probed_point[params.probe_len * 2u - 1u];
+    let x_n = probed_point[ref_iteration];
+    let x_n_prime = probed_point_prime[params.iter_offset + params.chunk_max_iter - 1u];
     var scale = pow(2.0, zoom);
     var scale_prime = pow(2.0, zoom_prime);
     if isnan(scale) {
@@ -192,14 +204,14 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let y_n = x_n + delta_n * scale;
     let y_n_prime = x_n_prime + delta_n_prime * scale_prime;
-    if params.iter_offset + params.probe_len >= params.max_iter {
+    if params.iter_offset + params.chunk_max_iter >= params.max_iter {
         // this is the last iter
         intermediate_step[buffer_index] = -i32(min_iter);
         stripes_buffer[buffer_index] = stripes / f32(params.max_iter);
-        delta_grid_iter[buffer_index] = vec3(y_n, 0.0);
+        delta_grid_iter[buffer_index] = vec4(y_n, 0.0, 0.0);
         delta_grid_prime[buffer_index] = vec3(delta_n_prime * pow(2.0, zoom_prime + zoom_0), zoom_0);
     } else {
-        delta_grid_iter[buffer_index] = vec3(delta_n, zoom);
+        delta_grid_iter[buffer_index] = vec4(delta_n, zoom, bitcast<f32>(ref_iteration));
         delta_grid_prime[buffer_index] = vec3(delta_n_prime, zoom_prime);
     }
 }
