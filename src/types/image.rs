@@ -460,11 +460,11 @@ impl Coloring2 {
             brightness: 1.0,
             color_frequency: 1.0,
             color_offset: 0.0,
-            gradient: Gradient::Hsv(0.7, 1.0),
+            gradient: Gradient::Procedural([[0.5; 3], [0.5; 3], [1.0; 3], [0.0, 0.1, 0.2]]),
             color_layers: [
                 Layer {
                     kind: LayerKind::SmoothStep,
-                    strength: 2.0,
+                    strength: 3.0,
                     param: 0.0,
                 },
                 Layer::default(),
@@ -475,11 +475,11 @@ impl Coloring2 {
                 Layer::default(),
                 Layer::default(),
             ],
-            lighting_kind: LightingKind::Gradient,
+            lighting_kind: LightingKind::Shaded,
             light_layers: [
                 Layer {
-                    kind: LayerKind::Distance,
-                    strength: 0.6,
+                    kind: LayerKind::Step,
+                    strength: 2.5,
                     param: 0.0,
                 },
                 Layer::default(),
@@ -491,7 +491,7 @@ impl Coloring2 {
                 Layer::default(),
             ],
             lights: [
-                Light::new([1.0, 1.0, 1.0], 3.0, [0.0, 0.1, 0.9]),
+                Light::new([1.0, 1.0, 1.0], 2.0, [0.0, 0.1, 0.9]),
                 Light::new([0.5, 0.6, 1.0], 1.0, [0.8, 0.0, 0.6]),
                 Light::new([1.0, 0.8, 0.4], 1.0, [0.0, 0.8, 0.5]),
             ],
