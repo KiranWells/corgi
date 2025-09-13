@@ -27,8 +27,8 @@ use std::time::Instant;
 use tracing::debug;
 
 use crate::types::{
-    ColorParams, ComputeParams, Image, ImageDiff, MAX_GPU_GROUP_ITER, Message,
-    RenderParams, StatusMessage,
+    ColorParams, ComputeParams, Image, ImageDiff, MAX_GPU_GROUP_ITER, Message, RenderParams,
+    StatusMessage,
 };
 use probe::probe;
 

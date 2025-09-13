@@ -311,6 +311,7 @@ impl CorgiUI {
                             if tui.ui_add(Button::new("Render")).clicked() {
                                 let mut image = self.image_settings.clone();
                                 image.viewport = self.output_viewport.clone();
+                                image.update_probe();
                                 let _ = self.send.send(Message::NewOutputSettings(image));
                             }
                             if tui.ui_add(Button::new("Save to file")).clicked() {
@@ -406,6 +407,7 @@ impl CorgiUI {
                                     self.image_settings.viewport.zoom +=
                                         scroll.y as f64 * pixel_scale as f64 * 0.005;
                                     self.image_settings.viewport.update_prec();
+                                    self.image_settings.update_probe();
                                 }
                                 ViewState::OutputView => {
                                     if drag.x != 0.0 || drag.y != 0.0 {
@@ -417,6 +419,7 @@ impl CorgiUI {
                                             view_image.viewport.zoom;
                                         self.image_settings.viewport.update_prec();
                                         self.view_state = ViewState::Viewport;
+                                        self.image_settings.update_probe();
                                     }
                                     self.render_zoom_offset +=
                                         scroll.y as f64 * pixel_scale as f64 * 0.005;

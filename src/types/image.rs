@@ -750,6 +750,20 @@ impl Image {
             Ok(())
         }
     }
+
+    pub fn update_probe(&mut self) {
+        let mut relative_pos = self
+            .viewport
+            .coords_to_px_offset(&self.probe_location.x, &self.probe_location.y);
+        relative_pos = (
+            relative_pos.0 / self.viewport.width as f64,
+            relative_pos.1 / self.viewport.height as f64,
+        );
+        if relative_pos.0.abs() > 10.0 || relative_pos.1.abs() > 10.0 {
+            // reset probe
+            self.probe_location = self.viewport.center.clone();
+        }
+    }
 }
 
 impl Default for Image {
