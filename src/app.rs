@@ -22,7 +22,10 @@ use crate::{
 pub struct CorgiCliOptions {
     /// Optional image settings file to start with
     #[arg(short, long, value_name = "FILE")]
-    image_file: Option<PathBuf>,
+    pub image_file: Option<PathBuf>,
+    /// Optional output image location
+    #[arg(short, long, value_name = "FILE")]
+    pub output_file: Option<PathBuf>,
 }
 
 /// The App State management struct

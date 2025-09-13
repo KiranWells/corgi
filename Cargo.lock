@@ -902,6 +902,7 @@ dependencies = [
  "image",
  "little_exif",
  "nanoserde",
+ "pollster",
  "rfd",
  "rug",
  "taffy",

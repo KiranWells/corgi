@@ -14,7 +14,6 @@ mod probe;
 use eframe::egui::mutex::RwLock;
 use eframe::wgpu::{self, Extent3d};
 use eframe::{egui, egui_wgpu};
-use gpu_setup::SharedState;
 use image::ImageBuffer;
 use little_exif::exif_tag::ExifTag;
 use little_exif::metadata::Metadata;
@@ -32,7 +31,7 @@ use crate::types::{
 };
 use probe::probe;
 
-pub use gpu_setup::GPUData;
+pub use gpu_setup::{GPUData, SharedState};
 
 // #[cfg(debug_assertions)]
 macro_rules! time {
@@ -145,7 +144,7 @@ impl WorkerState {
                         self.preview_settings.as_ref(),
                         self.send.clone(),
                         self.cancelled.clone(), // TODO: should this be the same cancel??
-                        self.ctx.clone(),
+                        Some(&self.ctx),
                     )
                 );
                 let _ = self.send.send(StatusMessage::NewPreviewViewport(
@@ -165,7 +164,7 @@ impl WorkerState {
                     self.output_settings.as_ref(),
                     self.send.clone(),
                     self.cancelled.clone(),
-                    self.ctx.clone(),
+                    Some(&self.ctx),
                 );
                 let _ = self.send.send(StatusMessage::NewOutputViewport(
                     Instant::now() - start,
@@ -237,14 +236,14 @@ pub fn is_metadata_supported(path: &Path) -> bool {
     matches!(path.extension(), Some(x) if x == "jpg" || x == "jpeg" || x == "png" || x == "webp")
 }
 
-fn render_image(
+pub fn render_image(
     gpu_data: &mut GPUData,
     probed_data: &mut (Vec<[f32; 2]>, Vec<[f32; 2]>),
     image: &Image,
     last_image: Option<&Image>,
     send: mpsc::Sender<StatusMessage>,
     cancelled: Arc<AtomicBool>,
-    ctx: egui::Context,
+    ctx: Option<&egui::Context>,
 ) {
     let diff = last_image
         .map(|img| image.comp(img))
@@ -263,7 +262,7 @@ fn render_image(
 
     if diff.reprobe {
         let _ = send.send(StatusMessage::Progress("Probing point".into(), 0.0));
-        ctx.request_repaint();
+        ctx.map(|x| x.request_repaint());
         // probe the point
         *probed_data = time!(
             "Probing point",
@@ -287,10 +286,10 @@ fn render_image(
             format!("Computing iteration 1 of {}", image.max_iter),
             0.0,
         ));
-        ctx.request_repaint();
+        ctx.map(|x| x.request_repaint());
         time!(
             "Running compute shader",
-            run_compute_step(probed_data, image, gpu_data, &send, cancelled, &ctx)
+            run_compute_step(probed_data, image, gpu_data, &send, cancelled, ctx)
         );
     }
 
@@ -300,7 +299,7 @@ fn render_image(
     // avoid dropped frames.
     if diff.recolor {
         let _ = send.send(StatusMessage::Progress("Rendering Colors".into(), 0.0));
-        ctx.request_repaint();
+        ctx.map(|x| x.request_repaint());
         time!("Running image render", run_render_step(image, gpu_data));
     }
 }
@@ -314,7 +313,7 @@ fn run_compute_step(
     gpu_data: &GPUData,
     send: &mpsc::Sender<StatusMessage>,
     _cancelled: Arc<AtomicBool>,
-    ctx: &egui::Context,
+    ctx: Option<&egui::Context>,
 ) {
     let GPUData {
         shared: SharedState { device, queue, .. },
@@ -420,7 +419,7 @@ fn run_compute_step(
             (i * MAX_GPU_GROUP_ITER + parameters.chunk_max_iter as usize) as f64
                 / image.max_iter as f64,
         ));
-        ctx.request_repaint();
+        ctx.map(|x| x.request_repaint());
     }
 }
 
