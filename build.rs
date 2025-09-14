@@ -1,7 +1,9 @@
+const PACKAGES: &[&str] = &["color", "direct_32", "perturbed_32"];
+
 fn main() {
     println!("cargo::rerun-if-changed=build.rs");
-    wesl::Wesl::new("src/shaders").build_artifact(&"package::color".parse().unwrap(), "color");
-    wesl::Wesl::new("src/shaders").build_artifact(&"package::direct".parse().unwrap(), "direct");
-    wesl::Wesl::new("src/shaders")
-        .build_artifact(&"package::calculate".parse().unwrap(), "calculate");
+    for package in PACKAGES {
+        wesl::Wesl::new("src/shaders")
+            .build_artifact(&format!("package::{package}").parse().unwrap(), package);
+    }
 }

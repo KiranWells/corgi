@@ -11,225 +11,27 @@ images back to the main thread.
 mod gpu_setup;
 mod probe;
 
-use eframe::egui::mutex::RwLock;
 use eframe::wgpu::{self, Extent3d};
-use eframe::{egui, egui_wgpu};
-use image::ImageBuffer;
-use little_exif::exif_tag::ExifTag;
-use little_exif::metadata::Metadata;
-use nanoserde::SerJson;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::sync::mpsc;
-use std::time::Instant;
 use tracing::debug;
 
 use crate::types::{
-    ColorParams, ComputeParams, Image, ImageDiff, MAX_GPU_GROUP_ITER, Message, RenderParams,
-    StatusMessage,
+    ColorParams, ComputeParams, Image, ImageDiff, MAX_GPU_GROUP_ITER, RenderParams, StatusMessage,
 };
 use probe::probe;
 
-pub use gpu_setup::{GPUData, SharedState};
+pub use gpu_setup::{GPUData, SharedState, get_device_and_queue};
 
-// #[cfg(debug_assertions)]
 macro_rules! time {
-    ($name:literal, $($expression:tt)*) => {{
+    ($name:literal; $($expression:tt)*) => {{
         let start = std::time::Instant::now();
         let result = { $($expression)* };
         let elapsed = start.elapsed();
         debug!("{} done in {:?}", $name, elapsed);
         result
     }};
-}
-
-// #[cfg(not(debug_assertions))]
-// macro_rules! time {
-//     ($name:literal, $expression:expr) => {{
-//         $expression
-//     }};
-// }
-
-pub struct WorkerState {
-    preview_state: GPUData,
-    output_state: GPUData,
-    probe_buffer: (Vec<[f32; 2]>, Vec<[f32; 2]>),
-    preview_settings: Option<Image>,
-    output_settings: Option<Image>,
-    recv: mpsc::Receiver<Message>,
-    cancelled: Arc<AtomicBool>,
-    send: mpsc::Sender<StatusMessage>,
-    ctx: egui::Context,
-}
-
-impl WorkerState {
-    pub fn new(
-        wgpu: &egui_wgpu::RenderState,
-        preview_settings: Image,
-        output_settings: Image,
-        recv: mpsc::Receiver<Message>,
-        send: mpsc::Sender<StatusMessage>,
-        cancelled: Arc<AtomicBool>,
-        ctx: egui::Context,
-    ) -> Self {
-        let shared = SharedState::new(wgpu.device.clone(), wgpu.queue.clone());
-
-        WorkerState {
-            preview_state: GPUData::init(
-                &preview_settings.viewport,
-                preview_settings.max_iter as usize,
-                shared.clone(),
-                "Preview",
-            ),
-            output_state: GPUData::init(
-                &output_settings.viewport,
-                output_settings.max_iter as usize,
-                shared,
-                "Output",
-            ),
-            probe_buffer: (vec![], vec![]),
-            preview_settings: None,
-            output_settings: None,
-            recv,
-            send,
-            cancelled,
-            ctx,
-        }
-    }
-
-    /// Main entry point for the image generation process. This should be called in a separate thread,
-    /// and will run until the given message channel is closed. `status` is used to communicate the
-    /// current status of the render process to the main thread.
-    pub fn run(&mut self) {
-        while let Ok(msg) = self.recv.recv() {
-            let mut new_preview = None;
-            let mut new_output = None;
-            let mut file_save = None;
-            match msg {
-                Message::NewPreviewSettings(image) => {
-                    new_preview = Some(image);
-                }
-                Message::NewOutputSettings(image) => {
-                    new_output = Some(image);
-                }
-                Message::SaveToFile(path) => {
-                    file_save = Some(path);
-                }
-            }
-            loop {
-                let next = self.recv.try_recv();
-                match next {
-                    Ok(Message::NewPreviewSettings(image)) => {
-                        new_preview = Some(image);
-                    }
-                    Ok(Message::NewOutputSettings(image)) => {
-                        new_output = Some(image);
-                    }
-                    Ok(Message::SaveToFile(path)) => {
-                        file_save = Some(path);
-                    }
-                    Err(mpsc::TryRecvError::Empty) => break,
-                    Err(mpsc::TryRecvError::Disconnected) => return,
-                }
-            }
-            if let Some(image) = new_preview {
-                let start = Instant::now();
-                time!(
-                    "full render",
-                    render_image(
-                        &mut self.preview_state,
-                        &mut self.probe_buffer,
-                        &image,
-                        self.preview_settings.as_ref(),
-                        self.send.clone(),
-                        self.cancelled.clone(), // TODO: should this be the same cancel??
-                        Some(&self.ctx),
-                    )
-                );
-                let _ = self.send.send(StatusMessage::NewPreviewViewport(
-                    Instant::now() - start,
-                    image.viewport.clone(),
-                ));
-                self.preview_settings = Some(image);
-                self.ctx.request_repaint();
-            }
-            if let Some(image) = new_output {
-                let start = Instant::now();
-                // TODO: move to separate thread
-                render_image(
-                    &mut self.output_state,
-                    &mut self.probe_buffer,
-                    &image,
-                    self.output_settings.as_ref(),
-                    self.send.clone(),
-                    self.cancelled.clone(),
-                    Some(&self.ctx),
-                );
-                let _ = self.send.send(StatusMessage::NewOutputViewport(
-                    Instant::now() - start,
-                    image.viewport.clone(),
-                ));
-                self.output_settings = Some(image);
-                self.ctx.request_repaint();
-            }
-            if let Some(path) = file_save {
-                // copy output buffer to CPU
-                if let Some(output_settings) = self.output_settings.as_ref() {
-                    let _ = self
-                        .send
-                        .send(StatusMessage::Progress("Fetching image data".into(), 0.0));
-                    self.ctx.request_repaint();
-                    if let Some(data) = self.output_state.get_texture_data() {
-                        let _ = self
-                            .send
-                            .send(StatusMessage::Progress("Saving image".into(), 0.0));
-                        self.ctx.request_repaint();
-                        let mut img = image::DynamicImage::ImageRgba8(
-                            ImageBuffer::from_raw(
-                                output_settings.viewport.width as u32,
-                                output_settings.viewport.height as u32,
-                                data,
-                            )
-                            .expect("image data to be properly formatted"),
-                        );
-                        img = image::DynamicImage::ImageRgb8(img.flipv().into_rgb8());
-                        if let Err(err) = img.save(path.clone()) {
-                            tracing::error!("Failed to save image: {err}");
-                            let _ = self.send.send(StatusMessage::Progress(
-                                format!("Failed to save image: {err}"),
-                                0.0,
-                            ));
-                            self.ctx.request_repaint();
-                        } else {
-                            // add metadata
-                            if is_metadata_supported(&path) {
-                                let mut meta = Metadata::new();
-                                meta.set_tag(ExifTag::ImageDescription(
-                                    self.output_settings.as_ref().unwrap().serialize_json(),
-                                ));
-                                meta.set_tag(ExifTag::Software("Corgi".into()));
-                                if let Err(err) = meta.write_to_file(&path) {
-                                    tracing::error!("Failed to write metadata to file: {err:?}");
-                                }
-                            }
-                            let _ = self
-                                .send
-                                .send(StatusMessage::Progress("Image save complete".into(), 100.0));
-                            self.ctx.request_repaint();
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn preview_texture(&self) -> Arc<RwLock<wgpu::Texture>> {
-        self.preview_state.texture.clone()
-    }
-    pub fn output_texture(&self) -> Arc<RwLock<wgpu::Texture>> {
-        self.output_state.texture.clone()
-    }
 }
 
 pub fn is_metadata_supported(path: &Path) -> bool {
@@ -241,9 +43,8 @@ pub fn render_image(
     probed_data: &mut (Vec<[f32; 2]>, Vec<[f32; 2]>),
     image: &Image,
     last_image: Option<&Image>,
-    send: mpsc::Sender<StatusMessage>,
     cancelled: Arc<AtomicBool>,
-    ctx: Option<&egui::Context>,
+    mut status_callback: impl FnMut(StatusMessage),
 ) {
     let diff = last_image
         .map(|img| image.comp(img))
@@ -261,11 +62,10 @@ pub fn render_image(
     }
 
     if diff.reprobe {
-        let _ = send.send(StatusMessage::Progress("Probing point".into(), 0.0));
-        ctx.map(|x| x.request_repaint());
+        status_callback(StatusMessage::Progress("Probing point".into(), 0.0));
         // probe the point
         *probed_data = time!(
-            "Probing point",
+            "Probing point";
             probe::<f32>(&image.probe_location, image.max_iter, image.viewport.zoom)
         );
         // update the probe buffer
@@ -282,14 +82,13 @@ pub fn render_image(
     }
 
     if diff.recompute {
-        let _ = send.send(StatusMessage::Progress(
+        status_callback(StatusMessage::Progress(
             format!("Computing iteration 1 of {}", image.max_iter),
             0.0,
         ));
-        ctx.map(|x| x.request_repaint());
         time!(
-            "Running compute shader",
-            run_compute_step(probed_data, image, gpu_data, &send, cancelled, ctx)
+            "Running compute shader";
+            run_compute_step(probed_data, image, gpu_data, cancelled, &mut status_callback)
         );
     }
 
@@ -298,9 +97,8 @@ pub fn render_image(
     // the color step should always complete with a low-enough time budget to
     // avoid dropped frames.
     if diff.recolor {
-        let _ = send.send(StatusMessage::Progress("Rendering Colors".into(), 0.0));
-        ctx.map(|x| x.request_repaint());
-        time!("Running image render", run_render_step(image, gpu_data));
+        status_callback(StatusMessage::Progress("Rendering Colors".into(), 0.0));
+        time!("Running image render"; run_render_step(image, gpu_data));
     }
 }
 
@@ -311,9 +109,8 @@ fn run_compute_step(
     probed_data: &(Vec<[f32; 2]>, Vec<[f32; 2]>),
     image: &Image,
     gpu_data: &GPUData,
-    send: &mpsc::Sender<StatusMessage>,
     _cancelled: Arc<AtomicBool>,
-    ctx: Option<&egui::Context>,
+    status_callback: &mut impl FnMut(StatusMessage),
 ) {
     let GPUData {
         shared: SharedState { device, queue, .. },
@@ -350,7 +147,7 @@ fn run_compute_step(
     for i in 0..=(image.max_iter as usize / MAX_GPU_GROUP_ITER) {
         let parameters;
         time! {
-            "Compute step batch",
+            "Compute step batch";
         // Create encoder for CPU - GPU communication
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
@@ -404,13 +201,13 @@ fn run_compute_step(
         let si = queue.submit(Some(command_buffer));
         // This slows down render times, so we avoid it in release
         #[cfg(debug_assertions)]
-        time!("wait",
+        time!("wait";
             let _ = device.poll(wgpu::MaintainBase::WaitForSubmissionIndex(si));
         );
         #[cfg(not(debug_assertions))]
         let _ = si;
         };
-        let _ = send.send(StatusMessage::Progress(
+        status_callback(StatusMessage::Progress(
             format!(
                 "Computing iteration {} of {}",
                 i * MAX_GPU_GROUP_ITER + parameters.chunk_max_iter as usize,
@@ -419,7 +216,6 @@ fn run_compute_step(
             (i * MAX_GPU_GROUP_ITER + parameters.chunk_max_iter as usize) as f64
                 / image.max_iter as f64,
         ));
-        ctx.map(|x| x.request_repaint());
     }
 }
 

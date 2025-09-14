@@ -8,7 +8,7 @@ use eframe::{
 };
 use wgpu::{Extent3d, Queue};
 
-use super::Transform;
+use corgi::types::{Transform, Viewport};
 
 /// Resources necessary for rendering the preview image
 struct SubResources {
@@ -242,8 +242,8 @@ impl SubResources {
 }
 
 pub struct PaintCallback {
-    pub rendered_viewport: crate::types::Viewport,
-    pub view: crate::types::Viewport,
+    pub rendered_viewport: Viewport,
+    pub view: Viewport,
     pub swap: bool,
     pub output: bool,
 }
@@ -259,7 +259,7 @@ impl CallbackTrait for PaintCallback {
     ) -> Vec<eframe::wgpu::CommandBuffer> {
         let res = callback_resources
             .get_mut::<PreviewRenderResources>()
-            .expect("Failed to get render resources");
+            .expect("to get render resources");
         let res = if self.output {
             &mut res.output
         } else {
@@ -276,7 +276,7 @@ impl CallbackTrait for PaintCallback {
         if size != *res.size() {
             // resize the render resources, refreshing the texture reference
             res.resize(device, queue, size)
-                .expect("Failed to resize render resources");
+                .expect("to resize render resources");
         }
         let transforms = self.rendered_viewport.transforms_from(&self.view);
 
@@ -292,7 +292,7 @@ impl CallbackTrait for PaintCallback {
     ) {
         let res = callback_resources
             .get::<PreviewRenderResources>()
-            .expect("Failed to get render resources");
+            .expect("to get render resources");
         let res = if self.output {
             &res.output
         } else {

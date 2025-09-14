@@ -4,18 +4,14 @@
 A Collection of types used throughout the application, and their associated functions.
  */
 
+mod coloring;
 mod image;
-mod preview_resources;
 
-use eframe::wgpu;
 use std::path::PathBuf;
 use std::time::Duration;
-use std::{error::Error, fmt::Display};
 
-use color_eyre::Report;
-
+pub use self::coloring::*;
 pub use self::image::*;
-pub use self::preview_resources::*;
 
 pub const ESCAPE_RADIUS: f64 = 1e10;
 // This needs to be set low enough to ensure the GPU is not
@@ -29,12 +25,13 @@ pub fn get_precision(zoom: f64) -> u32 {
 }
 
 #[derive(Debug)]
-pub enum Message {
+pub enum ImageGenCommand {
     NewPreviewSettings(Image),
     NewOutputSettings(Image),
     SaveToFile(PathBuf),
 }
 
+#[derive(Debug)]
 pub enum StatusMessage {
     Progress(String, f64),
     NewPreviewViewport(Duration, Viewport),
@@ -49,46 +46,131 @@ pub struct Status {
     pub rendered_image: Option<Image>,
 }
 
-/// Error type for the render thread
-#[derive(Debug)]
-pub enum RenderErr {
-    /// Signals a need to resize the window
-    Resize,
-    /// Signals an error that should cause the application to quit
-    Quit(Report),
-    /// Signals an error that should be logged but not cause the application to quit
-    Warn(Report),
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ColorParams {
+    pub saturation: f32,
+    pub brightness: f32,
+    pub color_frequency: f32,
+    pub color_offset: f32,
+    pub gradient_kind: u32,
+    pub lighting_kind: u32,
+    padding: [u32; 2],
+    pub gradient: [f32; 12],
+    pub color_layer_types: [u8; 8],
+    pub light_layer_types: [u8; 8],
+    pub color_strengths: [f32; 8],
+    pub color_params: [f32; 8],
+    pub light_strengths: [f32; 8],
+    pub light_params: [f32; 8],
+    pub lights: [Light; 3],
+    pub overlays: Overlays,
 }
 
-impl From<wgpu::SurfaceError> for RenderErr {
-    fn from(e: wgpu::SurfaceError) -> Self {
-        match e {
-            wgpu::SurfaceError::Lost => Self::Resize,
-            wgpu::SurfaceError::OutOfMemory => Self::Quit(e.into()),
-            wgpu::SurfaceError::Timeout => Self::Warn(e.into()),
-            wgpu::SurfaceError::Outdated => Self::Warn(e.into()),
-            wgpu::SurfaceError::Other => Self::Warn(e.into()),
+impl From<&Coloring> for ColorParams {
+    fn from(value: &Coloring) -> Self {
+        let (gradient_kind, gradient_vec) = match value.gradient {
+            Gradient::Flat(data) => {
+                let mut new_data = data.to_vec();
+                new_data.extend_from_slice(&[0.0; 9]);
+                (0, new_data)
+            }
+            Gradient::Procedural(data) => (1, data.concat()),
+            Gradient::Manual(data) => (2, data.concat()),
+            Gradient::Hsv(saturation, value) => {
+                let mut new_data = vec![saturation, value];
+                new_data.extend_from_slice(&[0.0; 10]);
+                (3, new_data)
+            }
+        };
+        let mut gradient = [0.0; 12];
+        gradient.copy_from_slice(&gradient_vec);
+        ColorParams {
+            saturation: value.saturation,
+            brightness: value.brightness,
+            color_frequency: value.color_frequency,
+            color_offset: value.color_offset,
+            gradient_kind,
+            lighting_kind: value.lighting_kind as u32,
+            gradient,
+            color_layer_types: value.color_layers.map(|x| x.kind as u8),
+            light_layer_types: value.light_layers.map(|x| x.kind as u8),
+            color_strengths: value.color_layers.map(|x| x.strength),
+            color_params: value.color_layers.map(|x| x.param),
+            light_strengths: value.light_layers.map(|x| x.strength),
+            light_params: value.light_layers.map(|x| x.param),
+            lights: value.lights,
+            overlays: value.overlays,
+            padding: [0; 2],
         }
     }
 }
 
-impl From<Report> for RenderErr {
-    fn from(e: Report) -> Self {
-        Self::Quit(e)
-    }
+/// The parameters for the compute shader. This is sent as a uniform
+/// to the compute shader.
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ComputeParams {
+    pub width: u32,
+    pub height: u32,
+    pub max_iter: u32,
+    pub chunk_max_iter: u32,
+    pub probe_len: u32,
+    pub iter_offset: u32,
+    pub x: f32,
+    pub y: f32,
+    pub cx: f32,
+    pub cy: f32,
+    pub zoom: f32,
 }
 
-impl Display for RenderErr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Resize => write!(f, "Resize"),
-            Self::Quit(e) => write!(f, "Quit: {e}"),
-            Self::Warn(e) => write!(f, "Warn: {e}"),
+/// The parameters for the render shader. This is sent as a uniform
+/// to the render shader.
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct RenderParams {
+    pub width: u32,
+    pub height: u32,
+    pub max_step: u32,
+    pub zoom: f32,
+    pub misc: f32,
+    pub debug_shutter: f32,
+}
+
+impl From<&Image> for RenderParams {
+    fn from(image: &Image) -> Self {
+        RenderParams {
+            width: (image.viewport.width as f64 * image.viewport.scaling) as u32,
+            height: (image.viewport.height as f64 * image.viewport.scaling) as u32,
+            max_step: image.max_iter as u32,
+            zoom: image.viewport.zoom as f32,
+            misc: image.misc,
+            debug_shutter: image.debug_shutter,
         }
     }
 }
 
-impl Error for RenderErr {}
+/// The parameters for the preview shader. This is sent as a uniform
+/// to the preview shader.
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Transform {
+    pub angle: f32,
+    pub _padding: f32,
+    pub scale: [f32; 2],
+    pub offset: [f32; 2],
+}
+
+impl Default for Transform {
+    fn default() -> Self {
+        Self {
+            angle: 0.0,
+            _padding: 0.0,
+            scale: [1.0, 1.0],
+            offset: [0.0, 0.0],
+        }
+    }
+}
 
 /// Debouncer for events
 ///
@@ -119,6 +201,7 @@ impl Error for RenderErr {}
 /// debouncer.reset();
 /// assert!(!debouncer.poll());
 /// ```
+#[derive(Debug)]
 pub struct Debouncer {
     pub wait_time: std::time::Duration,
     last_triggered: Option<std::time::Instant>,
@@ -179,11 +262,4 @@ impl Debouncer {
             None
         }
     }
-}
-
-/// A container for the egui-related state
-pub struct EguiData {
-    pub ctx: eframe::egui::Context,
-    pub renderer: eframe::egui_wgpu::Renderer,
-    pub needs_rerender: bool,
 }

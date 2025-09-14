@@ -4,7 +4,7 @@ use super::{
     EditUI, input_with_label,
     utils::{collapsible, ui_with_label},
 };
-use crate::types::{Coloring2, Gradient, Layer, LayerKind, Light, LightingKind, Overlays};
+use corgi::types::{Coloring, Gradient, Layer, LayerKind, Light, LightingKind, Overlays};
 use eframe::egui::{self, RichText};
 use egui_material_icons::icons;
 use egui_taffy::TuiBuilderLogic;
@@ -45,7 +45,7 @@ fn pseudo_color_edit(tui: &mut egui_taffy::Tui, color: &mut [f32; 3]) {
     });
 }
 
-impl EditUI for Coloring2 {
+impl EditUI for Coloring {
     fn render_edit_ui(&mut self, ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
         input_with_label(
             tui,
@@ -160,8 +160,6 @@ impl EditUI for Gradient {
                 let (c_stop, c) = c.split_first_chunk_mut::<3>().unwrap();
                 tui.style(taffy::Style {
                     display: taffy::Display::Grid,
-                    // align_items: Some(taffy::AlignItems::Stretch),
-                    // justify_items: Some(taffy::AlignItems::Stretch),
                     grid_template_rows: vec![min_content(); 2],
                     grid_template_columns: vec![min_content(); 3],
                     align_items: Some(AlignItems::Center),
@@ -276,7 +274,6 @@ impl EditUI for Overlays {
         let mut steps = self.iteration_outline_color[3] as i32;
         tui.style(taffy::Style {
             flex_direction: taffy::FlexDirection::Row,
-            // flex_grow: 1.0,
             justify_content: Some(taffy::AlignContent::Stretch),
             size: Size {
                 width: percent(1.0),
@@ -387,7 +384,7 @@ impl EditUI for LightingKind {
 impl EditUI for [Layer; 8] {
     fn render_edit_ui(&mut self, ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
         let valid_ct = self.iter().filter(|l| l.kind != LayerKind::None).count();
-        let mut add = false;
+        let mut add_layer = false;
         tui.style(Style {
             justify_content: Some(AlignContent::SpaceBetween),
             ..Default::default()
@@ -395,7 +392,7 @@ impl EditUI for [Layer; 8] {
         .add(|tui| {
             tui.label(RichText::new("Layers").strong());
             if valid_ct < 8 {
-                add = tui
+                add_layer = tui
                     .button(|tui| {
                         tui.label(format!("{} Add Layer", icons::ICON_ADD));
                     })
@@ -409,7 +406,7 @@ impl EditUI for [Layer; 8] {
                 break;
             }
             let mut remove = false;
-            let mut dup = false;
+            let mut duplicate = false;
             collapsible(tui, &layer.kind.icon_text(), |tui| {
                 layer.render_edit_ui(ctx, tui);
                 tui.style(Style {
@@ -432,7 +429,7 @@ impl EditUI for [Layer; 8] {
                         })
                         .clicked();
                     if valid_ct < 8 {
-                        dup = tui
+                        duplicate = tui
                             .style(Style {
                                 flex_grow: 1.0,
                                 ..Default::default()
@@ -448,13 +445,13 @@ impl EditUI for [Layer; 8] {
                 new_layers[layer_ct] = *layer;
                 layer_ct += 1;
             }
-            if dup {
+            if duplicate {
                 new_layers[layer_ct] = *layer;
                 layer_ct += 1;
             }
         }
         *self = new_layers;
-        if layer_ct < 8 && add {
+        if layer_ct < 8 && add_layer {
             self[layer_ct] = Layer {
                 kind: LayerKind::Step,
                 strength: 1.0,

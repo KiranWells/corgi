@@ -3,7 +3,7 @@ use egui_taffy::{Tui, TuiBuilderLogic, TuiWidget};
 use rug::Float;
 use taffy::{Overflow, prelude::*};
 
-use crate::types::ComplexPoint;
+use corgi::types::ComplexPoint;
 
 pub fn collapsible(tui: &mut egui_taffy::Tui, summary: &str, add_contents: impl FnOnce(&mut Tui)) {
     tui.ui_add_manual(

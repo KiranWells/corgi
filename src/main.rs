@@ -1,12 +1,15 @@
-use std::{
-    env, str::FromStr, sync::atomic::AtomicBool, time::Instant,
-};
+#![doc = include_str!("../README.md")]
+pub mod app;
+pub mod ui;
+pub mod worker;
 
+use std::{env, str::FromStr, sync::atomic::AtomicBool, time::Instant};
+
+use app::{CorgiApp, CorgiCliOptions};
 use clap::Parser;
 use color_eyre::{Result, eyre::eyre};
 use corgi::{
-    app::{CorgiApp, CorgiCliOptions},
-    image_gen::{GPUData, SharedState, is_metadata_supported, render_image},
+    image_gen::{GPUData, SharedState, get_device_and_queue, is_metadata_supported, render_image},
     types::Image,
 };
 use eframe::{egui, egui_wgpu, wgpu};
@@ -24,43 +27,20 @@ fn main() -> Result<()> {
         .with_max_level(
             env::var("CORGI_LOG_LEVEL")
                 .ok()
-                .and_then(|s| Level::from_str(&s).ok())
+                .map(|s| Level::from_str(&s).expect("log level to be valid"))
                 .unwrap_or(Level::WARN),
         )
         .finish();
-
     tracing::subscriber::set_global_default(subscriber)?;
     color_eyre::install()?;
 
     // cli only render
     if let Some(path) = cli_options.output_file {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY,
-            ..Default::default()
-        });
-
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: None,
-                force_fallback_adapter: false,
-            })
-            .block_on()?;
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                label: None,
-                required_features: wgpu::Features::empty(),
-                // WebGL doesn't support all of wgpu's features, so if
-                // we're building for the web we'll have to disable some.
-                required_limits: wgpu::Limits::default(),
-                memory_hints: Default::default(),
-                trace: wgpu::Trace::Off,
-            })
-            .block_on()?;
+        let (device, queue) = get_device_and_queue().block_on()?;
 
         let image = Image::load_from_file(
             &cli_options
-                .image_file
+                .settings_file
                 .ok_or(eyre!("No image file specified"))?,
         )?;
         let mut gpu_data = GPUData::init(
@@ -69,16 +49,14 @@ fn main() -> Result<()> {
             SharedState::new(device, queue),
             "cli renderer",
         );
-        let (send, _) = std::sync::mpsc::channel();
         let now = Instant::now();
         render_image(
             &mut gpu_data,
             &mut (vec![], vec![]),
             &image,
             None,
-            send,
             std::sync::Arc::new(AtomicBool::new(false)),
-            None,
+            |_sm| {},
         );
         println!("Rendering took {:?}", Instant::now().duration_since(now));
         if let Some(data) = gpu_data.get_texture_data() {
@@ -125,7 +103,7 @@ fn main() -> Result<()> {
     eframe::run_native(
         "Corgi",
         eframe_options,
-        Box::new(|cc| CorgiApp::new_dyn(cc, cli_options)),
+        Box::new(|cc| CorgiApp::create(cc, cli_options)),
     )?;
     Ok(())
 }

@@ -2,7 +2,7 @@
 # GPU Setup
 
 This types contained in this module are designed to manage the GPU handles and data.
-The `GPUData` struct contains all the handles and data needed to render an image,
+The [`GPUData`] struct contains all the handles and data needed to render an image,
 and accepts a pre-existing device and queue to allow for multiple renderers to share
 the same GPU.
 
@@ -10,6 +10,7 @@ the same GPU.
 
 use std::sync::{Arc, mpsc};
 
+use color_eyre::eyre::Result;
 use eframe::{
     egui::mutex::RwLock,
     wgpu::{
@@ -20,6 +21,22 @@ use eframe::{
 use wgpu::ShaderModule;
 
 use crate::types::{ColorParams, ComputeParams, RenderParams, Viewport};
+
+/// Contains GPU state that can be shared between all image generation
+/// contexts.
+#[derive(Clone, Debug)]
+pub struct SharedState {
+    /// A handle to the device
+    pub device: Device,
+    /// A handle to the queue
+    pub queue: Queue,
+    /// The shader module for the directly calculated f32 shader
+    pub direct_f32_shader: ShaderModule,
+    /// The shader module for the perturbation formula f32 shader
+    pub perturbed_f32_shader: ShaderModule,
+    /// The shader module for the color shader
+    pub color_shader: ShaderModule,
+}
 
 /// A struct containing all of the GPU handles for the application
 /// and the data needed to render an image. Use the `init` function
@@ -36,7 +53,6 @@ pub struct GPUData {
     pub perturbed_f32_pipeline: ComputePipeline,
     /// The color pipeline for the color shader
     pub color_pipeline: ComputePipeline,
-    // Data
     /// A struct containing all of the buffers used by the GPU
     pub buffers: Buffers,
     /// A struct containing all of the bind groups used by the GPU
@@ -45,21 +61,8 @@ pub struct GPUData {
     pub shared: SharedState,
 }
 
-#[derive(Clone)]
-pub struct SharedState {
-    /// A handle to the device
-    pub device: Device,
-    /// A handle to the queue
-    pub queue: Queue,
-    /// The shader module for the directly calculated f32 shader
-    pub direct_f32_shader: ShaderModule,
-    /// The shader module for the perturbation formula f32 shader
-    pub perturbed_f32_shader: ShaderModule,
-    /// The shader module for the color shader
-    pub color_shader: ShaderModule,
-}
-
 /// A struct containing all of the buffers used by the GPU
+#[derive(Debug)]
 pub struct Buffers {
     // compute input
     pub probe: Buffer,
@@ -78,6 +81,7 @@ pub struct Buffers {
 }
 
 /// A struct containing all of the bind groups used by the GPU
+#[derive(Debug)]
 pub struct BindGroups {
     pub compute_buffers: BindGroup,
     pub compute_parameters: BindGroup,
@@ -86,16 +90,57 @@ pub struct BindGroups {
     pub render_texture: BindGroup,
 }
 
+/// The different types of buffers that can be created.
+enum BuffType {
+    /// A buffer that is only used by the shader, and is not accessible by the host.
+    ShaderOnly,
+    /// A buffer that can be written to by the host, but not read.
+    HostWritable,
+    /// A buffer that can be read by the host; used for the target of a copy operation.
+    #[allow(dead_code)]
+    HostReadable,
+    /// A uniform buffer that can be written by the host.
+    Uniform,
+}
+
+/// Selects a device and queue suitable for non-UI rendering.
+pub async fn get_device_and_queue() -> Result<(Device, Queue)> {
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::PRIMARY,
+        ..Default::default()
+    });
+    let adapter = instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        })
+        .await?;
+
+    Ok(adapter
+        .request_device(&wgpu::DeviceDescriptor {
+            label: None,
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::default(),
+            memory_hints: wgpu::MemoryHints::Performance,
+            trace: wgpu::Trace::Off,
+        })
+        .await?)
+}
+
 impl SharedState {
+    /// Create a new shared state object for image generation. This should
+    /// only be called once in a program and cloned to share between multiple
+    /// [`GPUData`] objects.
     pub fn new(device: Device, queue: Queue) -> Self {
         let direct_f32_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Direct f32 Shader".to_string().as_str()),
-            source: wgpu::ShaderSource::Wgsl(wesl::include_wesl!("direct").into()),
+            source: wgpu::ShaderSource::Wgsl(wesl::include_wesl!("direct_32").into()),
         });
 
         let perturbed_f32_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Perturbed f32 Shader".to_string().as_str()),
-            source: wgpu::ShaderSource::Wgsl(wesl::include_wesl!("calculate").into()),
+            source: wgpu::ShaderSource::Wgsl(wesl::include_wesl!("perturbed_32").into()),
         });
 
         let color_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -121,12 +166,12 @@ impl GPUData {
         let final_texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let buffers = Buffers::init(device, viewport, max_iter);
-        let (bind_groups, compute_pipeline_layout, render_pipeline_layout) =
+        let (bind_groups, compute_pipeline_layout, color_pipeline_layout) =
             BindGroups::init(device, &buffers, &final_texture_view);
 
         let color_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some(format!("{label} Color Pipeline").as_str()),
-            layout: Some(&render_pipeline_layout),
+            layout: Some(&color_pipeline_layout),
             module: &shared.color_shader,
             entry_point: Some("main_color"),
             compilation_options: wgpu::PipelineCompilationOptions {
@@ -171,7 +216,6 @@ impl GPUData {
             texture: Arc::new(RwLock::new(texture)),
             buffers,
             bind_groups,
-            // pipeline_cache,
         }
     }
 
@@ -253,6 +297,7 @@ impl GPUData {
         })
     }
 
+    /// Load the data from the currently rendered image from th GPU to the CPU.
     pub fn get_texture_data(&self) -> Option<Vec<u8>> {
         let ext = self.texture.read().size();
         let padded_width = ((ext.width * 4) as f32 / 256.0).ceil() as u32 * 256;
@@ -307,19 +352,6 @@ impl GPUData {
             }
         }
     }
-}
-
-/// The different types of buffers that can be created.
-enum BuffType {
-    /// A buffer that is only used by the shader, and is not accessible by the host.
-    ShaderOnly,
-    /// A buffer that can be written to by the host, but not read.
-    HostWritable,
-    /// A buffer that can be read by the host; used for the target of a copy operation.
-    #[allow(dead_code)]
-    HostReadable,
-    /// A uniform buffer that can be written by the host.
-    Uniform,
 }
 
 impl Buffers {
