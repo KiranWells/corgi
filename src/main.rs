@@ -9,13 +9,10 @@ use app::{CorgiApp, CorgiCliOptions};
 use clap::Parser;
 use color_eyre::{Result, eyre::eyre};
 use corgi::{
-    image_gen::{GPUData, SharedState, get_device_and_queue, is_metadata_supported, render_image},
-    types::Image,
+    image_gen::{GPUData, SharedState, get_device_and_queue, render_image, save_to_file},
+    types::{Image, StatusMessage},
 };
 use eframe::{egui, egui_wgpu, wgpu};
-use image::ImageBuffer;
-use little_exif::{exif_tag::ExifTag, metadata::Metadata};
-use nanoserde::SerJson;
 use pollster::FutureExt;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
@@ -38,11 +35,13 @@ fn main() -> Result<()> {
     if let Some(path) = cli_options.output_file {
         let (device, queue) = get_device_and_queue().block_on()?;
 
-        let image = Image::load_from_file(
-            &cli_options
-                .settings_file
-                .ok_or(eyre!("No image file specified"))?,
-        )?;
+        let Some(settings_file) = cli_options.settings_file else {
+            return Err(eyre!("No settings file specified, exiting."));
+        };
+        if !settings_file.exists() {
+            return Err(eyre!("Settings file does not exist"));
+        }
+        let image = Image::load_from_file(&settings_file)?;
         let mut gpu_data = GPUData::init(
             &image.viewport,
             image.max_iter as usize,
@@ -50,39 +49,25 @@ fn main() -> Result<()> {
             "cli renderer",
         );
         let now = Instant::now();
+        fn status_callback(sm: StatusMessage) {
+            match sm {
+                corgi::types::StatusMessage::Progress(msg, percent) => {
+                    println!("{:>6.2}% | {}", percent * 100.0, msg)
+                }
+                corgi::types::StatusMessage::NewPreviewViewport(..) => todo!(),
+                corgi::types::StatusMessage::NewOutputViewport(..) => todo!(),
+            }
+        }
         render_image(
             &mut gpu_data,
             &mut (vec![], vec![]),
             &image,
             None,
             std::sync::Arc::new(AtomicBool::new(false)),
-            |_sm| {},
+            status_callback,
         );
         println!("Rendering took {:?}", Instant::now().duration_since(now));
-        if let Some(data) = gpu_data.get_texture_data() {
-            let mut img = image::DynamicImage::ImageRgba8(
-                ImageBuffer::from_raw(
-                    image.viewport.width as u32,
-                    image.viewport.height as u32,
-                    data,
-                )
-                .expect("image data to be properly formatted"),
-            );
-            img = image::DynamicImage::ImageRgb8(img.flipv().into_rgb8());
-            if let Err(err) = img.save(path.clone()) {
-                tracing::error!("Failed to save image: {err}");
-            } else {
-                // add metadata
-                if is_metadata_supported(&path) {
-                    let mut meta = Metadata::new();
-                    meta.set_tag(ExifTag::ImageDescription(image.serialize_json()));
-                    meta.set_tag(ExifTag::Software("Corgi".into()));
-                    if let Err(err) = meta.write_to_file(&path) {
-                        tracing::error!("Failed to write metadata to file: {err:?}");
-                    }
-                }
-            }
-        }
+        save_to_file(&gpu_data, &image, &path, status_callback);
         return Ok(());
     }
 

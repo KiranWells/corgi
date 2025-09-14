@@ -12,6 +12,9 @@ mod gpu_setup;
 mod probe;
 
 use eframe::wgpu::{self, Extent3d};
+use image::ImageBuffer;
+use little_exif::{exif_tag::ExifTag, metadata::Metadata};
+use nanoserde::SerJson;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -211,7 +214,7 @@ fn run_compute_step(
             format!(
                 "Computing iteration {} of {}",
                 i * MAX_GPU_GROUP_ITER + parameters.chunk_max_iter as usize,
-                probe_len
+                image.max_iter
             ),
             (i * MAX_GPU_GROUP_ITER + parameters.chunk_max_iter as usize) as f64
                 / image.max_iter as f64,
@@ -269,4 +272,43 @@ fn run_render_step(image: &Image, gpu_data: &GPUData) {
     // submit the render command queue
     let si = queue.submit(Some(encoder.finish()));
     let _ = device.poll(wgpu::MaintainBase::WaitForSubmissionIndex(si));
+}
+
+pub fn save_to_file(
+    gpu_data: &GPUData,
+    image_settings: &Image,
+    path: &Path,
+    mut status_callback: impl FnMut(StatusMessage),
+) {
+    status_callback(StatusMessage::Progress("Fetching image data".into(), 0.0));
+    if let Some(data) = gpu_data.get_texture_data() {
+        status_callback(StatusMessage::Progress("Saving image".into(), 0.0));
+        let mut img = image::DynamicImage::ImageRgba8(
+            ImageBuffer::from_raw(
+                image_settings.viewport.width as u32,
+                image_settings.viewport.height as u32,
+                data,
+            )
+            .expect("image data to be properly formatted"),
+        );
+        img = image::DynamicImage::ImageRgb8(img.flipv().into_rgb8());
+        if let Err(err) = img.save(path) {
+            tracing::error!("Failed to save image: {err}");
+            status_callback(StatusMessage::Progress(
+                format!("Failed to save image: {err}"),
+                0.0,
+            ));
+        } else {
+            // add metadata
+            if is_metadata_supported(path) {
+                let mut meta = Metadata::new();
+                meta.set_tag(ExifTag::ImageDescription(image_settings.serialize_json()));
+                meta.set_tag(ExifTag::Software("Corgi".into()));
+                if let Err(err) = meta.write_to_file(path) {
+                    tracing::error!("Failed to write metadata to file: {err:?}");
+                }
+            }
+            status_callback(StatusMessage::Progress("Image save complete".into(), 1.0));
+        }
+    }
 }
