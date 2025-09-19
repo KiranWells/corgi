@@ -59,6 +59,8 @@ pub struct GPUData {
     pub bind_groups: BindGroups,
     /// A copy of the shared state handles
     pub shared: SharedState,
+    /// A group of constants used to parameterize calculations
+    pub constants: Constants,
 }
 
 /// A struct containing all of the buffers used by the GPU
@@ -101,6 +103,15 @@ enum BuffType {
     HostReadable,
     /// A uniform buffer that can be written by the host.
     Uniform,
+}
+
+pub struct Constants {
+    /// The number of iterations to calculate in one execution
+    /// when running the compute shaders.
+    /// This needs to be set low enough to ensure the GPU is not
+    /// busy for too long; that causes stuttering and possibly
+    /// shader execution failures.
+    pub iter_batch_size: u64,
 }
 
 /// Selects a device and queue suitable for non-UI rendering.
@@ -159,7 +170,13 @@ impl SharedState {
 
 impl GPUData {
     /// Initializes the GPU handles for use in rendering an image.
-    pub fn init(viewport: &Viewport, max_iter: usize, shared: SharedState, label: &str) -> Self {
+    pub fn init(
+        viewport: &Viewport,
+        max_iter: usize,
+        shared: SharedState,
+        label: &str,
+        constants: Constants,
+    ) -> Self {
         let device = &shared.device;
 
         let texture = Self::create_texture(device, viewport);
@@ -216,6 +233,7 @@ impl GPUData {
             texture: Arc::new(RwLock::new(texture)),
             buffers,
             bind_groups,
+            constants,
         }
     }
 

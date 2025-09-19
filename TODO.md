@@ -124,10 +124,14 @@ https://gbillotey.github.io/Fractalshades-doc/math.html#f1
     - [x] smooth iteration
     - [x] distance estimation
     - [x] stripe-average coloring
+        - [ ] switch for optimized version?
+        - [ ] disable unoptimized version when not being used
     - [x] gradient coloring
     - [x] escape radii outlines
     - [x] orbit traps
         - [ ] will need some controls for point/geometry selection
+        - [ ] only enable the orbit traps that are configured
+        - [ ] add averaging step to make coloring adjustments easier
     - interior:
         - [/] orbit traps
         - [ ] interior distance estimation
@@ -209,6 +213,10 @@ https://gbillotey.github.io/Fractalshades-doc/math.html#f1
     - see [here](https://github.com/a-liashenko/TinyPomodoro) for reference on how
     - sketch up the desired look of the app
     - find out how to style egui
+- [ ] add libraries for:
+    - [ ] locations
+    - [ ] styles
+    - [ ] cameras/image sizes
 
 ### Structure
 

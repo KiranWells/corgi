@@ -40,12 +40,18 @@ impl WorkerState {
                 preview_settings.max_iter as usize,
                 shared.clone(),
                 "Preview",
+                corgi::image_gen::Constants {
+                    iter_batch_size: 10_000,
+                },
             ),
             output_state: GPUData::init(
                 &output_settings.viewport,
                 output_settings.max_iter as usize,
                 shared,
                 "Output",
+                corgi::image_gen::Constants {
+                    iter_batch_size: 10_000,
+                },
             ),
             probe_buffer: (vec![], vec![]),
             preview_settings: None,

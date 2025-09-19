@@ -3,13 +3,15 @@ pub mod app;
 pub mod ui;
 pub mod worker;
 
-use std::{env, str::FromStr, sync::atomic::AtomicBool, time::Instant};
+use std::{env, io::Write, str::FromStr, sync::atomic::AtomicBool, time::Instant};
 
 use app::{CorgiApp, CorgiCliOptions};
 use clap::Parser;
 use color_eyre::{Result, eyre::eyre};
 use corgi::{
-    image_gen::{GPUData, SharedState, get_device_and_queue, render_image, save_to_file},
+    image_gen::{
+        Constants, GPUData, SharedState, get_device_and_queue, render_image, save_to_file,
+    },
     types::{Image, StatusMessage},
 };
 use eframe::{egui, egui_wgpu, wgpu};
@@ -47,12 +49,16 @@ fn main() -> Result<()> {
             image.max_iter as usize,
             SharedState::new(device, queue),
             "cli renderer",
+            Constants {
+                iter_batch_size: 100_000,
+            },
         );
         let now = Instant::now();
         fn status_callback(sm: StatusMessage) {
             match sm {
                 corgi::types::StatusMessage::Progress(msg, percent) => {
-                    println!("{:>6.2}% | {}", percent * 100.0, msg)
+                    println!("{:>6.2}% | {}", percent * 100.0, msg);
+                    let _ = std::io::stdout().lock().flush();
                 }
                 corgi::types::StatusMessage::NewPreviewViewport(..) => todo!(),
                 corgi::types::StatusMessage::NewOutputViewport(..) => todo!(),

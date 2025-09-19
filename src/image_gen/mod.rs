@@ -15,17 +15,15 @@ use eframe::wgpu::{self, Extent3d};
 use image::ImageBuffer;
 use little_exif::{exif_tag::ExifTag, metadata::Metadata};
 use nanoserde::SerJson;
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::{path::Path, time::Instant};
 use tracing::debug;
 
-use crate::types::{
-    ColorParams, ComputeParams, Image, ImageDiff, MAX_GPU_GROUP_ITER, RenderParams, StatusMessage,
-};
+use crate::types::{ColorParams, ComputeParams, Image, ImageDiff, RenderParams, StatusMessage};
 use probe::probe;
 
-pub use gpu_setup::{GPUData, SharedState, get_device_and_queue};
+pub use gpu_setup::{Constants, GPUData, SharedState, get_device_and_queue};
 
 macro_rules! time {
     ($name:literal; $($expression:tt)*) => {{
@@ -65,22 +63,29 @@ pub fn render_image(
     }
 
     if diff.reprobe {
+        let now = Instant::now();
         status_callback(StatusMessage::Progress("Probing point".into(), 0.0));
         // probe the point
         *probed_data = time!(
             "Probing point";
             probe::<f32>(&image.probe_location, image.max_iter, image.viewport.zoom)
         );
+        status_callback(StatusMessage::Progress("Uploading probe".into(), 0.0));
+        println!("{:?}", now.elapsed());
         // update the probe buffer
-        gpu_data.shared.queue.write_buffer(
-            &gpu_data.buffers.probe,
-            0,
-            bytemuck::cast_slice(&probed_data.0[..]),
-        );
-        gpu_data.shared.queue.write_buffer(
-            &gpu_data.buffers.probe_prime,
-            0,
-            bytemuck::cast_slice(&probed_data.1[..]),
+        time!("probe upload";
+            gpu_data.shared.queue.write_buffer(
+                &gpu_data.buffers.probe,
+                0,
+                bytemuck::cast_slice(&probed_data.0[..]),
+            );
+            gpu_data.shared.queue.write_buffer(
+                &gpu_data.buffers.probe_prime,
+                0,
+                bytemuck::cast_slice(&probed_data.1[..]),
+            );
+            gpu_data.shared.queue.submit([]);
+            let _ = gpu_data.shared.device.poll(wgpu::MaintainBase::Wait);
         );
     }
 
@@ -121,6 +126,7 @@ fn run_compute_step(
         direct_f32_pipeline,
         perturbed_f32_pipeline,
         buffers,
+        constants,
         ..
     } = gpu_data;
     let texture_size: Extent3d = (&image.viewport).into();
@@ -147,10 +153,7 @@ fn run_compute_step(
 
     // Compute passes have encountered timeouts on some GPUs, so we split the compute passes into
     // multiple smaller passes.
-    for i in 0..=(image.max_iter as usize / MAX_GPU_GROUP_ITER) {
-        let parameters;
-        time! {
-            "Compute step batch";
+    for i in 0..=(image.max_iter / constants.iter_batch_size) {
         // Create encoder for CPU - GPU communication
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
@@ -173,17 +176,17 @@ fn run_compute_step(
 
         let command_buffer = encoder.finish();
         // Update the parameters
-        parameters = ComputeParams {
+        let parameters = ComputeParams {
             width: texture_size.width,
             height: texture_size.height,
             max_iter: image.max_iter as u32,
-            chunk_max_iter: if (MAX_GPU_GROUP_ITER + 1)  * i > image.max_iter as usize {
-                (image.max_iter as usize % MAX_GPU_GROUP_ITER) as u32
+            chunk_max_iter: if (constants.iter_batch_size + 1) * i > image.max_iter {
+                (image.max_iter % constants.iter_batch_size) as u32
             } else {
-                MAX_GPU_GROUP_ITER as u32
+                constants.iter_batch_size as u32
             },
             probe_len: probe_len as u32,
-            iter_offset: (i * MAX_GPU_GROUP_ITER) as u32,
+            iter_offset: (i * constants.iter_batch_size) as u32,
             x,
             y,
             cx: image.probe_location.x.to_f32(),
@@ -199,24 +202,22 @@ fn run_compute_step(
             bytemuck::cast_slice(&[parameters]),
         );
 
-
         // submit the compute shader command buffer
         let si = queue.submit(Some(command_buffer));
         // This slows down render times, so we avoid it in release
         #[cfg(debug_assertions)]
-        time!("wait";
+        time!("Compute step batch";
             let _ = device.poll(wgpu::MaintainBase::WaitForSubmissionIndex(si));
         );
         #[cfg(not(debug_assertions))]
         let _ = si;
-        };
         status_callback(StatusMessage::Progress(
             format!(
                 "Computing iteration {} of {}",
-                i * MAX_GPU_GROUP_ITER + parameters.chunk_max_iter as usize,
+                i * constants.iter_batch_size + parameters.chunk_max_iter as u64,
                 image.max_iter
             ),
-            (i * MAX_GPU_GROUP_ITER + parameters.chunk_max_iter as usize) as f64
+            (i * constants.iter_batch_size + parameters.chunk_max_iter as u64) as f64
                 / image.max_iter as f64,
         ));
     }

@@ -78,10 +78,23 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var line = vec2(0.0);
     var angles = 0.0;
     var total_angle = 0.0;
+    var stripes_started = true;
 
     for (var step = 0u; step < params.chunk_max_iter; step = step + 1u) {
         // test if the point is already outside the escape radius
         let radius_squared = z_n.x * z_n.x + z_n.y * z_n.y;
+
+        if stripes_started || radius_squared > 64.0 {
+            prev_stripes = stripes;
+            stripes.x += 0.5+0.5*sin(5.0*atan2(z_n.x, z_n.y));
+            stripes.y += 0.5+0.5*normalize(z_n).x;
+            stripes.y += 0.5+0.5*normalize(z_n).y;
+            if !stripes_started {
+                let frac = -1.0 + log2(2.0 * log(64.0)) - log2(0.5 * log(radius_squared));
+                stripes *= 1.0-frac;
+            }
+        }
+
         if radius_squared > ESCAPE_RADIUS || all(z_n == z_old) {
             // update the output values
             if radius_squared > ESCAPE_RADIUS {
@@ -123,8 +136,6 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
             orbits.x = min(orbits.x, length(z_n));
             orbits.z = min(orbits.z, abs(z_n.y - 0.5));
             orbits.z = min(orbits.z, abs(z_n.x + 0.5));
-            prev_stripes = stripes;
-            stripes.x += 0.5+0.5*sin(5.0*atan2(z_n.x, z_n.y));
             angles += acos(dot(normalize(z_n - previous), line));
             line = normalize(previous - z_n);
             let distance = length(z_n - z_0);
