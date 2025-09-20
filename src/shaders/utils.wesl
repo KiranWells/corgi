@@ -3,11 +3,11 @@ const TAU = 2.0 * PI;
 const ESCAPE_RADIUS = 10000.0;
 const EPSILON = 1.1920929E-17;
 // flags
-const STRIPES_ENABLED = 0x1;
-const TOTAL_ANGLE_ENABLED = 0x2;
-const ORBIT_ENABLED = 0x4;
-const DERIVATIVE_ENABLED = 0x8;
-const JULIA = 0x1000;
+const STRIPES_ENABLED = 0x1u;
+const TOTAL_ANGLE_ENABLED = 0x2u;
+const ORBIT_ENABLED = 0x4u;
+const DERIVATIVE_ENABLED = 0x8u;
+const JULIA = 0x10000000u;
 
 fn hsv2rgb(hsv: vec3<f32>) -> vec3<f32> {
     var rgb: vec3<f32>;

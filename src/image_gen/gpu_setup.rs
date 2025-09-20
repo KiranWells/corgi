@@ -238,7 +238,7 @@ impl GPUData {
 
     /// Resizes the image to the new viewport and recreates necessary handles.
     /// Any objects which created a texture view of the image will need to recreate it.
-    pub fn resize(&mut self, new_view: &Viewport, max_iter: usize) {
+    pub fn resize(&mut self, new_view: &Viewport, max_iter: usize, flags: u32) {
         // recreate the texture with the new size
         let texture = Self::create_texture(&self.shared.device, new_view);
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -259,7 +259,7 @@ impl GPUData {
                     module: &self.shared.direct_f32_shader,
                     entry_point: Some("main_mandel"),
                     compilation_options: wgpu::PipelineCompilationOptions {
-                        constants: &[],
+                        constants: &[("flags", flags as f64)],
                         zero_initialize_workgroup_memory: false,
                     },
                     cache: None,
@@ -274,7 +274,10 @@ impl GPUData {
                     module: &self.shared.perturbed_f32_shader,
                     entry_point: Some("main_mandel"),
                     compilation_options: wgpu::PipelineCompilationOptions {
-                        constants: &[],
+                        // This cast is safe, since the maximum u32 is still representable
+                        // in an f64 without rounding. This will be re-converted to a u32
+                        // in the shader.
+                        constants: &[("flags", flags as f64)],
                         zero_initialize_workgroup_memory: false,
                     },
                     cache: None,

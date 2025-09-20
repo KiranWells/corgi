@@ -59,14 +59,14 @@ pub fn render_image(
     // - run the image render
 
     if diff.resize {
-        gpu_data.resize(&image.viewport, image.max_iter as usize);
+        gpu_data.resize(&image.viewport, image.max_iter as usize, image.get_flags());
     }
 
     if diff.reprobe {
         status_callback(StatusMessage::Progress("Probing point".into(), 0.0));
-        let julia_point = match image.fractal_kind {
+        let julia_point = match &image.fractal_kind {
             crate::types::FractalKind::Mandelbrot => None,
-            crate::types::FractalKind::Julia(r, i) => Some((r, i)),
+            crate::types::FractalKind::Julia(pt) => Some(pt),
         };
         // probe the point
         *probed_data = time!(
@@ -172,9 +172,9 @@ fn run_compute_step(
         }
 
         let command_buffer = encoder.finish();
-        let julia_point = match image.fractal_kind {
+        let julia_point = match &image.fractal_kind {
             crate::types::FractalKind::Mandelbrot => (0.0, 0.0),
-            crate::types::FractalKind::Julia(r, i) => (r, i),
+            crate::types::FractalKind::Julia(pt) => (pt.x.to_f32(), pt.y.to_f32()),
         };
         // Update the parameters
         let parameters = ComputeParams {
@@ -193,7 +193,6 @@ fn run_compute_step(
             cx: image.probe_location.x.to_f32(),
             cy: image.probe_location.y.to_f32(),
             zoom: image.viewport.zoom as f32,
-            flags: image.get_flags(),
             julia_x: julia_point.0,
             julia_y: julia_point.1,
         };

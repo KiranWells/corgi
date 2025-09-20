@@ -118,7 +118,6 @@ pub struct ComputeParams {
     pub cx: f32,
     pub cy: f32,
     pub zoom: f32,
-    pub flags: u32,
     pub julia_x: f32,
     pub julia_y: f32,
 }

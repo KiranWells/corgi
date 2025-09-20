@@ -6,9 +6,7 @@ This module contains the main UI state struct and its implementation, which
 contains the code necessary to update internal state and render the ui.
  */
 
-use eframe::egui::{
-    Button, Color32, DragValue, ScrollArea, Sense, Stroke, TextStyle, UiBuilder, Vec2,
-};
+use eframe::egui::{Button, Color32, ScrollArea, Sense, Stroke, TextStyle, UiBuilder, Vec2};
 use eframe::{egui, egui_wgpu};
 use egui_material_icons::icons;
 use egui_taffy::{TuiBuilderLogic, tui};
@@ -88,7 +86,7 @@ impl CorgiUI {
                 },
                 external_coloring: Coloring::external_opt_default(),
                 internal_coloring: Coloring::internal_opt_default(),
-                ..Default::default()
+                ..image.clone()
             },
             output_settings: Image {
                 viewport: default_output_viewport,
@@ -301,6 +299,7 @@ impl CorgiUI {
     /// Build the Explore tab UI
     fn explore_tab(&mut self, tui: &mut egui_taffy::Tui) {
         collapsible(tui, "Viewport", |tui| {
+            let img = self.image();
             tui.ui_add_manual(
                 |ui| {
                     egui::ComboBox::from_label("Fractal Kind")
@@ -311,9 +310,10 @@ impl CorgiUI {
                                 corgi::types::FractalKind::Mandelbrot,
                                 "Mandelbrot",
                             );
+                            let img = self.image();
                             ui.selectable_value(
                                 &mut self.explore_settings.fractal_kind,
-                                corgi::types::FractalKind::Julia(0.4, 0.4),
+                                corgi::types::FractalKind::Julia(img.viewport.center.clone()),
                                 "Julia",
                             );
                         })
@@ -323,22 +323,21 @@ impl CorgiUI {
             );
             match &mut self.explore_settings.fractal_kind {
                 corgi::types::FractalKind::Mandelbrot => {}
-                corgi::types::FractalKind::Julia(r, i) => {
-                    input_with_label(tui, "Julia real", DragValue::new(r).speed(0.003));
-                    input_with_label(tui, "Julia imaginary", DragValue::new(i).speed(0.003));
+                corgi::types::FractalKind::Julia(pt) => {
+                    point_edit(tui, "Julia parameter", get_precision(img.viewport.zoom), pt);
                 }
             }
-            self.output_settings.fractal_kind = self.explore_settings.fractal_kind;
+            self.output_settings.fractal_kind = self.explore_settings.fractal_kind.clone();
             point_edit(
                 tui,
                 "Image Center",
-                get_precision(self.image().viewport.zoom),
+                get_precision(img.viewport.zoom),
                 &mut self.output_settings.viewport.center,
             );
             point_edit(
                 tui,
                 "Probe Point",
-                get_precision(self.image().viewport.zoom),
+                get_precision(img.viewport.zoom),
                 &mut self.output_settings.probe_location,
             );
             tui.ui_add(Button::new(format!(

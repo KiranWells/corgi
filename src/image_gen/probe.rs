@@ -29,7 +29,7 @@ pub fn probe<T>(
     ComplexPoint { x, y }: &ComplexPoint,
     max_iter: u64,
     zoom: f64,
-    julia_point: Option<(f32, f32)>,
+    julia_point: Option<&ComplexPoint>,
 ) -> Vec<[T; 2]>
 where
     T: FromFloat + Debug,
@@ -44,7 +44,7 @@ where
     // z = 0 + 0i
     let mut z_real = Float::with_val(precision, 0.0);
     let mut z_imag = Float::with_val(precision, 0.0);
-    if let Some((r, i)) = julia_point {
+    if let Some(ComplexPoint { x: r, y: i }) = julia_point {
         z_real = c_real.clone();
         z_imag = c_imag.clone();
         c_real = Float::with_val(precision, r);

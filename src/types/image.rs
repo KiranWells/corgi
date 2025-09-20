@@ -61,8 +61,8 @@ pub struct ComplexPoint {
 /// A representation of the current image being rendered, including
 /// the viewport, coloring, and other parameters
 #[derive(Debug, Clone, PartialEq, DeJson, SerJson)]
+#[nserde(default)]
 pub struct Image {
-    #[nserde(default)]
     pub fractal_kind: FractalKind,
     pub viewport: Viewport,
     pub max_iter: u64,
@@ -89,11 +89,11 @@ pub enum OptLevel {
     PerformanceOptimized,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, DeJson, SerJson)]
+#[derive(Debug, Default, Clone, PartialEq, DeJson, SerJson)]
 pub enum FractalKind {
     #[default]
     Mandelbrot,
-    Julia(f32, f32),
+    Julia(ComplexPoint),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -138,6 +138,15 @@ impl Default for Viewport {
     }
 }
 
+impl Default for ComplexPoint {
+    fn default() -> Self {
+        Self {
+            x: Float::new(53),
+            y: Float::new(53),
+        }
+    }
+}
+
 impl Image {
     pub fn algorithm(&self) -> Algorithm {
         self.viewport.algorithm()
@@ -148,6 +157,9 @@ impl Image {
         let resize = self.viewport.width != other.viewport.width
             || self.viewport.height != other.viewport.height
             || self.viewport.scaling != other.viewport.scaling
+            // if there are more bits set, then there are more enabled features
+            || (self.get_flags() & 0xFF).count_ones() > (other.get_flags() & 0xFF).count_ones()
+            || self.get_flags() & 0xFF00_0000 != other.get_flags() & 0xFF00_0000
             || self.max_iter != other.max_iter;
         // if the max iteration or probe location has changed, re-run the probe
         let reprobe = self.max_iter != other.max_iter
@@ -159,11 +171,8 @@ impl Image {
             || resize;
         // if the probe location has changed or the image viewport has changed, re-generate the delta grid
         // if the image generation parameters have changed, re-run the compute shader
-        let recompute = self.max_iter != other.max_iter
-            || self.viewport != other.viewport
-            // if there are more bits set, then there are more enabled features
-            || self.get_flags().count_ones() > other.get_flags().count_ones()
-            || reprobe;
+        let recompute =
+            self.max_iter != other.max_iter || self.viewport != other.viewport || reprobe;
         // if the image coloring parameters have changed, re-run the image render
         let recolor = self.external_coloring != other.external_coloring
             || self.internal_coloring != other.internal_coloring
@@ -231,10 +240,10 @@ impl Image {
         const TOTAL_ANGLE_ENABLED: u32 = 0x2;
         const ORBIT_ENABLED: u32 = 0x4;
         const DERIVATIVE_ENABLED: u32 = 0x8;
-        const JULIA: u32 = 0x1000;
-        let kind_flags = match self.fractal_kind {
+        const JULIA: u32 = 0x1000_0000;
+        let kind_flags = match &self.fractal_kind {
             FractalKind::Mandelbrot => 0,
-            FractalKind::Julia(_, _) => JULIA,
+            FractalKind::Julia(_) => JULIA,
         };
         match self.optimization_level {
             OptLevel::CacheOptimized => {
@@ -403,10 +412,10 @@ impl ImageDiff {
 }
 
 impl FractalKind {
-    pub fn text(self) -> &'static str {
-        match self {
+    pub fn text(&self) -> &'static str {
+        match &self {
             FractalKind::Mandelbrot => "Mandelbrot",
-            FractalKind::Julia(_, _) => "Julia",
+            FractalKind::Julia(_) => "Julia",
         }
     }
 }
