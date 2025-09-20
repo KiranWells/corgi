@@ -66,8 +66,8 @@ impl CorgiUI {
     /// Create a new state struct; status should be shared with the render thread.
     pub fn new(image: Image, command_channel: mpsc::Sender<ImageGenCommand>) -> Self {
         let default_output_viewport = Viewport {
-            width: 1920,
-            height: 1080,
+            width: 3840,
+            height: 2160,
             scaling: image.viewport.scaling,
             zoom: image.viewport.zoom,
             center: image.viewport.center.clone(),
