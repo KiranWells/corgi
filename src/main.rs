@@ -67,7 +67,7 @@ fn main() -> Result<()> {
         }
         render_image(
             &mut gpu_data,
-            &mut (vec![], vec![]),
+            &mut vec![],
             &image,
             None,
             std::sync::Arc::new(AtomicBool::new(false)),

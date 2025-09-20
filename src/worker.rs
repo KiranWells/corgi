@@ -12,7 +12,7 @@ use corgi::types::{Image, ImageGenCommand, StatusMessage};
 pub struct WorkerState {
     preview_state: GPUData,
     output_state: GPUData,
-    probe_buffer: (Vec<[f32; 2]>, Vec<[f32; 2]>),
+    probe_buffer: Vec<[f32; 2]>,
     preview_settings: Option<Image>,
     output_settings: Option<Image>,
     command_channel: mpsc::Receiver<ImageGenCommand>,
@@ -53,7 +53,7 @@ impl WorkerState {
                     iter_batch_size: 10_000,
                 },
             ),
-            probe_buffer: (vec![], vec![]),
+            probe_buffer: vec![],
             preview_settings: None,
             output_settings: None,
             command_channel: recv,

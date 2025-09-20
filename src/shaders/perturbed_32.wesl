@@ -2,7 +2,6 @@ import super::utils::{ESCAPE_RADIUS, isnan, isinf};
 
 // inputs
 @group(0) @binding(0) var<storage> probed_point : array<vec2<f32>>;
-@group(0) @binding(1) var<storage> probed_point_prime : array<vec2<f32>>;
 
 // intermediate buffers
 @group(0) @binding(2) var<storage, read_write> delta_grid_iter : array<vec4<f32>>;

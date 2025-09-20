@@ -15,9 +15,9 @@ use eframe::wgpu::{self, Extent3d};
 use image::ImageBuffer;
 use little_exif::{exif_tag::ExifTag, metadata::Metadata};
 use nanoserde::SerJson;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::{path::Path, time::Instant};
 use tracing::debug;
 
 use crate::types::{ColorParams, ComputeParams, Image, ImageDiff, RenderParams, StatusMessage};
@@ -41,7 +41,7 @@ pub fn is_metadata_supported(path: &Path) -> bool {
 
 pub fn render_image(
     gpu_data: &mut GPUData,
-    probed_data: &mut (Vec<[f32; 2]>, Vec<[f32; 2]>),
+    probed_data: &mut Vec<[f32; 2]>,
     image: &Image,
     last_image: Option<&Image>,
     cancelled: Arc<AtomicBool>,
@@ -63,7 +63,6 @@ pub fn render_image(
     }
 
     if diff.reprobe {
-        let now = Instant::now();
         status_callback(StatusMessage::Progress("Probing point".into(), 0.0));
         // probe the point
         *probed_data = time!(
@@ -71,18 +70,12 @@ pub fn render_image(
             probe::<f32>(&image.probe_location, image.max_iter, image.viewport.zoom)
         );
         status_callback(StatusMessage::Progress("Uploading probe".into(), 0.0));
-        println!("{:?}", now.elapsed());
         // update the probe buffer
         time!("probe upload";
             gpu_data.shared.queue.write_buffer(
                 &gpu_data.buffers.probe,
                 0,
-                bytemuck::cast_slice(&probed_data.0[..]),
-            );
-            gpu_data.shared.queue.write_buffer(
-                &gpu_data.buffers.probe_prime,
-                0,
-                bytemuck::cast_slice(&probed_data.1[..]),
+                bytemuck::cast_slice(&probed_data[..]),
             );
             gpu_data.shared.queue.submit([]);
             let _ = gpu_data.shared.device.poll(wgpu::MaintainBase::Wait);
@@ -114,7 +107,7 @@ pub fn render_image(
 /// should be cached as much as possible. This step only needs to be run if the probe
 /// location, max iteration, or image viewport has changed.
 fn run_compute_step(
-    probed_data: &(Vec<[f32; 2]>, Vec<[f32; 2]>),
+    probed_data: &[[f32; 2]],
     image: &Image,
     gpu_data: &GPUData,
     _cancelled: Arc<AtomicBool>,
@@ -146,7 +139,7 @@ fn run_compute_step(
                 perturbed_f32_pipeline,
                 x as f32 / image.viewport.width as f32,
                 y as f32 / image.viewport.height as f32,
-                probed_data.0.len(),
+                probed_data.len(),
             )
         }
     };

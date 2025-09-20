@@ -68,7 +68,6 @@ pub struct GPUData {
 pub struct Buffers {
     // compute input
     pub probe: Buffer,
-    pub probe_prime: Buffer,
     pub delta_n: Buffer,
     pub delta_prime: Buffer,
     // parameters
@@ -379,7 +378,6 @@ impl Buffers {
         let image_size = viewport.buffer_size();
         Self {
             probe: Self::create_buffer::<f32>(device, max_iter * 2 * 2, HostWritable),
-            probe_prime: Self::create_buffer::<f32>(device, max_iter * 2 * 2, HostWritable),
             delta_n: Self::create_buffer::<f32>(device, image_size * 4, ShaderOnly),
             delta_prime: Self::create_buffer::<f32>(device, image_size * 4, ShaderOnly),
             compute_parameters: Self::create_buffer::<ComputeParams>(device, 1, Uniform),
@@ -414,7 +412,6 @@ impl Buffers {
         use BuffType::*;
         // replace all sized buffers (not uniforms)
         self.probe = Self::create_buffer::<f32>(device, max_iter * 2, HostWritable);
-        self.probe_prime = Self::create_buffer::<f32>(device, max_iter * 2, HostWritable);
         let image_size = new_view.buffer_size();
         self.delta_n = Self::create_buffer::<f32>(device, image_size * 4, ShaderOnly);
         self.delta_prime = Self::create_buffer::<f32>(device, image_size * 4, ShaderOnly);
@@ -434,7 +431,6 @@ impl BindGroups {
     ) -> (Self, PipelineLayout, PipelineLayout) {
         let Buffers {
             probe,
-            probe_prime,
             delta_n,
             delta_prime,
             step,
@@ -451,7 +447,6 @@ impl BindGroups {
             label: Some("Compute Bind Group Layout"),
             entries: &[
                 Self::create_buffer_layout_entry(0, true),
-                Self::create_buffer_layout_entry(1, true),
                 Self::create_buffer_layout_entry(2, false),
                 Self::create_buffer_layout_entry(3, false),
                 Self::create_buffer_layout_entry(4, false),
@@ -466,10 +461,6 @@ impl BindGroups {
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: probe.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: probe_prime.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
