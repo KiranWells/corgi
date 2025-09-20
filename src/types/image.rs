@@ -62,6 +62,8 @@ pub struct ComplexPoint {
 /// the viewport, coloring, and other parameters
 #[derive(Debug, Clone, PartialEq, DeJson, SerJson)]
 pub struct Image {
+    #[nserde(default)]
+    pub fractal_kind: FractalKind,
     pub viewport: Viewport,
     pub max_iter: u64,
     pub probe_location: ComplexPoint,
@@ -87,6 +89,13 @@ pub enum OptLevel {
     PerformanceOptimized,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, DeJson, SerJson)]
+pub enum FractalKind {
+    #[default]
+    Mandelbrot,
+    Julia(f32, f32),
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct ImageDiff {
     pub reprobe: bool,
@@ -98,6 +107,7 @@ pub struct ImageDiff {
 impl Default for Image {
     fn default() -> Self {
         Self {
+            fractal_kind: FractalKind::Mandelbrot,
             viewport: Viewport::default(),
             probe_location: ComplexPoint {
                 x: Float::with_val(53, -0.5),
@@ -145,6 +155,7 @@ impl Image {
             || self.probe_location.y != other.probe_location.y
             || self.viewport.algorithm() == Algorithm::Perturbedf32
                 && other.viewport.algorithm() == Algorithm::Directf32
+            || self.fractal_kind != other.fractal_kind
             || resize;
         // if the probe location has changed or the image viewport has changed, re-generate the delta grid
         // if the image generation parameters have changed, re-run the compute shader
@@ -220,9 +231,18 @@ impl Image {
         const TOTAL_ANGLE_ENABLED: u32 = 0x2;
         const ORBIT_ENABLED: u32 = 0x4;
         const DERIVATIVE_ENABLED: u32 = 0x8;
+        const JULIA: u32 = 0x1000;
+        let kind_flags = match self.fractal_kind {
+            FractalKind::Mandelbrot => 0,
+            FractalKind::Julia(_, _) => JULIA,
+        };
         match self.optimization_level {
             OptLevel::CacheOptimized => {
-                STRIPES_ENABLED | TOTAL_ANGLE_ENABLED | ORBIT_ENABLED | DERIVATIVE_ENABLED
+                STRIPES_ENABLED
+                    | TOTAL_ANGLE_ENABLED
+                    | ORBIT_ENABLED
+                    | DERIVATIVE_ENABLED
+                    | kind_flags
             }
             OptLevel::AccuracyOptimized | OptLevel::PerformanceOptimized => {
                 let mut flags = 0;
@@ -242,7 +262,7 @@ impl Image {
                 {
                     flags |= DERIVATIVE_ENABLED;
                 }
-                flags
+                flags | kind_flags
             }
         }
     }
@@ -378,6 +398,15 @@ impl ImageDiff {
             reprobe: true,
             recompute: true,
             recolor: true,
+        }
+    }
+}
+
+impl FractalKind {
+    pub fn text(self) -> &'static str {
+        match self {
+            FractalKind::Mandelbrot => "Mandelbrot",
+            FractalKind::Julia(_, _) => "Julia",
         }
     }
 }

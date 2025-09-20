@@ -25,7 +25,12 @@ impl FromFloat for f32 {
 
 /// Generates a vector of iterated points for a given complex number in the mandelbrot set.
 /// The resulting vector will be of length `max_iter` or less if the point escapes.
-pub fn probe<T>(ComplexPoint { x, y }: &ComplexPoint, max_iter: u64, zoom: f64) -> Vec<[T; 2]>
+pub fn probe<T>(
+    ComplexPoint { x, y }: &ComplexPoint,
+    max_iter: u64,
+    zoom: f64,
+    julia_point: Option<(f32, f32)>,
+) -> Vec<[T; 2]>
 where
     T: FromFloat + Debug,
 {
@@ -33,16 +38,22 @@ where
     let precision = get_precision(zoom);
 
     // c = x + yi
-    let c_real = Float::with_val(precision, x);
-    let c_imag = Float::with_val(precision, y);
+    let mut c_real = Float::with_val(precision, x);
+    let mut c_imag = Float::with_val(precision, y);
 
     // z = 0 + 0i
     let mut z_real = Float::with_val(precision, 0.0);
     let mut z_imag = Float::with_val(precision, 0.0);
+    if let Some((r, i)) = julia_point {
+        z_real = c_real.clone();
+        z_imag = c_imag.clone();
+        c_real = Float::with_val(precision, r);
+        c_imag = Float::with_val(precision, i);
+    }
 
     // z^2 (temp values for optimized computation)
-    let mut z_squared_real = Float::with_val(precision, 0.0);
-    let mut z_squared_imag = Float::with_val(precision, 0.0);
+    let mut z_squared_real = z_real.clone() * z_real.clone();
+    let mut z_squared_imag = z_imag.clone() * z_imag.clone();
 
     probed_point.push([T::from_float(&z_real), T::from_float(&z_imag)]);
     for _step in 0..max_iter - 1 {

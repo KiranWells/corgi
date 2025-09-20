@@ -1,4 +1,4 @@
-import super::utils::{ESCAPE_RADIUS, isnan, isinf};
+import super::utils::{ESCAPE_RADIUS, isnan, isinf, STRIPES_ENABLED, TOTAL_ANGLE_ENABLED, ORBIT_ENABLED, DERIVATIVE_ENABLED, JULIA};
 
 // inputs
 @group(0) @binding(0) var<storage> probed_point : array<vec2<f32>>;
@@ -25,14 +25,12 @@ struct Params {
     cy: f32,
     zoom: f32,
     flags: u32,
+    julia_x: f32,
+    julia_y: f32,
 };
 @group(1) @binding(0) var<uniform> params : Params;
 
 const SCALE_FACTOR = 10.0;
-const STRIPES_ENABLED = 0x1;
-const TOTAL_ANGLE_ENABLED = 0x2;
-const ORBIT_ENABLED = 0x4;
-const DERIVATIVE_ENABLED = 0x8;
 
 fn iter_delta_n(delta_n: vec2f, zoom: f32, x_n: vec2f, delta_0: vec2f, zoom_0: f32) -> vec2f {
     // delta_n = 2 * x_n * delta_n - delta_n^2 + delta_0
@@ -67,12 +65,21 @@ fn rebase_fractexp(x: ptr<function, vec2f>, exp: ptr<function, f32>) {
     }
 }
 
-fn rebase_probe(x_n: ptr<function, vec2f>, delta_n: ptr<function, vec2f>, zoom: f32, ref_iteration: ptr<function, u32>) {
-    let y_n1 = *x_n * pow(2.0, -zoom) + *delta_n;
-    if length(y_n1) < length(*delta_n) || *ref_iteration == params.probe_len {
-        *delta_n = y_n1;
-        *ref_iteration = 0;
-        *x_n = vec2f(0.0);
+fn rebase_probe(x_n: ptr<function, vec2f>, x_0: vec2f, delta_n: ptr<function, vec2f>, zoom: f32, ref_iteration: ptr<function, u32>) {
+    if (params.flags & JULIA) > 0 {
+        let y_n1 = (*x_n - x_0) * pow(2.0, -zoom) + *delta_n;
+        if length(y_n1) < length(*delta_n) || *ref_iteration == params.probe_len {
+            *delta_n = y_n1;
+            *ref_iteration = 0;
+            *x_n = x_0;
+        }
+    } else {
+        let y_n1 = *x_n * pow(2.0, -zoom) + *delta_n;
+        if length(y_n1) < length(*delta_n) || *ref_iteration == params.probe_len {
+            *delta_n = y_n1;
+            *ref_iteration = 0;
+            *x_n = vec2f(0.0);
+        }
     }
 }
 
@@ -101,14 +108,16 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
     } else {
         aspect_scale.y = 1.0 / aspect;
     }
-    let offset = vec2(-params.x, -params.y) + vec2<f32>(f32(i) / f32(params.width), f32(j) / f32(params.height));
+    var offset = vec2(-params.x, -params.y) + vec2<f32>(f32(i) / f32(params.width), f32(j) / f32(params.height));
+    if (params.flags & JULIA) > 0 {
+        offset = vec2(-params.x, -params.y) + vec2<f32>(f32(i) / f32(params.width), f32(j) / f32(params.height));
+    }
 
     var delta_0 = ((offset - 0.5) * 2.0) * aspect_scale;
     var zoom_0 = -params.zoom;
     var zoom = zoom_0;
     var zoom_prime = 0.0;
     let c = vec2(params.cx, params.cy);
-    let y_0 = c + delta_0 * pow(2.0, zoom_0);
     var delta_n: vec2<f32>;
     var delta_n_prime: vec2<f32>;
     var x_old = vec2f(ESCAPE_RADIUS * 2);
@@ -119,7 +128,12 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var prev_stripes: vec4f;
     var ref_iteration = 0u;
     if params.iter_offset == 0u {
-        delta_n = vec2(0.0);
+        if (params.flags & JULIA) > 0 {
+            delta_n = delta_0;
+            delta_0 = vec2(0.0);
+        } else {
+            delta_n = vec2(0.0);
+        }
         delta_n_prime = vec2(0.0);
         intermediate_step[buffer_index] = 0;
     } else {
@@ -131,6 +145,7 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
         orbits = orbit_traps[buffer_index];
         stripes = stripes_buffer[buffer_index];
     };
+    let y_0 = c + delta_0 * pow(2.0, zoom_0);
     var complete = false;
     var step = 0u;
     var closest = length(y_0);
@@ -186,7 +201,7 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
             complete = true;
             break;
         }
-        rebase_probe(&x_n, &delta_n, zoom, &ref_iteration);
+        rebase_probe(&x_n, probed_point[0], &delta_n, zoom, &ref_iteration);
         ref_iteration += 1;
         if (step + params.iter_offset >= 100u && (step - 100u) % 1024u == 0) {
             x_old = x_n;

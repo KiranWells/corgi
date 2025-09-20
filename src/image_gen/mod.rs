@@ -64,10 +64,14 @@ pub fn render_image(
 
     if diff.reprobe {
         status_callback(StatusMessage::Progress("Probing point".into(), 0.0));
+        let julia_point = match image.fractal_kind {
+            crate::types::FractalKind::Mandelbrot => None,
+            crate::types::FractalKind::Julia(r, i) => Some((r, i)),
+        };
         // probe the point
         *probed_data = time!(
             "Probing point";
-            probe::<f32>(&image.probe_location, image.max_iter, image.viewport.zoom)
+            probe::<f32>(&image.probe_location, image.max_iter, image.viewport.zoom, julia_point)
         );
         status_callback(StatusMessage::Progress("Uploading probe".into(), 0.0));
         // update the probe buffer
@@ -168,6 +172,10 @@ fn run_compute_step(
         }
 
         let command_buffer = encoder.finish();
+        let julia_point = match image.fractal_kind {
+            crate::types::FractalKind::Mandelbrot => (0.0, 0.0),
+            crate::types::FractalKind::Julia(r, i) => (r, i),
+        };
         // Update the parameters
         let parameters = ComputeParams {
             width: texture_size.width,
@@ -186,6 +194,8 @@ fn run_compute_step(
             cy: image.probe_location.y.to_f32(),
             zoom: image.viewport.zoom as f32,
             flags: image.get_flags(),
+            julia_x: julia_point.0,
+            julia_y: julia_point.1,
         };
         if parameters.chunk_max_iter == 0 {
             break;

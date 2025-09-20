@@ -125,12 +125,12 @@ https://gbillotey.github.io/Fractalshades-doc/math.html#f1
     - [x] distance estimation
     - [x] stripe-average coloring
         - [ ] switch for optimized version?
-        - [ ] disable unoptimized version when not being used
+        - [x] disable unoptimized version when not being used
     - [x] gradient coloring
     - [x] escape radii outlines
     - [x] orbit traps
         - [ ] will need some controls for point/geometry selection
-        - [ ] only enable the orbit traps that are configured
+        - [x] only enable the orbit traps that are configured
         - [ ] add averaging step to make coloring adjustments easier
     - interior:
         - [/] orbit traps
@@ -149,7 +149,7 @@ https://gbillotey.github.io/Fractalshades-doc/math.html#f1
         - probably just include the parameters used internally until support for a dynamic coloring formula is added
 - [ ] additional fractal algorithms
     - [x] mandelbrot
-    - [ ] julia
+    - [x] julia
     - [ ] burning ship
 
 
@@ -157,7 +157,7 @@ https://gbillotey.github.io/Fractalshades-doc/math.html#f1
 
 - [x] test using rayon for delta grid generation
 - [x] switch to GPU calculations for initial deltas, if possible
-- [ ] dynamically select the work group size
+- [x] dynamically select the work group size
 - [x] dynamic precision selection
     - use zoom level to conservatively decide on necessary precision
     - switch on precision level to decide on strategy to use:

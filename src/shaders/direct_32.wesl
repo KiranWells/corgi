@@ -1,4 +1,4 @@
-import super::utils::{ESCAPE_RADIUS};
+import super::utils::{ESCAPE_RADIUS, JULIA};
 
 // inputs
 @group(0) @binding(0) var<storage> probed_point : array<vec2<f32>>;
@@ -25,6 +25,8 @@ struct Params {
     cy: f32,
     zoom: f32,
     flags: u32,
+    julia_x: f32,
+    julia_y: f32,
 };
 @group(1) @binding(0) var<uniform> params : Params;
 
@@ -56,7 +58,12 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let offset = vec2<f32>(f32(i) / f32(params.width), f32(j) / f32(params.height));
 
-    let z_0 = vec2<f32>(params.x, params.y) + (offset - 0.5) * 2.0 * scale * aspect_scale;
+    var z_0 = vec2f(0.0);
+    if (params.flags & JULIA) > 0 {
+        z_0 = vec2(params.julia_x, params.julia_y);
+    } else {
+        z_0 = vec2<f32>(params.x, params.y) + (offset - 0.5) * 2.0 * scale * aspect_scale;
+    }
     var z_n: vec2<f32>;
     var z_n_prime: vec2<f32>;
     var z_old = vec2<f32>(ESCAPE_RADIUS);
@@ -64,7 +71,11 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var stripes = vec4f(0.0);
     var prev_stripes: vec4f;
     if params.iter_offset == 0u {
-        z_n = vec2f(0.0);
+        if (params.flags & JULIA) > 0 {
+            z_n = vec2<f32>(params.x, params.y) + (offset - 0.5) * 2.0 * scale * aspect_scale;
+        } else {
+            z_n = vec2f(0.0);
+        }
         z_n_prime = vec2f(1.0, 0.0);
         intermediate_step[buffer_index] = 0;
     } else {

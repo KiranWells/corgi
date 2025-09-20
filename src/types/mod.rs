@@ -119,6 +119,8 @@ pub struct ComputeParams {
     pub cy: f32,
     pub zoom: f32,
     pub flags: u32,
+    pub julia_x: f32,
+    pub julia_y: f32,
 }
 
 /// The parameters for the render shader. This is sent as a uniform

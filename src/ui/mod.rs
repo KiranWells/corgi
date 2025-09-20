@@ -6,7 +6,9 @@ This module contains the main UI state struct and its implementation, which
 contains the code necessary to update internal state and render the ui.
  */
 
-use eframe::egui::{Button, Color32, ScrollArea, Sense, Stroke, TextStyle, UiBuilder, Vec2};
+use eframe::egui::{
+    Button, Color32, DragValue, ScrollArea, Sense, Stroke, TextStyle, UiBuilder, Vec2,
+};
 use eframe::{egui, egui_wgpu};
 use egui_material_icons::icons;
 use egui_taffy::{TuiBuilderLogic, tui};
@@ -278,6 +280,7 @@ impl CorgiUI {
                         self.explore_settings.internal_coloring.clone();
                     active_image.optimization_level = OptLevel::PerformanceOptimized;
                 } else {
+                    active_image.viewport.scaling = 1.0;
                     active_image.optimization_level = OptLevel::CacheOptimized;
                 }
                 active_image
@@ -298,6 +301,34 @@ impl CorgiUI {
     /// Build the Explore tab UI
     fn explore_tab(&mut self, tui: &mut egui_taffy::Tui) {
         collapsible(tui, "Viewport", |tui| {
+            tui.ui_add_manual(
+                |ui| {
+                    egui::ComboBox::from_label("Fractal Kind")
+                        .selected_text(self.explore_settings.fractal_kind.text())
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.explore_settings.fractal_kind,
+                                corgi::types::FractalKind::Mandelbrot,
+                                "Mandelbrot",
+                            );
+                            ui.selectable_value(
+                                &mut self.explore_settings.fractal_kind,
+                                corgi::types::FractalKind::Julia(0.4, 0.4),
+                                "Julia",
+                            );
+                        })
+                        .response
+                },
+                |res, _ui| res,
+            );
+            match &mut self.explore_settings.fractal_kind {
+                corgi::types::FractalKind::Mandelbrot => {}
+                corgi::types::FractalKind::Julia(r, i) => {
+                    input_with_label(tui, "Julia real", DragValue::new(r).speed(0.003));
+                    input_with_label(tui, "Julia imaginary", DragValue::new(i).speed(0.003));
+                }
+            }
+            self.output_settings.fractal_kind = self.explore_settings.fractal_kind;
             point_edit(
                 tui,
                 "Image Center",
@@ -439,7 +470,7 @@ impl CorgiUI {
                             let (x, y) = view_image
                                 .viewport
                                 .get_real_coords((pos.x) as f64, (size.y - pos.y) as f64);
-                            self.output_settings.probe_location = ComplexPoint { x, y };
+                            self.explore_settings.probe_location = ComplexPoint { x, y };
                             self.setting_probe = false;
                         }
                     }
