@@ -12,7 +12,7 @@ use corgi::{
     image_gen::{
         Constants, GPUData, SharedState, get_device_and_queue, render_image, save_to_file,
     },
-    types::{Image, StatusMessage},
+    types::{Image, OptLevel, StatusMessage},
 };
 use eframe::{egui, egui_wgpu, wgpu};
 use pollster::FutureExt;
@@ -43,7 +43,8 @@ fn main() -> Result<()> {
         if !settings_file.exists() {
             return Err(eyre!("Settings file does not exist"));
         }
-        let image = Image::load_from_file(&settings_file)?;
+        let mut image = Image::load_from_file(&settings_file)?;
+        image.optimization_level = OptLevel::AccuracyOptimized;
         let mut gpu_data = GPUData::init(
             &image.viewport,
             image.max_iter as usize,

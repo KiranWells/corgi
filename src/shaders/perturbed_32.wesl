@@ -25,10 +25,15 @@ struct Params {
     cx: f32,
     cy: f32,
     zoom: f32,
+    flags: u32,
 };
 @group(1) @binding(0) var<uniform> params : Params;
 
 const SCALE_FACTOR = 10.0;
+const STRIPES_ENABLED = 0x1;
+const TOTAL_ANGLE_ENABLED = 0x2;
+const ORBIT_ENABLED = 0x4;
+const DERIVATIVE_ENABLED = 0x8;
 
 fn iter_delta_n(delta_n: vec2f, zoom: f32, x_n: vec2f, delta_0: vec2f, zoom_0: f32) -> vec2f {
     // delta_n = 2 * x_n * delta_n - delta_n^2 + delta_0
@@ -143,32 +148,35 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
 
         let y_n = x_n + delta_n * pow(2.0, zoom);
-        // since we are inside, calculate the orbit's step count and total internal angle
-        if step + params.iter_offset > 1u && step + params.iter_offset < min_iter *2 {
-            angles += acos(dot(normalize(y_n - previous), line));
-            line = normalize(previous - y_n);
-            let distance = length(x_n + delta_n * scale - (c + delta_0 * pow(2.0, zoom_0)));
-            if distance < closest {
-                total_angle = angles;
-                min_iter = step + params.iter_offset;
-                closest = distance;
+        if (params.flags & TOTAL_ANGLE_ENABLED) > 0 {
+            if step + params.iter_offset > 1u && step + params.iter_offset < min_iter *2 {
+                angles += acos(dot(normalize(y_n - previous), line));
+                line = normalize(previous - y_n);
+                let distance = length(x_n + delta_n * scale - (c + delta_0 * pow(2.0, zoom_0)));
+                if distance < closest {
+                    total_angle = angles;
+                    min_iter = step + params.iter_offset;
+                    closest = distance;
+                }
             }
         }
         previous = y_n;
         let radius_squared = y_n.x * y_n.x + y_n.y * y_n.y;
         // calculate orbit traps and stripe averages
-        if stripes_started || radius_squared > 64.0 {
+        if (params.flags & STRIPES_ENABLED) > 0 && (stripes_started || radius_squared > 64.0) {
             prev_stripes = stripes;
             stripes.x += 0.5+0.5*sin(5.0*atan2(y_n.x, y_n.y));
-            stripes.y += 0.5+0.5*normalize(y_n).x;
-            stripes.y += 0.5+0.5*normalize(y_n).y;
+            if length(y_n) != 0.0 {
+                stripes.y += 0.5+0.5*normalize(y_n).x;
+                stripes.z += 0.5+0.5*normalize(y_n).y;
+            }
             if !stripes_started {
                 let frac = -1.0 + log2(2.0 * log(64.0)) - log2(0.5 * log(radius_squared));
                 stripes *= 1.0-frac;
                 stripes_started = true;
             }
         }
-        if step + params.iter_offset > 1u {
+        if (params.flags & ORBIT_ENABLED) > 0 && step + params.iter_offset > 1u {
             orbits.x = min(orbits.x, length(y_n));
             orbits.z = min(orbits.z, abs(y_n.y - 0.5));
             orbits.z = min(orbits.z, abs(y_n.x + 0.5));
@@ -188,13 +196,14 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
 
         // calculate the next iteration according to the perturbation formula
-        delta_n_prime = iter_delta_n_prime(y_n, delta_n_prime, zoom_prime);
+        if (params.flags & DERIVATIVE_ENABLED) > 0 {
+            delta_n_prime = iter_delta_n_prime(y_n, delta_n_prime, zoom_prime);
+        }
         delta_n = iter_delta_n(delta_n, zoom, x_n, delta_0, zoom_0);
         if step % 32 == 0  {
             rebase_fractexp(&delta_n, &zoom);
             rebase_fractexp(&delta_n_prime, &zoom_prime);
         }
-
     }
 
     // update the output values
@@ -214,9 +223,12 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
         delta_grid_iter[buffer_index] = vec4(y_n, zoom, 0.0);
         delta_grid_prime[buffer_index] = vec3(delta_n_prime * pow(2.0, zoom_prime + zoom_0), -zoom_0);
 
-        orbit_traps[buffer_index] = orbits;
-        let frac = -1.0 + log2(2.0 * log(ESCAPE_RADIUS)) - log2(0.5 * log(radius_squared));
-        stripes_buffer[buffer_index] = stripes / f32(params.iter_offset + step) * frac + prev_stripes / f32(params.iter_offset + step - 1) * (1.0 - frac);
+        if internal {
+            stripes_buffer[buffer_index] = stripes;
+        } else {
+            let frac = -1.0 + log2(2.0 * log(ESCAPE_RADIUS)) - log2(0.5 * log(radius_squared));
+            stripes_buffer[buffer_index] = stripes / f32(params.iter_offset + step) * frac + prev_stripes / f32(params.iter_offset + step - 1) * (1.0 - frac);
+        }
     } else {
         delta_grid_iter[buffer_index] = vec4(delta_n, zoom, bitcast<f32>(ref_iteration));
         delta_grid_prime[buffer_index] = vec3(delta_n_prime, zoom_prime);

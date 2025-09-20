@@ -25,6 +25,7 @@ struct Params {
     cx: f32,
     cy: f32,
     zoom: f32,
+    flags: u32,
 };
 @group(1) @binding(0) var<uniform> params : Params;
 
@@ -87,8 +88,10 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if stripes_started || radius_squared > 64.0 {
             prev_stripes = stripes;
             stripes.x += 0.5+0.5*sin(5.0*atan2(z_n.x, z_n.y));
-            stripes.y += 0.5+0.5*normalize(z_n).x;
-            stripes.y += 0.5+0.5*normalize(z_n).y;
+            if length(z_n) != 0.0 {
+                stripes.y += 0.5+0.5*normalize(z_n).x;
+                stripes.z += 0.5+0.5*normalize(z_n).y;
+            }
             if !stripes_started {
                 let frac = -1.0 + log2(2.0 * log(64.0)) - log2(0.5 * log(radius_squared));
                 stripes *= 1.0-frac;

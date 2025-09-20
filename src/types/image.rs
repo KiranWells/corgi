@@ -13,7 +13,7 @@ use rug::{
     ops::{CompleteRound, PowAssign},
 };
 
-use crate::image_gen::is_metadata_supported;
+use crate::{image_gen::is_metadata_supported, types::LayerKind};
 
 use super::{Coloring, Transform, get_precision};
 
@@ -67,6 +67,8 @@ pub struct Image {
     pub probe_location: ComplexPoint,
     pub external_coloring: Coloring,
     pub internal_coloring: Coloring,
+    #[nserde(skip)]
+    pub optimization_level: OptLevel,
     pub misc: f32,
     pub debug_shutter: f32,
 }
@@ -75,6 +77,14 @@ pub struct Image {
 pub enum Algorithm {
     Directf32,
     Perturbedf32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum OptLevel {
+    #[default]
+    CacheOptimized,
+    AccuracyOptimized,
+    PerformanceOptimized,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -98,6 +108,7 @@ impl Default for Image {
             internal_coloring: Coloring::internal_default(),
             misc: 1.0,
             debug_shutter: 0.0,
+            optimization_level: OptLevel::AccuracyOptimized,
         }
     }
 }
@@ -137,8 +148,11 @@ impl Image {
             || resize;
         // if the probe location has changed or the image viewport has changed, re-generate the delta grid
         // if the image generation parameters have changed, re-run the compute shader
-        let recompute =
-            self.max_iter != other.max_iter || self.viewport != other.viewport || reprobe;
+        let recompute = self.max_iter != other.max_iter
+            || self.viewport != other.viewport
+            // if there are more bits set, then there are more enabled features
+            || self.get_flags().count_ones() > other.get_flags().count_ones()
+            || reprobe;
         // if the image coloring parameters have changed, re-run the image render
         let recolor = self.external_coloring != other.external_coloring
             || self.internal_coloring != other.internal_coloring
@@ -199,6 +213,71 @@ impl Image {
             // reset probe
             self.probe_location = self.viewport.center.clone();
         }
+    }
+
+    pub fn get_flags(&self) -> u32 {
+        const STRIPES_ENABLED: u32 = 0x1;
+        const TOTAL_ANGLE_ENABLED: u32 = 0x2;
+        const ORBIT_ENABLED: u32 = 0x4;
+        const DERIVATIVE_ENABLED: u32 = 0x8;
+        match self.optimization_level {
+            OptLevel::CacheOptimized => {
+                STRIPES_ENABLED | TOTAL_ANGLE_ENABLED | ORBIT_ENABLED | DERIVATIVE_ENABLED
+            }
+            OptLevel::AccuracyOptimized | OptLevel::PerformanceOptimized => {
+                let mut flags = 0;
+                if self.contains_kind(LayerKind::Stripe) {
+                    flags |= STRIPES_ENABLED;
+                }
+                if self.internal_contains_kind(LayerKind::Step)
+                    || self.internal_contains_kind(LayerKind::SmoothStep)
+                {
+                    flags |= TOTAL_ANGLE_ENABLED;
+                }
+                if self.contains_kind(LayerKind::OrbitTrap) {
+                    flags |= ORBIT_ENABLED;
+                }
+                if self.external_contains_kind(LayerKind::Distance)
+                    || self.external_coloring.overlays.set_outline_color[3].fract() != 0.0
+                {
+                    flags |= DERIVATIVE_ENABLED;
+                }
+                flags
+            }
+        }
+    }
+    pub fn contains_kind(&self, kind: LayerKind) -> bool {
+        self.external_contains_kind(kind) || self.internal_contains_kind(kind)
+    }
+    pub fn internal_contains_kind(&self, kind: LayerKind) -> bool {
+        self.internal_coloring
+            .color_layers
+            .iter()
+            .filter(|x| x.kind == kind)
+            .count()
+            > 0
+            || self
+                .internal_coloring
+                .light_layers
+                .iter()
+                .filter(|x| x.kind == kind)
+                .count()
+                > 0
+    }
+    pub fn external_contains_kind(&self, kind: LayerKind) -> bool {
+        self.external_coloring
+            .color_layers
+            .iter()
+            .filter(|x| x.kind == kind)
+            .count()
+            > 0
+            || self
+                .external_coloring
+                .light_layers
+                .iter()
+                .filter(|x| x.kind == kind)
+                .count()
+                > 0
     }
 }
 

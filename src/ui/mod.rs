@@ -15,7 +15,7 @@ use std::sync::mpsc;
 use taffy::{Overflow, prelude::*};
 
 use corgi::types::{
-    Coloring, ComplexPoint, Image, ImageGenCommand, Status, Viewport, get_precision,
+    Coloring, ComplexPoint, Image, ImageGenCommand, OptLevel, Status, Viewport, get_precision,
 };
 use preview_resources::PaintCallback;
 use utils::{collapsible, input_with_label, point_edit};
@@ -90,6 +90,7 @@ impl CorgiUI {
             },
             output_settings: Image {
                 viewport: default_output_viewport,
+                optimization_level: OptLevel::AccuracyOptimized,
                 ..image
             },
             setting_probe: false,
@@ -275,6 +276,9 @@ impl CorgiUI {
                         self.explore_settings.external_coloring.clone();
                     active_image.internal_coloring =
                         self.explore_settings.internal_coloring.clone();
+                    active_image.optimization_level = OptLevel::PerformanceOptimized;
+                } else {
+                    active_image.optimization_level = OptLevel::CacheOptimized;
                 }
                 active_image
             }

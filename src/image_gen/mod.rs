@@ -192,6 +192,7 @@ fn run_compute_step(
             cx: image.probe_location.x.to_f32(),
             cy: image.probe_location.y.to_f32(),
             zoom: image.viewport.zoom as f32,
+            flags: image.get_flags(),
         };
         if parameters.chunk_max_iter == 0 {
             break;
