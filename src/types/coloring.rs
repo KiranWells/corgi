@@ -230,7 +230,7 @@ impl Coloring {
             ],
             overlays: Overlays {
                 iteration_outline_color: [0.0; 4],
-                set_outline_color: [1.0; 4],
+                set_outline_color: [0.0, 0.0, 0.0, 3.0],
             },
         }
     }

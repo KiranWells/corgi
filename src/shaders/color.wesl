@@ -299,10 +299,8 @@ fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
     if fract(color_params.overlays.set_outline_color.a) > 0.0 {
-        let pixel_size = scale / f32(render_params.width);
-        if distance_estimate < pixel_size * 0.03 * floor(color_params.overlays.set_outline_color.a) {
-            color = mix(color, color_params.overlays.set_outline_color.rgb, fract(color_params.overlays.set_outline_color.a));
-        }
+        let frac = 1.0 - clamp(distance_estimate / 0.00005 / floor(color_params.overlays.set_outline_color.a), 0.0,1.0);
+        color = mix(color, color_params.overlays.set_outline_color.rgb, fract(color_params.overlays.set_outline_color.a) * frac);
     }
     
     textureStore(
