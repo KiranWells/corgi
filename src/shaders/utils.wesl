@@ -2,6 +2,7 @@ const PI = 3.1415926535897932384626433832795028841971693993751058209749445923078
 const TAU = 2.0 * PI;
 const ESCAPE_RADIUS = 10000.0;
 const EPSILON = 1.1920929E-17;
+const FRACTEXP_SCALE_FACTOR = 10.0;
 // flags
 const STRIPES_ENABLED = 0x1u;
 const TOTAL_ANGLE_ENABLED = 0x2u;
@@ -67,7 +68,22 @@ fn isinf(x: f32) -> bool {
     return exp == 0xffu && frac == 0u;
 }
 
+fn length_squared(v: vec2f) -> f32 {
+    return v.x * v.x + v.y * v.y;
+}
+
 fn debug(x: u32) -> bool {
     return x < u32(f32(render_params.width) * render_params.debug_shutter);
+}
+
+fn aspect(width: u32, height: u32) -> vec2f {
+    var aspect_scale = vec2<f32>(1.0, 1.0);
+    let aspect = f32(width) / f32(height);
+    if aspect < 1.0 {
+        aspect_scale.x = aspect;
+    } else {
+        aspect_scale.y = 1.0 / aspect;
+    }
+    return aspect_scale;
 }
 
