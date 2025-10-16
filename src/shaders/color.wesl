@@ -102,7 +102,7 @@ fn calculate_lighting_layers(x: u32, y: u32, color_params: ColorParams) -> f32 {
                 continue;
             }
             case LAYER_STEP {
-                brightness += (log(f32(step)) * log(f32(step)) - layer_param) * 0.05 * layer_strength;
+                brightness += (f32(step) - layer_param) * 0.05 * layer_strength;
             }
             case LAYER_SMOOTH_STEP {
                 if internal {
@@ -171,7 +171,7 @@ fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 continue;
             }
             case LAYER_STEP {
-                color_value += log(f32(step)) * log(f32(step)) * 0.05 * layer_strength;
+                color_value += f32(step) * 0.05 * layer_strength;
             }
             case LAYER_SMOOTH_STEP {
                 if internal {

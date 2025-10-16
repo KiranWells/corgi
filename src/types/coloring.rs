@@ -212,7 +212,7 @@ impl Coloring {
             light_layers: [
                 Layer {
                     kind: LayerKind::Step,
-                    strength: 2.5,
+                    strength: 3.0,
                     param: 0.0,
                 },
                 Layer::default(),
@@ -224,13 +224,13 @@ impl Coloring {
                 Layer::default(),
             ],
             lights: [
-                Light::new([1.0, 1.0, 1.0], 2.0, [0.0, 0.1, 0.9]),
-                Light::new([0.5, 0.6, 1.0], 1.0, [0.8, 0.0, 0.6]),
-                Light::new([1.0, 0.8, 0.4], 1.0, [0.0, 0.8, 0.5]),
+                Light::new([1.0, 1.0, 1.0], 3.0, [0.0, 0.1, 0.9]),
+                Light::new([0.2, 0.4, 1.0], 3.0, [0.9, 0.0, 0.0]),
+                Light::new([1.0, 0.6, 0.1], 3.0, [0.0, 0.8, 0.1]),
             ],
             overlays: Overlays {
                 iteration_outline_color: [0.0; 4],
-                set_outline_color: [0.0, 0.0, 0.0, 3.0],
+                set_outline_color: [0.0; 4],
             },
         }
     }
@@ -245,14 +245,10 @@ impl Coloring {
             color_layers: [Layer::default(); 8],
             lighting_kind: LightingKind::Flat,
             light_layers: [Layer::default(); 8],
-            lights: [
-                Light::new([1.0, 1.0, 1.0], 1.0, [0.0, 0.5, 0.8]),
-                Light::new([0.5, 0.6, 1.0], 1.0, [0.8, 0.0, 0.6]),
-                Light::new([1.0, 0.8, 0.4], 1.0, [0.0, 0.8, 0.5]),
-            ],
+            lights: [Light::default(); 3],
             overlays: Overlays {
                 iteration_outline_color: [0.0; 4],
-                set_outline_color: [1.0; 4],
+                set_outline_color: [0.0; 4],
             },
         }
     }
