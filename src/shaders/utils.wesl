@@ -87,3 +87,11 @@ fn aspect(width: u32, height: u32) -> vec2f {
     return aspect_scale;
 }
 
+fn get_orbit_values(z_n: vec2f) -> vec4f {
+    return vec4f(
+        length_squared(z_n),
+        abs(length_squared(z_n)-2.0),
+        min(abs(z_n.x), abs(z_n.y)),
+        abs(abs(z_n.x) + abs(z_n.y)-2.0)
+    );
+}

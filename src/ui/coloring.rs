@@ -244,10 +244,25 @@ impl EditUI for Layer {
                 let mut index = self.param as i32 + 1;
                 let mut offset = self.param.fract();
 
-                input_with_label(
-                    tui,
-                    "Version",
-                    egui::DragValue::new(&mut index).speed(0.03).range(1..=4),
+                tui.ui_add_manual(
+                    |ui| {
+                        egui::ComboBox::from_label("Orbit Shape")
+                            .selected_text(match index {
+                                1 => "Center",
+                                2 => "Circle",
+                                3 => "Axes",
+                                4 => "Box",
+                                _ => unreachable!(),
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut index, 1, "Center");
+                                ui.selectable_value(&mut index, 2, "Circle");
+                                ui.selectable_value(&mut index, 3, "Axes");
+                                ui.selectable_value(&mut index, 4, "Box");
+                            })
+                            .response
+                    },
+                    |res, _ui| res,
                 );
                 input_with_label(
                     tui,

@@ -9,6 +9,7 @@ import super::utils::{
     aspect,
     isinf,
     isnan,
+    get_orbit_values,
     length_squared,
 };
 
@@ -219,9 +220,7 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
         }
         if (flags & ORBIT_ENABLED) != 0 && step + params.iter_offset > 1u {
-            orbits.x = min(orbits.x, length_squared(y_n));
-            orbits.z = min(orbits.z, abs(y_n.y - 0.5));
-            orbits.z = min(orbits.z, abs(y_n.x + 0.5));
+            orbits = min(orbits, get_orbit_values(y_n));
         }
 
         // test if the point is already outside the escape radius
