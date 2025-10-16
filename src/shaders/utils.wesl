@@ -95,3 +95,19 @@ fn get_orbit_values(z_n: vec2f) -> vec4f {
         abs(abs(z_n.x) + abs(z_n.y)-2.0)
     );
 }
+
+fn get_stripe_values(z_n: vec2f) -> vec4f {
+    if all(z_n == vec2f(0.0)) {
+        return vec4(0.0);
+    }
+    return vec4(
+        0.5+0.5*sin(5.0*atan2(z_n.x, z_n.y)),
+        0.5+0.5*normalize(z_n).x,
+        0.5+0.5*normalize(z_n).y,
+        0.0
+    );
+}
+
+fn step_frac(start_radius_squared: f32, end_radius_squared: f32) -> f32 {
+    return -1.0 + log2(2.0 * log(end_radius_squared)) - log2(0.5 * log(start_radius_squared));
+}

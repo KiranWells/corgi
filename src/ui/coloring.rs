@@ -240,7 +240,7 @@ impl EditUI for Layer {
                 "Boost",
                 egui::DragValue::new(&mut self.param).speed(0.01),
             ),
-            LayerKind::OrbitTrap | LayerKind::Stripe => {
+            LayerKind::OrbitTrap => {
                 let mut index = self.param as i32 + 1;
                 let mut offset = self.param.fract();
 
@@ -259,6 +259,38 @@ impl EditUI for Layer {
                                 ui.selectable_value(&mut index, 2, "Circle");
                                 ui.selectable_value(&mut index, 3, "Axes");
                                 ui.selectable_value(&mut index, 4, "Box");
+                            })
+                            .response
+                    },
+                    |res, _ui| res,
+                );
+                input_with_label(
+                    tui,
+                    "Offset",
+                    egui::DragValue::new(&mut offset)
+                        .speed(0.003)
+                        .range(0.0..=0.99),
+                );
+
+                self.param = index as f32 - 1.0 + offset;
+            }
+            LayerKind::Stripe => {
+                let mut index = self.param as i32 + 1;
+                let mut offset = self.param.fract();
+
+                tui.ui_add_manual(
+                    |ui| {
+                        egui::ComboBox::from_label("Stripe Variant")
+                            .selected_text(match index {
+                                1 => "Angle",
+                                2 => "Real",
+                                3 => "Imaginary",
+                                _ => unreachable!(),
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut index, 1, "Angle");
+                                ui.selectable_value(&mut index, 2, "Real");
+                                ui.selectable_value(&mut index, 3, "Imaginary");
                             })
                             .response
                     },

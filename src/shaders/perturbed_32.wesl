@@ -10,7 +10,9 @@ import super::utils::{
     isinf,
     isnan,
     get_orbit_values,
+    get_stripe_values,
     length_squared,
+    step_frac,
 };
 
 // inputs
@@ -208,14 +210,9 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // calculate stripe averages and orbit traps
         if (flags & STRIPES_ENABLED) != 0 && (stripes_started || radius_squared > 64.0) {
             prev_stripes = stripes;
-            stripes.x += 0.5+0.5*sin(5.0*atan2(y_n.x, y_n.y));
-            if length_squared(y_n) != 0.0 {
-                stripes.y += 0.5+0.5*normalize(y_n).x;
-                stripes.z += 0.5+0.5*normalize(y_n).y;
-            }
+            stripes += get_stripe_values(y_n);
             if !stripes_started {
-                let frac = -1.0 + log2(2.0 * log(64.0)) - log2(0.5 * log(radius_squared));
-                stripes *= 1.0-frac;
+                stripes *= 1.0 - step_frac(radius_squared, 64.0);
                 stripes_started = true;
             }
         }
@@ -272,7 +269,7 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
         } else {
             intermediate_step[buffer_index] = i32(params.iter_offset + step);
             z_grid_prime[buffer_index] = vec3(z_n_prime * pow(2.0, zoom_prime + zoom_0), -zoom_0);
-            let frac = -1.0 + log2(2.0 * log(ESCAPE_RADIUS)) - log2(0.5 * log(radius_squared));
+            let frac = step_frac(radius_squared, ESCAPE_RADIUS);
             stripes_buffer[buffer_index] = stripes / f32(params.iter_offset + step) * frac + prev_stripes / f32(params.iter_offset + step - 1) * (1.0 - frac);
         }
     }
