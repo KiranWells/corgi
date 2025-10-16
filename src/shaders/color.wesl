@@ -295,7 +295,7 @@ fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let step_y = step_buffer[global_id.x + (global_id.y+1) * render_params.width];
         let steps = i32(floor(color_params.overlays.iteration_outline_color.a));
         if abs(i32(step) / steps - i32(step_x) / steps)  == 1 || abs(i32(step) / steps - i32(step_y) / steps) == 1 {
-            color = mix(color, color_params.overlays.iteration_outline_color.rgb, color_params.overlays.iteration_outline_color.a);
+            color = mix(color, color_params.overlays.iteration_outline_color.rgb, fract(color_params.overlays.iteration_outline_color.a));
         }
     }
     if fract(color_params.overlays.set_outline_color.a) > 0.0 {
