@@ -13,7 +13,10 @@ use rug::{
     ops::{CompleteRound, PowAssign},
 };
 
-use crate::{image_gen::is_metadata_supported, types::LayerKind};
+use crate::{
+    image_gen::is_metadata_supported,
+    types::{Layer, LayerKind, next_layer_id},
+};
 
 use super::{Coloring, Transform, get_precision};
 
@@ -188,7 +191,7 @@ impl Image {
     }
 
     pub fn load_from_file(path: &PathBuf) -> Result<Self> {
-        let image = if is_metadata_supported(path) {
+        let mut image = if is_metadata_supported(path) {
             let meta = Metadata::new_from_path(path)?;
             let tag = meta
                 .get_tag(&ExifTag::ImageDescription(String::new()))
@@ -203,6 +206,17 @@ impl Image {
                 .map_err(color_eyre::Report::from)
                 .and_then(|s| Image::deserialize_json(&s).map_err(color_eyre::Report::from))?
         };
+        fn update_ids(layers: &mut [Layer]) {
+            for layer in layers {
+                if layer.kind != LayerKind::None {
+                    layer.id = next_layer_id();
+                }
+            }
+        }
+        update_ids(&mut image.internal_coloring.color_layers);
+        update_ids(&mut image.internal_coloring.light_layers);
+        update_ids(&mut image.external_coloring.color_layers);
+        update_ids(&mut image.external_coloring.light_layers);
         Ok(image)
     }
 
@@ -407,15 +421,6 @@ impl ImageDiff {
             reprobe: true,
             recompute: true,
             recolor: true,
-        }
-    }
-}
-
-impl FractalKind {
-    pub fn text(&self) -> &'static str {
-        match &self {
-            FractalKind::Mandelbrot => "Mandelbrot",
-            FractalKind::Julia(_) => "Julia",
         }
     }
 }

@@ -6,11 +6,16 @@ This module contains the main UI state struct and its implementation, which
 contains the code necessary to update internal state and render the ui.
  */
 
-use eframe::egui::{Button, Color32, ScrollArea, Sense, Stroke, TextStyle, UiBuilder, Vec2};
+use eframe::egui::containers::menu::MenuButton;
+use eframe::egui::{
+    Button, Color32, CornerRadius, Frame, ScrollArea, Sense, Separator, Stroke, TextStyle,
+    UiBuilder, Vec2,
+};
 use eframe::{egui, egui_wgpu};
 use egui_material_icons::icons;
 use egui_taffy::{TuiBuilderLogic, tui};
 use rug::{Float, ops::PowAssign};
+use std::path::PathBuf;
 use std::sync::mpsc;
 use taffy::{Overflow, prelude::*};
 
@@ -18,7 +23,7 @@ use corgi::types::{
     Coloring, ComplexPoint, Image, ImageGenCommand, OptLevel, Status, Viewport, get_precision,
 };
 use preview_resources::PaintCallback;
-use utils::{collapsible, input_with_label, point_edit};
+use utils::{TuiExt, collapsible, input_with_label, point_edit, section, selection_with_label};
 
 mod coloring;
 mod preview_resources;
@@ -57,9 +62,12 @@ pub struct CorgiUI {
     setting_probe: bool,
     tab: UITab,
     view_state: ViewState,
+    show_camera: bool,
     pub swap: bool,
     pub status: Status,
     command_channel: mpsc::Sender<ImageGenCommand>,
+    output_path: PathBuf,
+    show_file_confirm: bool,
 }
 
 impl CorgiUI {
@@ -77,8 +85,8 @@ impl CorgiUI {
             rendered_explore_viewport: image.viewport.clone(),
             rendered_output_viewport: default_output_viewport.clone(),
             output_preview_viewport: default_output_viewport.clone(),
-            view_state: ViewState::Viewport,
-            render_zoom_offset: -1.0,
+            view_state: ViewState::OutputLock,
+            render_zoom_offset: -0.5,
             explore_settings: Image {
                 viewport: Viewport {
                     scaling: 0.5,
@@ -93,122 +101,236 @@ impl CorgiUI {
                 optimization_level: OptLevel::AccuracyOptimized,
                 ..image
             },
+            show_camera: false,
             setting_probe: false,
             swap: false,
             command_channel,
             tab: UITab::Explore,
+            output_path: "fractal.png".into(),
+            show_file_confirm: false,
         }
     }
 
     /// Generate the UI and handle any events. This function will do some blocking
     /// to access shared data
     pub fn generate_ui(&mut self, ctx: &egui::Context) {
-        egui::SidePanel::right("settings_panel").show(ctx, |ui| {
-            // Top bar
-            ui.horizontal(|ui| {
-                ui.style_mut().override_text_style = Some(TextStyle::Heading);
-                self.menu(ui);
-                ui.selectable_value(
-                    &mut self.tab,
-                    UITab::Explore,
-                    format!("{} Explore", icons::ICON_EXPLORE),
+        egui::SidePanel::right("settings_panel")
+            .frame(Frame::new().fill(ctx.style().visuals.window_fill))
+            .show(ctx, |ui| {
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                let y = ui.style_mut().spacing.item_spacing.y;
+                ui.style_mut().spacing.item_spacing.y = 0.0;
+                // Top bar
+                ui.horizontal(|ui| {
+                    {
+                        let style = ui.style_mut();
+                        style.spacing.item_spacing.x = 0.0;
+                        style.visuals.widgets.inactive.corner_radius = CornerRadius::same(0);
+                        style.visuals.widgets.active.corner_radius = CornerRadius::same(0);
+                        style.visuals.widgets.hovered.corner_radius = CornerRadius::same(0);
+                        style.spacing.button_padding.x *= 2.0;
+                        style.override_text_style = Some(TextStyle::Heading);
+                    }
+                    self.menu(ui);
+                    ui.selectable_value(
+                        &mut self.tab,
+                        UITab::Explore,
+                        format!("{} Explore", icons::ICON_EXPLORE),
+                    );
+                    ui.selectable_value(
+                        &mut self.tab,
+                        UITab::Color,
+                        format!("{} Style", icons::ICON_STYLE),
+                    );
+                    ui.selectable_value(
+                        &mut self.tab,
+                        UITab::Render,
+                        format!("{} Render", icons::ICON_IMAGE),
+                    );
+                });
+                ui.add(
+                    Separator::default()
+                        .spacing(ui.visuals().widgets.noninteractive.bg_stroke.width),
                 );
-                ui.selectable_value(
-                    &mut self.tab,
-                    UITab::Color,
-                    format!("{} Style", icons::ICON_STYLE),
-                );
-                ui.selectable_value(
-                    &mut self.tab,
-                    UITab::Render,
-                    format!("{} Render", icons::ICON_IMAGE),
-                );
-            });
-            ui.separator();
-            ScrollArea::vertical().show(ui, |ui| {
-                tui(ui, ui.id().with("side"))
-                    .reserve_available_width()
-                    .style(taffy::Style {
-                        flex_direction: taffy::FlexDirection::Column,
-                        size: percent(1.0),
-                        align_items: Some(AlignItems::Stretch),
-                        justify_content: Some(AlignContent::Start),
-                        gap: length(8.),
-                        overflow: taffy::Point {
-                            x: Overflow::Hidden,
-                            y: Overflow::Scroll,
-                        },
-                        ..Default::default()
-                    })
-                    .show(|tui| match self.tab {
-                        UITab::Explore => self.explore_tab(tui),
-                        UITab::Color => {
-                            tui.heading("External");
-                            self.output_settings
-                                .external_coloring
-                                .render_edit_ui(ctx, tui);
-                            tui.heading("Internal");
-                            self.output_settings
-                                .internal_coloring
-                                .render_edit_ui(ctx, tui);
-                        }
-                        UITab::Render => {
-                            input_with_label(
-                                tui,
-                                "Camera width",
-                                egui::DragValue::new(&mut self.output_settings.viewport.width)
-                                    .speed(10.0),
-                            );
-                            input_with_label(
-                                tui,
-                                "Camera height",
-                                egui::DragValue::new(&mut self.output_settings.viewport.height)
-                                    .speed(10.0),
-                            );
-                            if tui.ui_add(Button::new("Render")).clicked() {
-                                let image = self.output_settings.clone();
-                                let _ = self
-                                    .command_channel
-                                    .send(ImageGenCommand::NewOutputSettings(image));
+                ui.style_mut().spacing.item_spacing.y = y;
+                ScrollArea::vertical().show(ui, |ui| {
+                    tui(ui, ui.id().with("side"))
+                        .reserve_available_width()
+                        .style(taffy::Style {
+                            flex_direction: taffy::FlexDirection::Column,
+                            size: percent(1.0),
+                            align_items: Some(AlignItems::Stretch),
+                            justify_content: Some(AlignContent::Start),
+                            gap: length(ctx.style().spacing.item_spacing.y),
+                            overflow: taffy::Point {
+                                x: Overflow::Hidden,
+                                y: Overflow::Scroll,
+                            },
+                            ..Default::default()
+                        })
+                        .show(|tui| match self.tab {
+                            UITab::Explore => self.explore_tab(tui),
+                            UITab::Color => {
+                                section(tui, "External", true, |tui| {
+                                    self.output_settings
+                                        .external_coloring
+                                        .render_edit_ui(ctx, tui);
+                                });
+                                section(tui, "Internal", false, |tui| {
+                                    self.output_settings
+                                        .internal_coloring
+                                        .render_edit_ui(ctx, tui);
+                                });
                             }
-                            if tui.ui_add(Button::new("Save to file")).clicked() {
-                                if let Some(path) = rfd::FileDialog::new()
-                                    .add_filter(
-                                        "image with metadata",
-                                        &["jpg", "jpeg", "webp", "png"],
-                                    )
-                                    .add_filter(
-                                        "image without metadata",
-                                        &["avif", "gif", "qoi", "tiff", "exr"],
-                                    )
-                                    .set_file_name("fractal.png")
-                                    .save_file()
-                                {
-                                    let _ = self
-                                        .command_channel
-                                        .send(ImageGenCommand::SaveToFile(path));
+                            UITab::Render => {
+                                section(tui, "Image Settings", true, |tui| {
+                                    input_with_label(
+                                        tui,
+                                        "Image width",
+                                        None,
+                                        egui::DragValue::new(
+                                            &mut self.output_settings.viewport.width,
+                                        )
+                                        .speed(10.0),
+                                    );
+                                    input_with_label(
+                                        tui,
+                                        "Image height",
+                                        None,
+                                        egui::DragValue::new(
+                                            &mut self.output_settings.viewport.height,
+                                        )
+                                        .speed(10.0),
+                                    );
+                                    tui.horizontal().add(|tui| {
+                                        let mut str_path = self
+                                            .output_path
+                                            .to_str()
+                                            .unwrap_or("Invalid Path")
+                                            .to_string();
+                                        tui.grow()
+                                            .ui_add(egui::TextEdit::singleline(&mut str_path));
+
+                                        if tui
+                                            .ui_add(Button::new(icons::ICON_FOLDER_OPEN))
+                                            .clicked()
+                                        {
+                                            if let Some(path) = rfd::FileDialog::new()
+                                                .set_directory(&self.output_path)
+                                                .add_filter(
+                                                    "image with metadata",
+                                                    &["jpg", "jpeg", "webp", "png"],
+                                                )
+                                                .add_filter(
+                                                    "image without metadata",
+                                                    &["avif", "gif", "qoi", "tiff", "exr"],
+                                                )
+                                                .set_file_name("fractal.png")
+                                                .save_file()
+                                            {
+                                                self.output_path = path;
+                                            }
+                                        }
+                                    });
+                                });
+                                let item_spacing = tui.egui_ui().spacing().item_spacing;
+                                tui.style(taffy::Style {
+                                    flex_direction: taffy::FlexDirection::Column,
+                                    size: percent(1.0),
+                                    padding: Rect {
+                                        left: length(item_spacing.y * 3.0),
+                                        right: length(item_spacing.y * 3.0),
+                                        top: length(item_spacing.y * 3.0),
+                                        bottom: length(0.0),
+                                    },
+                                    gap: length(tui.egui_ui().spacing().item_spacing.y * 2.0),
+                                    ..Default::default()
+                                })
+                                .add(|tui| {
+                                    if tui.ui_add(Button::new("Render")).clicked() {
+                                        let image = self.output_settings.clone();
+                                        let _ = self
+                                            .command_channel
+                                            .send(ImageGenCommand::NewOutputSettings(image));
+                                    }
+                                    if tui.ui_add(Button::new("Save to file")).clicked() {
+                                        if self.output_path.exists() {
+                                            self.show_file_confirm = true;
+                                        } else {
+                                            let _ = self.command_channel.send(
+                                                ImageGenCommand::SaveToFile(
+                                                    self.output_path.clone(),
+                                                ),
+                                            );
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                });
+            });
+        let style = ctx.style().clone();
+        if self.show_file_confirm {
+            egui::Window::new("File already exists, overwrite?")
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.set_style(style);
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+
+                    let item_spacing = ui.spacing().item_spacing;
+                    tui(ui, ui.id().with("confirm"))
+                        .reserve_available_width()
+                        .style(Style {
+                            flex_direction: FlexDirection::Row,
+                            justify_content: Some(AlignContent::Stretch),
+                            align_items: Some(AlignItems::Center),
+                            size: Size {
+                                width: percent(1.0),
+                                height: auto(),
+                            },
+                            padding: Rect::length(item_spacing.x * 2.0),
+                            gap: length(item_spacing.x * 2.0),
+                            ..Default::default()
+                        })
+                        .show(|tui| {
+                            tui.horizontal().add(|tui| {
+                                if tui.grow().ui_add(Button::new("Cancel")).clicked() {
+                                    self.show_file_confirm = false;
                                 }
-                            }
-                        }
-                    });
-            });
-        });
+
+                                if tui
+                                    .grow()
+                                    .ui_add(Button::new("Overwrite and save"))
+                                    .clicked()
+                                {
+                                    self.show_file_confirm = false;
+                                    let _ = self.command_channel.send(ImageGenCommand::SaveToFile(
+                                        self.output_path.clone(),
+                                    ));
+                                }
+                            });
+                        })
+                });
+        }
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(ctx.style().visuals.window_fill))
             .show(ctx, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
                 self.viewport(ui, ctx);
 
                 ui.horizontal_centered(|ui| {
                     ui.scope_builder(
-                        UiBuilder::new().max_rect(ui.max_rect().with_max_x(100.0)),
+                        UiBuilder::new().max_rect(
+                            ui.max_rect()
+                                .with_max_x(100.0 + ui.spacing().item_spacing.x)
+                                .with_min_x(ui.spacing().item_spacing.x),
+                        ),
                         |ui| {
-                            if let Some(progress) = self.status.progress {
-                                ui.add(egui::ProgressBar::new(progress as f32));
-                            } else {
-                                ui.add_space(
-                                    ui.available_width() + ui.spacing().item_spacing.x / 2.0,
-                                );
-                            }
+                            ui.add_visible(
+                                self.status.progress.is_some(),
+                                egui::ProgressBar::new(self.status.progress.unwrap_or(0.0) as f32),
+                            );
                         },
                     );
                     ui.separator();
@@ -219,7 +341,16 @@ impl CorgiUI {
 
     // Build the menu button
     pub fn menu(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button(icons::ICON_MENU, |ui| {
+        let spacing = ui.spacing().button_padding.y;
+        MenuButton::from_button(Button::new(icons::ICON_MENU)).ui(ui, |ui| {
+            {
+                let style = ui.style_mut();
+                style.spacing.item_spacing = Vec2::splat(spacing);
+                style.visuals.widgets.inactive.corner_radius = CornerRadius::same(spacing as u8);
+                style.visuals.widgets.active.corner_radius = CornerRadius::same(spacing as u8);
+                style.visuals.widgets.hovered.corner_radius = CornerRadius::same(spacing as u8);
+                style.spacing.button_padding = Vec2::splat(spacing);
+            }
             if ui.add(Button::new("Save Image Settings")).clicked() {
                 if let Some(path) = rfd::FileDialog::new()
                     .set_file_name("saved_fractal.corg")
@@ -298,73 +429,43 @@ impl CorgiUI {
 
     /// Build the Explore tab UI
     fn explore_tab(&mut self, tui: &mut egui_taffy::Tui) {
-        collapsible(tui, "Viewport", |tui| {
-            let img = self.image();
-            tui.ui_add_manual(
-                |ui| {
-                    egui::ComboBox::from_label("Fractal Kind")
-                        .selected_text(self.explore_settings.fractal_kind.text())
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(
-                                &mut self.explore_settings.fractal_kind,
-                                corgi::types::FractalKind::Mandelbrot,
-                                "Mandelbrot",
-                            );
-                            let img = self.image();
-                            ui.selectable_value(
-                                &mut self.explore_settings.fractal_kind,
-                                corgi::types::FractalKind::Julia(img.viewport.center.clone()),
-                                "Julia",
-                            );
-                        })
-                        .response
-                },
-                |res, _ui| res,
+        let img = self.image();
+        let item_spacing = tui.egui_ui().spacing().item_spacing;
+        tui.style(taffy::Style {
+            flex_direction: taffy::FlexDirection::Column,
+            size: percent(1.0),
+            padding: Rect {
+                left: length(item_spacing.y * 3.0),
+                right: length(item_spacing.y * 3.0),
+                top: length(item_spacing.y * 3.0),
+                bottom: length(0.0),
+            },
+            gap: length(tui.egui_ui().spacing().item_spacing.y * 2.0),
+            ..Default::default()
+        })
+        .add(|tui| {
+            selection_with_label(
+                tui,
+                "Fractal Mode",
+                Some("Which fractal algorithm to use. Switching from Mandelbrot to Julia will set the Julia parameter to the current view center."),
+                &mut self.explore_settings.fractal_kind,
+                vec![
+                    corgi::types::FractalKind::Mandelbrot,
+                    corgi::types::FractalKind::Julia(img.viewport.center.clone()),
+                ],
             );
             match &mut self.explore_settings.fractal_kind {
                 corgi::types::FractalKind::Mandelbrot => {}
                 corgi::types::FractalKind::Julia(pt) => {
-                    point_edit(tui, "Julia parameter", get_precision(img.viewport.zoom), pt);
+                    point_edit(tui, "Julia parameter", Some("The C value used in the Julia equation. picking values from interesting locations in the Mandelbrot set tend to be interesting in the Julia Set."), get_precision(img.viewport.zoom), pt);
                 }
             }
             self.output_settings.fractal_kind = self.explore_settings.fractal_kind.clone();
-            point_edit(
-                tui,
-                "Image Center",
-                get_precision(img.viewport.zoom),
-                &mut self.output_settings.viewport.center,
-            );
-            point_edit(
-                tui,
-                "Probe Point",
-                get_precision(img.viewport.zoom),
-                &mut self.output_settings.probe_location,
-            );
-            tui.ui_add(Button::new(format!(
-                "{} Pick new probe point",
-                icons::ICON_POINT_SCAN
-            )))
-            .clicked()
-            .then(|| self.setting_probe = !self.setting_probe);
-            input_with_label(
-                tui,
-                "Zoom",
-                egui::DragValue::new(&mut self.output_settings.viewport.zoom)
-                    .speed(0.03)
-                    .update_while_editing(false),
-            );
-            input_with_label(
-                tui,
-                "Max iteration",
-                egui::DragValue::new(&mut self.output_settings.max_iter)
-                    .speed(100.0)
-                    .range(100..=u32::MAX)
-                    .update_while_editing(false),
-            );
             let mut scaling = (1.0 / self.explore_settings.viewport.scaling) as u32;
             input_with_label(
                 tui,
-                "Viewport Downscaling",
+                "Preview Scaling",
+                Some("Divides the resolution of the preview image to improve performance."),
                 egui::DragValue::new(&mut scaling)
                     .speed(0.01)
                     .range(1..=8)
@@ -372,68 +473,111 @@ impl CorgiUI {
             );
             self.explore_settings.viewport.scaling = 1.0 / scaling as f64;
         });
-        collapsible(tui, "Camera", |tui| {
-            if tui
-                .enabled_ui(self.view_state == ViewState::Viewport)
-                .ui_add(Button::new(format!(
-                    "{} Set Camera to View",
-                    icons::ICON_CROP_FREE
+        section(tui, "Viewport", true, |tui| {
+            point_edit(
+                tui,
+                "Image Center",
+                Some("The location of the center of the image in the complex plane."),
+                get_precision(img.viewport.zoom),
+                &mut self.output_settings.viewport.center,
+            );
+            input_with_label(
+                tui,
+                "Zoom",
+                Some(
+                    "Zoom level of the camera. Scales the range of the viewport by 2 raised to the negative of the zoom.",
+                ),
+                egui::DragValue::new(&mut self.output_settings.viewport.zoom)
+                    .speed(0.03)
+                    .update_while_editing(false),
+            );
+            input_with_label(
+                tui,
+                "Max iteration",
+                Some(
+                    "The maximum number of iterations to calculate before assuming a point is inside the set. Not all points will run this many iterations, some will quit early.",
+                ),
+                egui::DragValue::new(&mut self.output_settings.max_iter)
+                    .speed(100.0)
+                    .range(100..=u32::MAX)
+                    .update_while_editing(false),
+            );
+            collapsible(tui, "Advanced", |tui| {
+                point_edit(
+                    tui,
+                    "Probe Point",
+                    Some(
+                        "The reference location to use when calculating the fractal using perturbation-based formulas.",
+                    ),
+                    get_precision(img.viewport.zoom),
+                    &mut self.output_settings.probe_location,
+                );
+                tui.ui_add(Button::new(format!(
+                    "{} Pick new probe point",
+                    icons::ICON_POINT_SCAN
                 )))
                 .clicked()
-            {
-                self.output_settings.viewport.center =
-                    self.explore_settings.viewport.center.clone();
-                self.output_settings.viewport.zoom = self.explore_settings.viewport.zoom + 0.5;
-                self.output_settings.update_probe();
-                self.render_zoom_offset = -0.5;
-                if self.view_state == ViewState::Viewport {
-                    self.view_state = ViewState::OutputView;
-                }
-            }
-            if tui
-                .ui_add(Button::new(if self.view_state == ViewState::Viewport {
-                    format!("{} Preview Camera", icons::ICON_FRAME_INSPECT)
-                } else {
-                    format!("{} Exit Preview", icons::ICON_BACK_TO_TAB)
-                }))
-                .clicked()
-            {
-                if self.view_state == ViewState::Viewport {
-                    self.view_state = ViewState::OutputView;
-                } else {
-                    self.view_state = ViewState::Viewport;
-                }
-            }
-            if tui
-                .ui_add(Button::new(if self.view_state != ViewState::OutputLock {
-                    format!("{} Lock Camera to View", icons::ICON_LOCK)
-                } else {
-                    format!("{} Unlock Camera", icons::ICON_LOCK_OPEN)
-                }))
-                .clicked()
-            {
-                if self.view_state == ViewState::OutputLock {
-                    self.view_state = ViewState::OutputView;
-                } else {
-                    if self.view_state == ViewState::Viewport {
-                        self.output_settings.viewport.center =
-                            self.explore_settings.viewport.center.clone();
-                        self.output_settings.viewport.zoom =
-                            self.explore_settings.viewport.zoom + 0.5;
-                        self.output_settings.update_probe();
-                        self.render_zoom_offset = -0.5;
+                .then(|| self.setting_probe = !self.setting_probe);
+            });
+        });
+        section(tui, "Camera", false, |tui| {
+            tui.ui_add(egui::Checkbox::new(&mut self.show_camera, "Show Camera"));
+            if self.show_camera {
+                match self.view_state {
+                    ViewState::Viewport | ViewState::OutputView => {
+                        tui.horizontal().add(|tui| {
+                            if tui
+                                .ui_add(Button::new(format!(
+                                    "{} Move Camera Here",
+                                    icons::ICON_CROP_FREE
+                                )))
+                                .clicked()
+                            {
+                                self.output_settings.viewport.center =
+                                    self.explore_settings.viewport.center.clone();
+                                self.output_settings.viewport.zoom =
+                                    self.explore_settings.viewport.zoom + 0.5;
+                                self.output_settings.update_probe();
+                                self.render_zoom_offset = -0.5;
+                                self.view_state = ViewState::OutputLock;
+                            }
+                            if tui
+                                .ui_add(Button::new(format!(
+                                    "{} Return to Camera",
+                                    icons::ICON_BACK_TO_TAB
+                                )))
+                                .clicked()
+                            {
+                                self.view_state = ViewState::OutputLock;
+                            }
+                        });
                     }
-                    self.view_state = ViewState::OutputLock;
+                    ViewState::OutputLock => {
+                        if tui
+                            .ui_add(Button::new(format!("{} Pin Camera", icons::ICON_LOCK)))
+                            .clicked()
+                        {
+                            self.explore_settings.viewport.center =
+                                self.output_settings.viewport.center.clone();
+                            self.explore_settings.viewport.zoom =
+                                self.output_settings.viewport.zoom + self.render_zoom_offset;
+                            self.explore_settings.update_probe();
+                            self.view_state = ViewState::OutputView;
+                        }
+                    }
+                    ViewState::Output => {}
                 }
             }
             input_with_label(
                 tui,
-                "Camera width",
+                "Image width",
+                None,
                 egui::DragValue::new(&mut self.output_settings.viewport.width).speed(10.0),
             );
             input_with_label(
                 tui,
-                "Camera height",
+                "Image height",
+                None,
                 egui::DragValue::new(&mut self.output_settings.viewport.height).speed(10.0),
             );
         });
@@ -469,7 +613,16 @@ impl CorgiUI {
                             let (x, y) = view_image
                                 .viewport
                                 .get_real_coords((pos.x) as f64, (size.y - pos.y) as f64);
-                            self.explore_settings.probe_location = ComplexPoint { x, y };
+                            match self.view_state {
+                                ViewState::Viewport => {
+                                    self.explore_settings.probe_location = ComplexPoint { x, y }
+                                }
+                                ViewState::OutputView
+                                | ViewState::OutputLock
+                                | ViewState::Output => {
+                                    self.output_settings.probe_location = ComplexPoint { x, y }
+                                }
+                            }
                             self.setting_probe = false;
                         }
                     }
@@ -513,7 +666,7 @@ impl CorgiUI {
                 let callback = egui_wgpu::Callback::new_paint_callback(rect, cb);
 
                 ui.painter().add(callback);
-                if self.tab != UITab::Render {
+                if self.tab != UITab::Render && self.show_camera {
                     ui.painter().rect_stroke(
                         render_rect.intersect(rect),
                         0.0,

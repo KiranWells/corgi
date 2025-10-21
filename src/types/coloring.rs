@@ -1,3 +1,5 @@
+use std::sync::atomic::AtomicU64;
+
 use egui_material_icons::icons;
 use nanoserde::{DeJson, SerJson};
 
@@ -38,6 +40,8 @@ pub struct Light {
 
 #[derive(Clone, Copy, Debug, PartialEq, DeJson, SerJson)]
 pub struct Layer {
+    #[nserde(skip)]
+    pub id: u64,
     pub kind: LayerKind,
     pub strength: f32,
     pub param: f32,
@@ -46,11 +50,17 @@ pub struct Layer {
 impl Default for Layer {
     fn default() -> Self {
         Self {
+            id: 0,
             kind: LayerKind::None,
             strength: 0.5,
             param: 0.0,
         }
     }
+}
+
+static LAYER_ID: AtomicU64 = AtomicU64::new(0);
+pub fn next_layer_id() -> u64 {
+    LAYER_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 #[repr(C)]
@@ -111,6 +121,7 @@ impl Default for Coloring {
             gradient: Gradient::Hsv(0.7, 1.0),
             color_layers: [
                 Layer {
+                    id: next_layer_id(),
                     kind: LayerKind::SmoothStep,
                     strength: 2.0,
                     param: 0.0,
@@ -126,6 +137,7 @@ impl Default for Coloring {
             lighting_kind: LightingKind::Gradient,
             light_layers: [
                 Layer {
+                    id: next_layer_id(),
                     kind: LayerKind::Distance,
                     strength: 0.8,
                     param: 0.5,
@@ -163,6 +175,7 @@ impl Coloring {
             lighting_kind: LightingKind::Gradient,
             light_layers: [
                 Layer {
+                    id: next_layer_id(),
                     kind: LayerKind::OrbitTrap,
                     strength: 1.0,
                     param: 0.0,
@@ -196,6 +209,7 @@ impl Coloring {
             gradient: Gradient::Procedural([[0.5; 3], [0.5; 3], [1.0; 3], [0.0, 0.1, 0.2]]),
             color_layers: [
                 Layer {
+                    id: next_layer_id(),
                     kind: LayerKind::SmoothStep,
                     strength: 3.0,
                     param: 0.0,
@@ -211,6 +225,7 @@ impl Coloring {
             lighting_kind: LightingKind::Shaded,
             light_layers: [
                 Layer {
+                    id: next_layer_id(),
                     kind: LayerKind::Step,
                     strength: 3.0,
                     param: 0.0,
