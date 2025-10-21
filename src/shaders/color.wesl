@@ -108,7 +108,7 @@ fn calculate_lighting_layers(x: u32, y: u32, color_params: ColorParams) -> f32 {
                 if internal {
                     brightness += (smoothed_step - layer_param) * 0.3 * layer_strength;
                 } else {
-                    brightness += (log(smoothed_step) * log(smoothed_step) - layer_param) * 0.05 * layer_strength;
+                    brightness += (log(smoothed_step) - layer_param) * 0.4 * layer_strength;
                 }
             }
             case LAYER_DISTANCE {
@@ -117,8 +117,15 @@ fn calculate_lighting_layers(x: u32, y: u32, color_params: ColorParams) -> f32 {
                 }
             }
             case LAYER_ORBIT_TRAP {
-                let orbit = orbits[u32(layer_param)];
-                brightness += (orbit - fract(layer_param)) * pow(2.0, layer_strength);
+                var orbit = orbits[u32(layer_param)];
+                if internal {
+                    let offset = 0.25*fract(layer_param);
+                    brightness += (orbit - offset)/(0.25-offset) * pow(2.0, layer_strength-1.0);
+                } else {
+                    orbit = 10.0 - orbit;
+                    let offset = 10.0*fract(layer_param);
+                    brightness += (orbit - offset)/(10.0-offset) * pow(2.0, layer_strength-1.0);
+                }
             }
             case LAYER_STRIPE {
                 let stripe = stripes[u32(layer_param)];
@@ -177,7 +184,7 @@ fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 if internal {
                     color_value += (smoothed_step - layer_param) * 0.3 * layer_strength;
                 } else {
-                    color_value += (log(smoothed_step) * log(smoothed_step) - layer_param) * 0.05 * layer_strength;
+                    color_value += (log(smoothed_step) * log(smoothed_step) - layer_param) * 0.1 * layer_strength;
                 }
             }
             case LAYER_DISTANCE {
@@ -186,8 +193,11 @@ fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             }
             case LAYER_ORBIT_TRAP {
-                let orbit = orbits[u32(layer_param)];
-                color_value += orbit * pow(2.0, layer_strength);
+                var orbit = orbits[u32(layer_param)];
+                if orbit > 2.0 {
+                    orbit = log(orbit / 2.0) + 2.0;
+                }
+                color_value += orbit * 0.1 * pow(2.0, layer_strength) + layer_param;
             }
             case LAYER_STRIPE {
                 let stripe = stripes[u32(layer_param)];

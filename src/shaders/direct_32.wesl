@@ -83,7 +83,7 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
         z_n = vec2f(0.0);
     }
     var z_n_prime = vec2f(1.0, 0.0);
-    var orbits = vec4f(1.0);
+    var orbits = vec4f(ESCAPE_RADIUS);
     var stripes = vec4f(0.0);
 
     if params.iter_offset != 0u {

@@ -257,6 +257,9 @@ impl EditUI for Layer {
             }
             LayerKind::OrbitTrap => {
                 let mut index = OrbitType(self.param as u8 + 1);
+                if index.0 > 4 {
+                    index.0 = 4;
+                }
                 let mut offset = self.param.fract();
                 selection_with_label(
                     tui,
@@ -286,6 +289,9 @@ impl EditUI for Layer {
             }
             LayerKind::Stripe => {
                 let mut index = StripeType(self.param as u8 + 1);
+                if index.0 > 3 {
+                    index.0 = 3;
+                }
                 let mut offset = self.param.fract();
                 selection_with_label(
                     tui,
@@ -548,6 +554,8 @@ impl EditUI for [Layer; 8] {
                                 if i > 0
                                     && tui
                                         .button(|tui| tui.label(icons::ICON_ARROW_UPWARD))
+                                        .response
+                                        .on_hover_text("Move layer up")
                                         .clicked()
                                 {
                                     swap_first = i as i32 - 1;
@@ -555,16 +563,38 @@ impl EditUI for [Layer; 8] {
                                 if tui
                                     .enabled_ui(i < valid_ct.saturating_sub(1))
                                     .button(|tui| tui.label(icons::ICON_ARROW_DOWNWARD))
+                                    .response
+                                    .on_hover_text("Move layer down")
                                     .clicked()
                                 {
                                     swap_first = i as i32;
                                 }
+                                if tui
+                                    .button(|tui| tui.label(icons::ICON_RESET_SETTINGS))
+                                    .response
+                                    .on_hover_text("Reset layer parameters")
+                                    .clicked()
+                                {
+                                    layer.strength = 1.0;
+                                    match layer.kind {
+                                        LayerKind::OrbitTrap | LayerKind::Stripe => {
+                                            layer.param = layer.param.floor();
+                                        }
+                                        _ => layer.param = 0.0,
+                                    }
+                                }
                                 if valid_ct < 8 {
                                     duplicate = tui
                                         .button(|tui| tui.label(icons::ICON_CONTENT_COPY))
+                                        .response
+                                        .on_hover_text("Duplicate layer")
                                         .clicked();
                                 }
-                                remove = tui.button(|tui| tui.label(icons::ICON_DELETE)).clicked();
+                                remove = tui
+                                    .button(|tui| tui.label(icons::ICON_DELETE))
+                                    .response
+                                    .on_hover_text("Delete layer")
+                                    .clicked();
                             },
                         );
                         let current = tui.current_style().clone();

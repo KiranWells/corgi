@@ -123,7 +123,7 @@ impl Default for Coloring {
                 Layer {
                     id: next_layer_id(),
                     kind: LayerKind::SmoothStep,
-                    strength: 2.0,
+                    strength: 1.0,
                     param: 0.0,
                 },
                 Layer::default(),
@@ -139,8 +139,8 @@ impl Default for Coloring {
                 Layer {
                     id: next_layer_id(),
                     kind: LayerKind::Distance,
-                    strength: 0.8,
-                    param: 0.5,
+                    strength: 1.0,
+                    param: 0.0,
                 },
                 Layer::default(),
                 Layer::default(),

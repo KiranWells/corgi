@@ -145,7 +145,7 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var zoom = zoom_0;
     var z_n_prime = vec2(0.0);
     var zoom_prime = 0.0;
-    var orbits = vec4f(1.0);
+    var orbits = vec4f(ESCAPE_RADIUS);
     var stripes = vec4f(0.0);
 
     // reference values for detecting orbit cycles
