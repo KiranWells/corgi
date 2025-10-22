@@ -1,9 +1,12 @@
 [package]
 name = "corgi"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "Corgi is a performance-focused fractal rendering engine capable of ultra-deep and highly flexible styling."
+homepage = "https://github.com/KiranWells/corgi"
+repository = "https://github.com/KiranWells/corgi"
+license = "Apache-2.0"
+keywords = ["fractals", "mandelbrot", "julia", "graphics"]
 
 [dependencies]
 bytemuck = { version = "1.23", features = ["derive"] }

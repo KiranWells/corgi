@@ -1,47 +1,58 @@
 # Corgi
 
-Corgi is a GPU-accelerated fractal rendering engine written in Rust that aims to be as performant as possible while maintaining a very high degree of precision. This allows for creating images at extremely high zoom levels (up to 2<sup>100</sup> times magnification).
+Corgi is a performance-focused fractal rendering engine capable of ultra-deep and highly flexible styling.
 
-![An example of the UI in use at extreme zoom levels](assets/preview.jpg)
+![An example of the UI in use at extreme zoom levels](assets/ui_example_small.avif)
 
 ## Features
 
-- High precision rendering
+### High precision rendering
 
-Corgi uses a combination of arbitrary precision floating-point arithmetic and a perturbation-based formula to render views of the Mandelbrot set at up to 2^100 times magnification.
+Corgi uses a combination of several precision-extending techniques to render views of the Mandelbrot set at nearly infinite zoom levels. So far, the deepest rendered image had over $10^{250}$ times magnification.
 
-- GPU acceleration
+### Performance Optimizations
 
-The bulk of the computation is performed on the GPU, allowing for full utilization of your hardware.
+Corgi uses optimized algorithms and efficient hardware utilization to render images as fast as possible on your hardware, often achieving real-time interactive rendering. Features include:
 
-- Fine-grained caching
+* Parallelized rendering in GPU compute shaders
+* Fine-grained caching to avoid re-rendering when unnecessary
+* Immediate UI feedback combined with asynchronous re-rendering
 
-Image rendering is performed in multiple steps to allow for caching of the most expensive computation. This means that modifications to settings used to color the image do not cause a full re-render, making style changes visible in real time.
+### Highly Customizable Image Styling
+
+Corgi includes several coloring algorithms and a layer-based compositing system to allow an incredible amout of variation even for the same fractal locations.
+
+![A collage of several different styles applied to the same fractal location](assets/style_collage.avif)
 
 ### Planned Features
 
-- Saving images to a file
-- Fully customizable image coloring
-- UI improvements
-- Performance improvements
-    - HIP/CUDA could be used as an alternative to compute shaders on supported hardware
-    - Low-zoom images can be safely rendered GPU-only with the standard algorithm
+Corgi is still in alpha, so there are many more features I still plan to add. Until version 1.0, the exact algorithm and save file format may have breaking changes.
+
+### Know Issues
+
+Above about $10^{90}$ times zoom, some visual artifacts appear around some Mini-brots. In Julia mode, artifacts appear much sooner. This seems to be due to a rounding issue in the iteration algorithm.
+
+Internal coloring algorithms are unstable at high zoom levels, and internal distance estimation is not implemented yet.
 
 ## Usage
 
-Currently, binary releases are not being created. However, you can compile Corgi from source by cloning the repository and running:
+Currently, binary releases are not being created. However, you can install Corgi by cloning the repository and running:
 
 ```bash
-cargo run --release
+cargo install --path .
 ```
 
-You can then use the mouse and scroll wheel to explore the image, and the sliders on the side to adjust the image generation parameters. If you end up seeing noise or pixelation, use the "Probe Point" and select the point on the image closest to the interior of the Mandelbrot set (the part that has the most iterations). In the future this will be automatic.
+This will compile a binary named `corgi`.
 
-The glow calculations also don't work reliably at high zoom levels, so you may need to set "Glow Intensity" to 0. This is also currently being worked on.
+Basic CLI options can be viewed with `--help`:
+
+```bash
+corgi --help
+````
 
 ## Troubleshooting
 
-If you the application fails to load, it likely encountered an issue during GPU initialization. Open up an issue, and I will see what I can do to support your machine. Currently, I have tested on both integrated and dedicated GPUs on the OpenGL and Vulkan backends.
+If the application fails to load, it likely encountered an issue during GPU initialization. Open up an issue, and I will see what I can do to support your machine. Currently, I have tested on dedicated GPUs on the Vulkan backend.
 
 To get more information about what is happening, you can set the `CORGI_LOG_LEVEL` environment variable:
 
