@@ -18,7 +18,7 @@ use eframe::{
         Queue, Texture, TextureView,
     },
 };
-use wgpu::ShaderModule;
+use wgpu::{ExperimentalFeatures, ShaderModule};
 
 use crate::types::{ColorParams, ComputeParams, RenderParams, Viewport};
 
@@ -134,6 +134,7 @@ pub async fn get_device_and_queue() -> Result<(Device, Queue)> {
             required_limits: wgpu::Limits::default(),
             memory_hints: wgpu::MemoryHints::Performance,
             trace: wgpu::Trace::Off,
+            experimental_features: ExperimentalFeatures::disabled(),
         })
         .await?)
 }
@@ -349,7 +350,7 @@ impl GPUData {
         slice.map_async(wgpu::MapMode::Read, move |res| {
             let _ = send.send(res);
         });
-        let _ = self.shared.device.poll(wgpu::PollType::Wait);
+        let _ = self.shared.device.poll(wgpu::PollType::wait_indefinitely());
         match recv.recv() {
             Ok(Ok(())) => {
                 let mut out = Vec::new();

@@ -15,9 +15,9 @@ use eframe::wgpu::{self, Extent3d};
 use image::ImageBuffer;
 use little_exif::{exif_tag::ExifTag, metadata::Metadata};
 use nanoserde::SerJson;
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::{path::Path, time::Duration};
 use tracing::debug;
 
 use crate::types::{ColorParams, ComputeParams, Image, ImageDiff, RenderParams, StatusMessage};
@@ -82,7 +82,7 @@ pub fn render_image(
                 bytemuck::cast_slice(&probed_data[..]),
             );
             gpu_data.shared.queue.submit([]);
-            let _ = gpu_data.shared.device.poll(wgpu::MaintainBase::Wait);
+            let _ = gpu_data.shared.device.poll(wgpu::PollType::wait_indefinitely());
         );
     }
 
@@ -210,7 +210,7 @@ fn run_compute_step(
         // This slows down render times, so we avoid it in release
         #[cfg(debug_assertions)]
         time!("Compute step batch";
-            let _ = device.poll(wgpu::MaintainBase::WaitForSubmissionIndex(si));
+            let _ = device.poll(wgpu::PollType::Wait { submission_index: Some(si), timeout: Some(Duration::from_secs(1)) });
         );
         #[cfg(not(debug_assertions))]
         let _ = si;
@@ -275,7 +275,10 @@ fn run_render_step(image: &Image, gpu_data: &GPUData) {
 
     // submit the render command queue
     let si = queue.submit(Some(encoder.finish()));
-    let _ = device.poll(wgpu::MaintainBase::WaitForSubmissionIndex(si));
+    let _ = device.poll(wgpu::PollType::Wait {
+        submission_index: Some(si),
+        timeout: Some(Duration::from_secs(1)),
+    });
 }
 
 pub fn save_to_file(
