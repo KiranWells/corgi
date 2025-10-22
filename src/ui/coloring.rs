@@ -88,7 +88,9 @@ impl EditUI for Coloring {
                     .range(0.0..=1.0),
             );
         }
-        self.color_layers.render_edit_ui(ctx, tui);
+        if discriminant(&self.gradient) != discriminant(&Gradient::Flat(Default::default())) {
+            self.color_layers.render_edit_ui(ctx, tui);
+        }
         fancy_header_tui(
             tui,
             RichText::new("Lighting").text_style(egui::TextStyle::Name("Subheading".into())),
@@ -476,7 +478,17 @@ impl EditUI for [Layer; 8] {
                 let mut state = CollapsingState::load_with_default_open(tui.egui_ctx(), id, true);
                 let is_open = state.openness(tui.egui_ctx()) > 0.0;
                 let radius = tui.egui_ui().visuals().widgets.inactive.corner_radius.nw * 2;
-                tui.vertical().add_with_background_ui(
+                tui.style(Style {
+                    flex_direction: FlexDirection::Column,
+                    padding: Rect::zero(),
+                    gap: if is_open {
+                        length(item_spacing.y * 2.0)
+                    } else {
+                        length(0.0)
+                    },
+                    ..tui.current_style().clone()
+                })
+                .add_with_background_ui(
                     |ui, container| {
                         ui.painter().rect_filled(
                             container.full_container(),

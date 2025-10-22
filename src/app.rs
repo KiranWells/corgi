@@ -188,6 +188,10 @@ impl Theme {
                 panel_fill: self.crust(),
                 ..Default::default()
             },
+            // debug: eframe::egui::style::DebugOptions {
+            //     debug_on_hover: true,
+            //     ..Default::default()
+            // },
             explanation_tooltips: true,
             ..Default::default()
         }
