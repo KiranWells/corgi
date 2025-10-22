@@ -15,6 +15,7 @@ use eframe::{egui, egui_wgpu};
 use egui_material_icons::icons;
 use egui_taffy::{TuiBuilderLogic, tui};
 use rug::{Float, ops::PowAssign};
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::mpsc;
 use taffy::{Overflow, prelude::*};
@@ -106,7 +107,7 @@ impl CorgiUI {
             swap: false,
             command_channel,
             tab: UITab::Explore,
-            output_path: "fractal.png".into(),
+            output_path: PathBuf::from("./fractal.png").canonicalize().unwrap(),
             show_file_confirm: false,
         }
     }
@@ -210,13 +211,18 @@ impl CorgiUI {
                                             .to_string();
                                         tui.grow()
                                             .ui_add(egui::TextEdit::singleline(&mut str_path));
+                                        self.output_path = str_path.into();
 
                                         if tui
                                             .ui_add(Button::new(icons::ICON_FOLDER_OPEN))
                                             .clicked()
                                         {
                                             if let Some(path) = rfd::FileDialog::new()
-                                                .set_directory(&self.output_path)
+                                                .set_directory(
+                                                    self.output_path
+                                                        .parent()
+                                                        .unwrap_or(&PathBuf::new()),
+                                                )
                                                 .add_filter(
                                                     "image with metadata",
                                                     &["jpg", "jpeg", "webp", "png"],
@@ -225,7 +231,13 @@ impl CorgiUI {
                                                     "image without metadata",
                                                     &["avif", "gif", "qoi", "tiff", "exr"],
                                                 )
-                                                .set_file_name("fractal.png")
+                                                .set_file_name(
+                                                    self.output_path
+                                                        .file_name()
+                                                        .unwrap_or(&OsString::new())
+                                                        .to_string_lossy()
+                                                        .into_owned(),
+                                                )
                                                 .save_file()
                                             {
                                                 self.output_path = path;
@@ -353,6 +365,7 @@ impl CorgiUI {
             }
             if ui.add(Button::new("Save Image Settings")).clicked() {
                 if let Some(path) = rfd::FileDialog::new()
+                    .set_directory(PathBuf::from(".").canonicalize().unwrap_or(PathBuf::new()))
                     .set_file_name("saved_fractal.corg")
                     .add_filter("corg", &["corg"])
                     .save_file()
@@ -368,6 +381,7 @@ impl CorgiUI {
             }
             if ui.add(Button::new("Load Image Settings")).clicked() {
                 if let Some(path) = rfd::FileDialog::new()
+                    .set_directory(PathBuf::from(".").canonicalize().unwrap_or(PathBuf::new()))
                     .add_filter("corg", &["corg"])
                     .add_filter("image with metadata", &["jpg", "jpeg", "webp", "png"])
                     .pick_file()
