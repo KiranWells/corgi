@@ -139,13 +139,13 @@ impl WorkerState {
                 self.output_settings = Some(image);
                 self.ctx.request_repaint();
             }
-            if let Some(path) = file_save {
-                if let Some(output_settings) = self.output_settings.as_ref() {
-                    save_to_file(&self.output_state, output_settings, &path, |sm| {
-                        let _ = self.status_channel.send(sm);
-                        self.ctx.request_repaint();
-                    });
-                }
+            if let Some(path) = file_save
+                && let Some(output_settings) = self.output_settings.as_ref()
+            {
+                save_to_file(&self.output_state, output_settings, &path, |sm| {
+                    let _ = self.status_channel.send(sm);
+                    self.ctx.request_repaint();
+                });
             }
         }
     }

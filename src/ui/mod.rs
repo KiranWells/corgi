@@ -107,7 +107,9 @@ impl CorgiUI {
             swap: false,
             command_channel,
             tab: UITab::Explore,
-            output_path: PathBuf::from("./fractal.png").canonicalize().unwrap(),
+            output_path: std::env::current_dir()
+                .unwrap_or_default()
+                .join("fractal.png"),
             show_file_confirm: false,
         }
     }
@@ -216,8 +218,7 @@ impl CorgiUI {
                                         if tui
                                             .ui_add(Button::new(icons::ICON_FOLDER_OPEN))
                                             .clicked()
-                                        {
-                                            if let Some(path) = rfd::FileDialog::new()
+                                            && let Some(path) = rfd::FileDialog::new()
                                                 .set_directory(
                                                     self.output_path
                                                         .parent()
@@ -239,9 +240,8 @@ impl CorgiUI {
                                                         .into_owned(),
                                                 )
                                                 .save_file()
-                                            {
-                                                self.output_path = path;
-                                            }
+                                        {
+                                            self.output_path = path;
                                         }
                                     });
                                 });
@@ -363,36 +363,34 @@ impl CorgiUI {
                 style.visuals.widgets.hovered.corner_radius = CornerRadius::same(spacing as u8);
                 style.spacing.button_padding = Vec2::splat(spacing);
             }
-            if ui.add(Button::new("Save Image Settings")).clicked() {
-                if let Some(path) = rfd::FileDialog::new()
-                    .set_directory(PathBuf::from(".").canonicalize().unwrap_or(PathBuf::new()))
+            if ui.add(Button::new("Save Image Settings")).clicked()
+                && let Some(path) = rfd::FileDialog::new()
+                    .set_directory(std::env::current_dir().unwrap_or_default())
                     .set_file_name("saved_fractal.corg")
                     .add_filter("corg", &["corg"])
                     .save_file()
-                {
-                    // write to file
-                    match self.output_settings.save_to_file(&path) {
-                        Err(err) => {
-                            self.status.message = format!("Failed to save image settings: {err:?}")
-                        }
-                        Ok(_) => self.status.message = "Saved settings".to_string(),
+            {
+                // write to file
+                match self.output_settings.save_to_file(&path) {
+                    Err(err) => {
+                        self.status.message = format!("Failed to save image settings: {err:?}")
                     }
+                    Ok(_) => self.status.message = "Saved settings".to_string(),
                 }
             }
-            if ui.add(Button::new("Load Image Settings")).clicked() {
-                if let Some(path) = rfd::FileDialog::new()
-                    .set_directory(PathBuf::from(".").canonicalize().unwrap_or(PathBuf::new()))
+            if ui.add(Button::new("Load Image Settings")).clicked()
+                && let Some(path) = rfd::FileDialog::new()
+                    .set_directory(std::env::current_dir().unwrap_or_default())
                     .add_filter("corg", &["corg"])
                     .add_filter("image with metadata", &["jpg", "jpeg", "webp", "png"])
                     .pick_file()
-                {
-                    match Image::load_from_file(&path) {
-                        Ok(image) => {
-                            self.output_settings = image;
-                        }
-                        Err(err) => {
-                            self.status.message = format!("Failed to load image settings: {err:?}")
-                        }
+            {
+                match Image::load_from_file(&path) {
+                    Ok(image) => {
+                        self.output_settings = image;
+                    }
+                    Err(err) => {
+                        self.status.message = format!("Failed to load image settings: {err:?}")
                     }
                 }
             }
@@ -622,23 +620,22 @@ impl CorgiUI {
                 if self.setting_probe {
                     // probe setting mode, set the probe location to the mouse position
                     // on click
-                    if primary_down && pointer_in_rect {
-                        if let Some(pos) = pointer_pos {
-                            let (x, y) = view_image
-                                .viewport
-                                .get_real_coords((pos.x) as f64, (size.y - pos.y) as f64);
-                            match self.view_state {
-                                ViewState::Viewport => {
-                                    self.explore_settings.probe_location = ComplexPoint { x, y }
-                                }
-                                ViewState::OutputView
-                                | ViewState::OutputLock
-                                | ViewState::Output => {
-                                    self.output_settings.probe_location = ComplexPoint { x, y }
-                                }
+                    if primary_down
+                        && pointer_in_rect
+                        && let Some(pos) = pointer_pos
+                    {
+                        let (x, y) = view_image
+                            .viewport
+                            .get_real_coords((pos.x) as f64, (size.y - pos.y) as f64);
+                        match self.view_state {
+                            ViewState::Viewport => {
+                                self.explore_settings.probe_location = ComplexPoint { x, y }
                             }
-                            self.setting_probe = false;
+                            ViewState::OutputView | ViewState::OutputLock | ViewState::Output => {
+                                self.output_settings.probe_location = ComplexPoint { x, y }
+                            }
                         }
+                        self.setting_probe = false;
                     }
                 } else {
                     self.handle_viewport_input(ui, pointer_in_rect, &view_image);
