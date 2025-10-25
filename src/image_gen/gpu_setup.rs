@@ -11,12 +11,10 @@ the same GPU.
 use std::sync::{Arc, mpsc};
 
 use color_eyre::eyre::Result;
-use eframe::{
-    egui::mutex::RwLock,
-    wgpu::{
-        self, BindGroup, BindGroupLayoutEntry, Buffer, ComputePipeline, Device, PipelineLayout,
-        Queue, Texture, TextureView,
-    },
+use eframe::egui::mutex::RwLock;
+use eframe::wgpu::{
+    self, BindGroup, BindGroupLayoutEntry, Buffer, ComputePipeline, Device, PipelineLayout, Queue,
+    Texture, TextureView,
 };
 use wgpu::{ExperimentalFeatures, ShaderModule};
 

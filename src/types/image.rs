@@ -1,50 +1,53 @@
-use std::{
-    fs::{OpenOptions, read_to_string},
-    io::Write,
-    path::PathBuf,
-};
+use std::fs::{OpenOptions, read_to_string};
+use std::io::Write;
+use std::path::PathBuf;
 
 use color_eyre::eyre::{Result, eyre};
-use eframe::{egui::Vec2, wgpu::Extent3d};
-use little_exif::{exif_tag::ExifTag, metadata::Metadata};
-use nanoserde::{DeJson, SerJson};
-use rug::{
-    Float,
-    ops::{CompleteRound, PowAssign},
-};
-
-use crate::{
-    image_gen::is_metadata_supported,
-    types::{Layer, LayerKind, next_layer_id},
-};
+use eframe::egui::Vec2;
+use eframe::wgpu::Extent3d;
+use little_exif::exif_tag::ExifTag;
+use little_exif::metadata::Metadata;
+use rug::Float;
+use rug::ops::{CompleteRound, PowAssign};
+use serde::{Deserialize, Serialize};
 
 use super::{Coloring, Transform, get_precision};
+use crate::image_gen::is_metadata_supported;
+use crate::types::{Layer, LayerKind, next_layer_id};
 
-#[derive(DeJson, SerJson)]
+// We use a custom implementation for serde
+// of Float to get a radix of 10. This increases
+// the space it takes on disk, but that is a smaller
+// concern for this app.
+#[derive(Deserialize, Serialize)]
+#[serde(remote = "Float")]
 struct FloatParser {
+    #[serde(getter = "Float::value")]
     value: String,
+    #[serde(getter = "Float::prec")]
     precision: u32,
 }
 
-impl From<&FloatParser> for Float {
-    fn from(value: &FloatParser) -> Self {
+trait Translate {
+    fn value(&self) -> String;
+}
+
+impl Translate for Float {
+    fn value(&self) -> String {
+        self.to_string_radix(10, None)
+    }
+}
+
+impl From<FloatParser> for Float {
+    fn from(value: FloatParser) -> Self {
         Float::parse(value.value.clone())
             .map(|val| val.complete(value.precision))
             .unwrap_or(Float::new(53))
     }
 }
 
-impl From<&Float> for FloatParser {
-    fn from(val: &Float) -> Self {
-        FloatParser {
-            value: val.to_string_radix(10, None),
-            precision: val.prec(),
-        }
-    }
-}
-
 /// A representation of the current viewed portion of the fractal
-#[derive(Debug, Clone, PartialEq, DeJson, SerJson)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Viewport {
     pub width: usize,
     pub height: usize,
@@ -53,18 +56,18 @@ pub struct Viewport {
     pub center: ComplexPoint,
 }
 
-#[derive(Debug, Clone, PartialEq, DeJson, SerJson)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ComplexPoint {
-    #[nserde(proxy = "FloatParser")]
+    #[serde(with = "FloatParser")]
     pub x: Float,
-    #[nserde(proxy = "FloatParser")]
+    #[serde(with = "FloatParser")]
     pub y: Float,
 }
 
 /// A representation of the current image being rendered, including
 /// the viewport, coloring, and other parameters
-#[derive(Debug, Clone, PartialEq, DeJson, SerJson)]
-#[nserde(default)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Image {
     pub fractal_kind: FractalKind,
     pub viewport: Viewport,
@@ -72,7 +75,7 @@ pub struct Image {
     pub probe_location: ComplexPoint,
     pub external_coloring: Coloring,
     pub internal_coloring: Coloring,
-    #[nserde(skip)]
+    #[serde(skip)]
     pub optimization_level: OptLevel,
     pub misc: f32,
     pub debug_shutter: f32,
@@ -92,7 +95,7 @@ pub enum OptLevel {
     PerformanceOptimized,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, DeJson, SerJson)]
+#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
 pub enum FractalKind {
     #[default]
     Mandelbrot,
@@ -191,7 +194,7 @@ impl Image {
     }
 
     pub fn load_from_file(path: &PathBuf) -> Result<Self> {
-        let mut image = if is_metadata_supported(path) {
+        let mut image: Image = if is_metadata_supported(path) {
             let meta = Metadata::new_from_path(path)?;
             let tag = meta
                 .get_tag(&ExifTag::ImageDescription(String::new()))
@@ -200,11 +203,11 @@ impl Image {
             let ExifTag::ImageDescription(desc) = tag else {
                 return Err(eyre!("Tag is not a Description"));
             };
-            Image::deserialize_json(desc)?
+            serde_json::from_str(desc)?
         } else {
             read_to_string(path)
                 .map_err(color_eyre::Report::from)
-                .and_then(|s| Image::deserialize_json(&s).map_err(color_eyre::Report::from))?
+                .and_then(|s| serde_json::from_str(&s).map_err(color_eyre::Report::from))?
         };
         fn update_ids(layers: &mut [Layer]) {
             for layer in layers {
@@ -226,7 +229,7 @@ impl Image {
             .truncate(true)
             .write(true)
             .open(path)?;
-        let serialized = self.serialize_json();
+        let serialized = serde_json::to_string(self)?;
         let written_amt = file.write(serialized.as_bytes())?;
         if written_amt < serialized.len() {
             Err(eyre!("Failed to write all of the image!"))

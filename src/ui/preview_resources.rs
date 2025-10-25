@@ -1,14 +1,13 @@
 use std::sync::Arc;
 
 use color_eyre::Result;
-use eframe::{
-    egui::{self, mutex::RwLock},
-    egui_wgpu::{self, CallbackTrait},
-    wgpu::{self, Device, include_wgsl, util::DeviceExt},
-};
-use wgpu::{Extent3d, Queue};
-
 use corgi::types::{Transform, Viewport};
+use eframe::egui::mutex::RwLock;
+use eframe::egui::{self};
+use eframe::egui_wgpu::{self, CallbackTrait};
+use eframe::wgpu::util::DeviceExt;
+use eframe::wgpu::{self, Device, include_wgsl};
+use wgpu::{Extent3d, Queue};
 
 /// Resources necessary for rendering the preview image
 struct SubResources {

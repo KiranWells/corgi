@@ -1,51 +1,19 @@
 use std::mem::discriminant;
 
-use crate::ui::utils::selection;
-
-use super::{
-    EditUI, input_with_label,
-    utils::{TuiExt, fancy_header_tui, indent_with_line, selection_with_label, ui_with_label},
-};
 use corgi::types::{
     Coloring, Gradient, Layer, LayerKind, Light, LightingKind, Overlays, next_layer_id,
 };
-use eframe::egui::{
-    self, CornerRadius, RichText, Sense, Stroke,
-    collapsing_header::{CollapsingState, paint_default_icon},
-};
+use eframe::egui::collapsing_header::{CollapsingState, paint_default_icon};
+use eframe::egui::{self, CornerRadius, RichText, Sense, Stroke};
 use egui_material_icons::icons;
 use egui_taffy::TuiBuilderLogic;
 use taffy::prelude::*;
 
-fn color_edit(tui: &mut egui_taffy::Tui, color: &mut [f32; 3]) {
-    tui.ui_add_manual(
-        |ui| egui::widgets::color_picker::color_edit_button_rgb(ui, color),
-        |res, _ui| res,
-    );
-}
-
-fn pseudo_color_edit(tui: &mut egui_taffy::Tui, color: &mut [f32; 3]) {
-    tui.horizontal().add(|tui| {
-        tui.ui_add(
-            egui::DragValue::new(&mut color[0])
-                .speed(0.003)
-                .fixed_decimals(3),
-        );
-        tui.ui_add(
-            egui::DragValue::new(&mut color[1])
-                .speed(0.003)
-                .fixed_decimals(3),
-        );
-        tui.ui_add(
-            egui::DragValue::new(&mut color[2])
-                .speed(0.003)
-                .fixed_decimals(3),
-        );
-        if color.map(|x| (0.0..=1.0).contains(&x)).iter().all(|x| *x) {
-            color_edit(tui, color);
-        }
-    });
-}
+use super::utils::{
+    TuiExt, fancy_header_tui, indent_with_line, selection_with_label, ui_with_label,
+};
+use super::{EditUI, input_with_label};
+use crate::ui::utils::{color_edit, pseudo_color_edit, selection};
 
 impl EditUI for Coloring {
     fn render_edit_ui(&mut self, ctx: &egui::Context, tui: &mut egui_taffy::Tui) {

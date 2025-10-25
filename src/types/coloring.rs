@@ -1,12 +1,12 @@
 use std::sync::atomic::AtomicU64;
 
 use egui_material_icons::icons;
-use nanoserde::{DeJson, SerJson};
+use serde::{Deserialize, Serialize};
 
 /// The coloring parameters for the image. These are interpreted
 /// slightly differently for internal and external coloring, as
 /// some coloring algorithms are incompatible between the two.
-#[derive(Clone, Debug, PartialEq, DeJson, SerJson)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Coloring {
     pub saturation: f32,
     pub brightness: f32,
@@ -21,7 +21,7 @@ pub struct Coloring {
 }
 
 #[repr(u32)]
-#[derive(Clone, Copy, Debug, PartialEq, DeJson, SerJson)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 pub enum LightingKind {
     Flat,
     Gradient,
@@ -30,7 +30,9 @@ pub enum LightingKind {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, DeJson, SerJson, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Deserialize, Serialize, bytemuck::Pod, bytemuck::Zeroable,
+)]
 pub struct Light {
     pub color: [f32; 3],
     pub strength: f32,
@@ -38,9 +40,9 @@ pub struct Light {
     padding: f32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, DeJson, SerJson)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Layer {
-    #[nserde(skip)]
+    #[serde(skip)]
     pub id: u64,
     pub kind: LayerKind,
     pub strength: f32,
@@ -64,14 +66,16 @@ pub fn next_layer_id() -> u64 {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, DeJson, SerJson, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Deserialize, Serialize, bytemuck::Pod, bytemuck::Zeroable,
+)]
 pub struct Overlays {
     pub iteration_outline_color: [f32; 4],
     pub set_outline_color: [f32; 4],
 }
 
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, DeJson, SerJson)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 pub enum LayerKind {
     None = 0,
     Step,
@@ -104,7 +108,7 @@ impl LayerKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, DeJson, SerJson)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 pub enum Gradient {
     Flat([f32; 3]),
     Procedural([[f32; 3]; 4]),

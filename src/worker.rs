@@ -1,13 +1,11 @@
-use eframe::egui::mutex::RwLock;
-use eframe::wgpu::{self};
-use eframe::{egui, egui_wgpu};
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use std::time::Instant;
 
 use corgi::image_gen::{GPUData, SharedState, render_image, save_to_file};
 use corgi::types::{Image, ImageGenCommand, StatusMessage};
+use eframe::egui::mutex::RwLock;
+use eframe::{egui, egui_wgpu, wgpu};
 
 pub struct WorkerState {
     preview_state: GPUData,
@@ -31,6 +29,7 @@ impl WorkerState {
         send: mpsc::Sender<StatusMessage>,
         cancelled: Arc<AtomicBool>,
         ctx: egui::Context,
+        context: &crate::Context,
     ) -> Self {
         let shared = SharedState::new(wgpu.device.clone(), wgpu.queue.clone());
 
@@ -41,7 +40,7 @@ impl WorkerState {
                 shared.clone(),
                 "Preview",
                 corgi::image_gen::Constants {
-                    iter_batch_size: 10_000,
+                    iter_batch_size: context.config().max_shader_batch_iters,
                 },
             ),
             output_state: GPUData::init(
@@ -50,7 +49,7 @@ impl WorkerState {
                 shared,
                 "Output",
                 corgi::image_gen::Constants {
-                    iter_batch_size: 10_000,
+                    iter_batch_size: context.config().max_shader_batch_iters,
                 },
             ),
             probe_buffer: vec![],

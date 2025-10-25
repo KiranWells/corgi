@@ -15,7 +15,7 @@ identifier = "com.kiranwells.corgi"
 # TODO
 # icon
 linux_mime_types = ["application/x-corgi-settings","image/png","image/jpeg","image/webp"]
-# linux_exec_args = "%f"
+linux_exec_args = "%f"
 
 [lib]
 name = "corgi"
@@ -29,16 +29,20 @@ path = "src/main.rs"
 bytemuck = { version = "1.23", features = ["derive"] }
 clap = { version = "4.5.43", features = ["derive"] }
 color-eyre = "0.6"
+directories = "6.0.0"
+ecolor = { version = "0.33.0", features = ["serde"] }
 eframe = { version = "0.33.0", default-features = false, features = ["default_fonts","wayland","wgpu","x11"] }
 egui_material_icons = "0.5.0"
 egui_taffy = "0.10.0"
 image = "0.25"
 little_exif = "0.6.14"
-nanoserde = { version = "0.2.1", default-features = false, features = ["std", "json"] }
 pollster = "0.4.0"
 rfd = { version = "0.15.4", features = ["xdg-portal"] }
 rug = "1.27"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
 taffy = "0.7.7"
+toml = { version = "0.9.8", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 wesl = "0.2.0"

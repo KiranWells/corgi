@@ -1,7 +1,8 @@
 use std::fmt::Debug;
 
-use crate::types::{ComplexPoint, ESCAPE_RADIUS, get_precision};
 use rug::Float;
+
+use crate::types::{ComplexPoint, ESCAPE_RADIUS, get_precision};
 
 /// # FromFloat
 /// A trait to convert a `rug::Float` to another type.

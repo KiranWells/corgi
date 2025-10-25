@@ -6,28 +6,32 @@ This module contains the main UI state struct and its implementation, which
 contains the code necessary to update internal state and render the ui.
  */
 
-use eframe::egui::containers::menu::MenuButton;
-use eframe::egui::{
-    Button, Color32, CornerRadius, Frame, ScrollArea, Sense, Separator, Stroke, TextStyle,
-    UiBuilder, Vec2,
-};
-use eframe::{egui, egui_wgpu};
-use egui_material_icons::icons;
-use egui_taffy::{TuiBuilderLogic, tui};
-use rug::{Float, ops::PowAssign};
-use std::ffi::OsString;
-use std::path::PathBuf;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use taffy::{Overflow, prelude::*};
 
 use corgi::types::{
     Coloring, ComplexPoint, Image, ImageGenCommand, OptLevel, Status, Viewport, get_precision,
 };
+use directories::BaseDirs;
+use eframe::egui::containers::menu::MenuButton;
+use eframe::egui::{
+    Button, Color32, CornerRadius, Frame, ScrollArea, Sense, Separator, Stroke, TextStyle,
+    UiBuilder, Vec2, WidgetText,
+};
+use eframe::{egui, egui_wgpu};
+use egui_material_icons::icons;
+use egui_taffy::{TuiBuilderLogic, tui};
 use preview_resources::PaintCallback;
+use rug::Float;
+use rug::ops::PowAssign;
+use taffy::Overflow;
+use taffy::prelude::*;
 use utils::{TuiExt, collapsible, input_with_label, point_edit, section, selection_with_label};
 
 mod coloring;
 mod preview_resources;
+mod settings;
 mod utils;
 
 pub use preview_resources::PreviewRenderResources;
@@ -68,12 +72,16 @@ pub struct CorgiUI {
     pub status: Status,
     command_channel: mpsc::Sender<ImageGenCommand>,
     output_path: PathBuf,
-    show_file_confirm: bool,
+    show_settings: bool,
 }
 
 impl CorgiUI {
     /// Create a new state struct; status should be shared with the render thread.
-    pub fn new(image: Image, command_channel: mpsc::Sender<ImageGenCommand>) -> Self {
+    pub fn new(
+        context: &crate::Context,
+        image: Image,
+        command_channel: mpsc::Sender<ImageGenCommand>,
+    ) -> Self {
         let default_output_viewport = Viewport {
             width: 3840,
             height: 2160,
@@ -107,16 +115,14 @@ impl CorgiUI {
             swap: false,
             command_channel,
             tab: UITab::Explore,
-            output_path: std::env::current_dir()
-                .unwrap_or_default()
-                .join("fractal.png"),
-            show_file_confirm: false,
+            output_path: context.cache().previous_paths.image.clone(),
+            show_settings: false,
         }
     }
 
     /// Generate the UI and handle any events. This function will do some blocking
     /// to access shared data
-    pub fn generate_ui(&mut self, ctx: &egui::Context) {
+    pub fn generate_ui(&mut self, ctx: &egui::Context, context: &mut crate::Context) {
         egui::SidePanel::right("settings_panel")
             .frame(Frame::new().fill(ctx.style().visuals.window_fill))
             .show(ctx, |ui| {
@@ -134,7 +140,7 @@ impl CorgiUI {
                         style.spacing.button_padding.x *= 2.0;
                         style.override_text_style = Some(TextStyle::Heading);
                     }
-                    self.menu(ui);
+                    self.menu(context, ui);
                     ui.selectable_value(
                         &mut self.tab,
                         UITab::Explore,
@@ -211,36 +217,51 @@ impl CorgiUI {
                                             .to_str()
                                             .unwrap_or("Invalid Path")
                                             .to_string();
-                                        tui.grow()
-                                            .ui_add(egui::TextEdit::singleline(&mut str_path));
+                                        let home_opt = BaseDirs::new()
+                                            .as_ref()
+                                            .map(BaseDirs::home_dir)
+                                            .and_then(Path::to_str)
+                                            .map(ToOwned::to_owned);
+                                        if let Some(home_dir) = &home_opt
+                                            && str_path.starts_with(&(home_dir.to_owned() + "/"))
+                                        {
+                                            str_path = str_path.replacen(home_dir, "~", 1);
+                                        }
+                                        let text_size =
+                                            WidgetText::Text(icons::ICON_FOLDER_OPEN.to_owned())
+                                                .into_galley(
+                                                    tui.egui_ui(),
+                                                    None,
+                                                    tui.egui_ui().available_width(),
+                                                    TextStyle::Button,
+                                                )
+                                                .size();
+                                        let spacing = tui.egui_ui().spacing().clone();
+                                        let available_width = tui.egui_ui().available_width();
+                                        tui.grow().ui_add(
+                                            egui::TextEdit::singleline(&mut str_path)
+                                                .desired_width(
+                                                    available_width
+                                                        - text_size.x
+                                                        - spacing.button_padding.x * 2.0
+                                                        - spacing.item_spacing.x * 2.0,
+                                                ),
+                                        );
+                                        if let Some(home_dir) = &home_opt
+                                            && str_path.starts_with("~/")
+                                        {
+                                            str_path = str_path.replacen("~", home_dir, 1);
+                                        }
                                         self.output_path = str_path.into();
 
                                         if tui
                                             .ui_add(Button::new(icons::ICON_FOLDER_OPEN))
                                             .clicked()
                                             && let Some(path) = rfd::FileDialog::new()
-                                                .set_directory(
-                                                    self.output_path
-                                                        .parent()
-                                                        .unwrap_or(&PathBuf::new()),
-                                                )
-                                                .add_filter(
-                                                    "image with metadata",
-                                                    &["jpg", "jpeg", "webp", "png"],
-                                                )
-                                                .add_filter(
-                                                    "image without metadata",
-                                                    &["avif", "gif", "qoi", "tiff", "exr"],
-                                                )
-                                                .set_file_name(
-                                                    self.output_path
-                                                        .file_name()
-                                                        .unwrap_or(&OsString::new())
-                                                        .to_string_lossy()
-                                                        .into_owned(),
-                                                )
-                                                .save_file()
+                                                .set_directory(&self.output_path)
+                                                .pick_folder()
                                         {
+                                            context.cache_mut().previous_paths.image = path.clone();
                                             self.output_path = path;
                                         }
                                     });
@@ -265,66 +286,36 @@ impl CorgiUI {
                                             .command_channel
                                             .send(ImageGenCommand::NewOutputSettings(image));
                                     }
-                                    if tui.ui_add(Button::new("Save to file")).clicked() {
-                                        if self.output_path.exists() {
-                                            self.show_file_confirm = true;
-                                        } else {
-                                            let _ = self.command_channel.send(
-                                                ImageGenCommand::SaveToFile(
-                                                    self.output_path.clone(),
-                                                ),
-                                            );
+                                    if tui.ui_add(Button::new("Save to file")).clicked()
+                                        && let Some(path) = rfd::FileDialog::new()
+                                            .set_directory(&self.output_path)
+                                            .add_filter(
+                                                "image with metadata",
+                                                &["jpg", "jpeg", "webp", "png"],
+                                            )
+                                            .add_filter(
+                                                "image without metadata",
+                                                &["avif", "gif", "qoi", "tiff", "exr"],
+                                            )
+                                            .set_file_name(format!(
+                                                "fractal.{}",
+                                                context.cache().default_image_type
+                                            ))
+                                            .save_file()
+                                    {
+                                        if let Some(ext) = path.extension().and_then(OsStr::to_str)
+                                        {
+                                            context.cache_mut().default_image_type = ext.to_owned();
                                         }
+                                        let _ = self
+                                            .command_channel
+                                            .send(ImageGenCommand::SaveToFile(path.clone()));
                                     }
                                 });
                             }
                         });
                 });
             });
-        let style = ctx.style().clone();
-        if self.show_file_confirm {
-            egui::Window::new("File already exists, overwrite?")
-                .collapsible(false)
-                .resizable(false)
-                .show(ctx, |ui| {
-                    ui.set_style(style);
-                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-
-                    let item_spacing = ui.spacing().item_spacing;
-                    tui(ui, ui.id().with("confirm"))
-                        .reserve_available_width()
-                        .style(Style {
-                            flex_direction: FlexDirection::Row,
-                            justify_content: Some(AlignContent::Stretch),
-                            align_items: Some(AlignItems::Center),
-                            size: Size {
-                                width: percent(1.0),
-                                height: auto(),
-                            },
-                            padding: Rect::length(item_spacing.x * 2.0),
-                            gap: length(item_spacing.x * 2.0),
-                            ..Default::default()
-                        })
-                        .show(|tui| {
-                            tui.horizontal().add(|tui| {
-                                if tui.grow().ui_add(Button::new("Cancel")).clicked() {
-                                    self.show_file_confirm = false;
-                                }
-
-                                if tui
-                                    .grow()
-                                    .ui_add(Button::new("Overwrite and save"))
-                                    .clicked()
-                                {
-                                    self.show_file_confirm = false;
-                                    let _ = self.command_channel.send(ImageGenCommand::SaveToFile(
-                                        self.output_path.clone(),
-                                    ));
-                                }
-                            });
-                        })
-                });
-        }
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(ctx.style().visuals.window_fill))
             .show(ctx, |ui| {
@@ -349,10 +340,36 @@ impl CorgiUI {
                     ui.label(&self.status.message)
                 })
             });
+        let style = ctx.style().clone();
+        egui::Window::new("Settings")
+            .open(&mut self.show_settings)
+            .show(ctx, |ui| {
+                ui.set_style(style);
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+
+                tui(ui, ui.id().with("settings"))
+                    .reserve_available_width()
+                    .style(Style {
+                        flex_direction: FlexDirection::Column,
+                        size: Size {
+                            width: percent(1.0),
+                            height: auto(),
+                        },
+                        ..Default::default()
+                    })
+                    .show(|tui| {
+                        section(tui, "Configuration", true, |tui| {
+                            context.config_mut().render_edit_ui(ctx, tui);
+                        });
+                        section(tui, "Theme", true, |tui| {
+                            context.theme_mut().render_edit_ui(ctx, tui);
+                        });
+                    })
+            });
     }
 
     // Build the menu button
-    pub fn menu(&mut self, ui: &mut egui::Ui) {
+    pub fn menu(&mut self, context: &mut crate::Context, ui: &mut egui::Ui) {
         let spacing = ui.spacing().button_padding.y;
         MenuButton::from_button(Button::new(icons::ICON_MENU)).ui(ui, |ui| {
             {
@@ -365,14 +382,18 @@ impl CorgiUI {
             }
             if ui.add(Button::new("Save Image Settings")).clicked()
                 && let Some(path) = rfd::FileDialog::new()
-                    .set_directory(std::env::current_dir().unwrap_or_default())
+                    .set_directory(context.cache().previous_paths.settings.clone())
                     .set_file_name("saved_fractal.corg")
                     .add_filter("corg", &["corg"])
                     .save_file()
             {
+                if let Some(dir) = path.parent() {
+                    context.cache_mut().previous_paths.settings = dir.to_owned();
+                }
                 // write to file
                 match self.output_settings.save_to_file(&path) {
                     Err(err) => {
+                        tracing::error!("Failed to save image settings: {err:?}");
                         self.status.message = format!("Failed to save image settings: {err:?}")
                     }
                     Ok(_) => self.status.message = "Saved settings".to_string(),
@@ -380,19 +401,26 @@ impl CorgiUI {
             }
             if ui.add(Button::new("Load Image Settings")).clicked()
                 && let Some(path) = rfd::FileDialog::new()
-                    .set_directory(std::env::current_dir().unwrap_or_default())
+                    .set_directory(context.cache().previous_paths.settings.clone())
                     .add_filter("corg", &["corg"])
                     .add_filter("image with metadata", &["jpg", "jpeg", "webp", "png"])
                     .pick_file()
             {
+                if let Some(dir) = path.parent() {
+                    context.cache_mut().previous_paths.settings = dir.to_owned();
+                }
                 match Image::load_from_file(&path) {
                     Ok(image) => {
                         self.output_settings = image;
                     }
                     Err(err) => {
+                        tracing::error!("Failed to load image settings `{path:?}`: {err}");
                         self.status.message = format!("Failed to load image settings: {err:?}")
                     }
                 }
+            }
+            if ui.add(Button::new("Settings")).clicked() {
+                self.show_settings = true;
             }
         });
     }

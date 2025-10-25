@@ -11,19 +11,20 @@ images back to the main thread.
 mod gpu_setup;
 mod probe;
 
-use eframe::wgpu::{self, Extent3d};
-use image::ImageBuffer;
-use little_exif::{exif_tag::ExifTag, metadata::Metadata};
-use nanoserde::SerJson;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::{path::Path, time::Duration};
+use std::time::Duration;
+
+use eframe::wgpu::{self, Extent3d};
+pub use gpu_setup::{Constants, GPUData, SharedState, get_device_and_queue};
+use image::ImageBuffer;
+use little_exif::exif_tag::ExifTag;
+use little_exif::metadata::Metadata;
+use probe::probe;
 use tracing::debug;
 
 use crate::types::{ColorParams, ComputeParams, Image, ImageDiff, RenderParams, StatusMessage};
-use probe::probe;
-
-pub use gpu_setup::{Constants, GPUData, SharedState, get_device_and_queue};
 
 macro_rules! time {
     ($name:literal; $($expression:tt)*) => {{
@@ -309,10 +310,22 @@ pub fn save_to_file(
             // add metadata
             if is_metadata_supported(path) {
                 let mut meta = Metadata::new();
-                meta.set_tag(ExifTag::ImageDescription(image_settings.serialize_json()));
-                meta.set_tag(ExifTag::Software("Corgi".into()));
-                if let Err(err) = meta.write_to_file(path) {
-                    tracing::error!("Failed to write metadata to file: {err:?}");
+                let serialized = serde_json::to_string(image_settings);
+                match serialized {
+                    Err(err) => {
+                        tracing::error!("Failed to save image: {err}");
+                        status_callback(StatusMessage::Progress(
+                            format!("Failed to save image: {err}"),
+                            0.0,
+                        ));
+                    }
+                    Ok(description) => {
+                        meta.set_tag(ExifTag::ImageDescription(description));
+                        meta.set_tag(ExifTag::Software("Corgi".into()));
+                        if let Err(err) = meta.write_to_file(path) {
+                            tracing::error!("Failed to write metadata to file: {err:?}");
+                        }
+                    }
                 }
             }
             status_callback(StatusMessage::Progress("Image save complete".into(), 1.0));

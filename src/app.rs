@@ -1,24 +1,16 @@
-use clap::Parser;
-use eframe::egui::Color32;
-use eframe::egui::CornerRadius;
-use eframe::egui::FontId;
-use eframe::egui::Stroke;
-use eframe::egui::Style;
-use eframe::egui::TextStyle;
-use eframe::egui::style::WidgetVisuals;
-use eframe::egui::vec2;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use std::thread;
-use std::time::Duration;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+use clap::Parser;
+use corgi::types::{Debouncer, Image, ImageGenCommand, StatusMessage};
 use wgpu::Extent3d;
 
+use crate::config::Context;
 use crate::ui::{CorgiUI, PreviewRenderResources};
 use crate::worker::WorkerState;
-use corgi::types::{Debouncer, Image, ImageGenCommand, StatusMessage};
 
 /// Command line options for the application
 #[derive(Parser, Debug)]
@@ -36,7 +28,6 @@ rendering images given image settings defined in a JSON file."
 pub struct CorgiCliOptions {
     /// Optional image settings file to start with. Supported formats include
     /// JSON (.json or .corg) and image files containing the necessary metadata.
-    #[arg(short, long, value_name = "FILE")]
     pub settings_file: Option<PathBuf>,
     /// Optional output image location. If specified, Corgi will not launch a UI.
     /// If the image format supports metadata, the generations settings will be
@@ -45,200 +36,12 @@ pub struct CorgiCliOptions {
     pub output_file: Option<PathBuf>,
 }
 
-struct Theme {
-    bg_color: Color32,
-    fg_color: Color32,
-    accent_color: Color32,
-    spacing: f32,
-    base_rem: f32,
-}
-
-impl Default for Theme {
-    fn default() -> Self {
-        Self {
-            bg_color: Color32::from_rgb(30, 30, 46),
-            fg_color: Color32::from_rgb(186, 194, 222),
-            accent_color: Color32::from_rgb(116, 199, 236),
-            spacing: 4.0,
-            base_rem: 12.0,
-        }
-    }
-}
-
-impl Theme {
-    pub fn style(&self) -> Style {
-        Style {
-            text_styles: [
-                (
-                    TextStyle::Body,
-                    FontId::new(self.rem(1.0), eframe::egui::FontFamily::Proportional),
-                ),
-                (
-                    TextStyle::Button,
-                    FontId::new(self.rem(1.0), eframe::egui::FontFamily::Proportional),
-                ),
-                (
-                    TextStyle::Monospace,
-                    FontId::new(self.rem(1.0), eframe::egui::FontFamily::Monospace),
-                ),
-                (
-                    TextStyle::Small,
-                    FontId::new(self.rem(0.75), eframe::egui::FontFamily::Proportional),
-                ),
-                (
-                    TextStyle::Heading,
-                    FontId::new(self.rem(1.5), eframe::egui::FontFamily::Proportional),
-                ),
-                (
-                    TextStyle::Name("Subheading".into()),
-                    FontId::new(self.rem(1.25), eframe::egui::FontFamily::Proportional),
-                ),
-            ]
-            .into(),
-            drag_value_text_style: TextStyle::Monospace,
-            spacing: eframe::egui::Spacing {
-                item_spacing: vec2(self.spacing, self.spacing),
-                window_margin: eframe::egui::Margin::same(self.spacing as i8),
-                menu_margin: eframe::egui::Margin::same(self.spacing as i8),
-                button_padding: vec2(self.spacing, self.spacing),
-                indent: self.spacing * 4.0,
-                interact_size: vec2(self.rem(5.0), self.rem(1.5)),
-                slider_width: 100.0,
-                slider_rail_height: 8.0,
-                combo_width: 80.0,
-                text_edit_width: 200.0,
-                icon_width: self.rem(1.25),
-                icon_width_inner: self.rem(0.75),
-                icon_spacing: self.spacing,
-                default_area_size: vec2(600.0, 400.0),
-                tooltip_width: 300.0,
-                menu_width: 300.0,
-                menu_spacing: 0.0,
-                combo_height: 200.0,
-                scroll: Default::default(),
-                indent_ends_with_horizontal_line: false,
-            },
-            interaction: eframe::egui::style::Interaction {
-                interact_radius: 8.0,
-                resize_grab_radius_side: 5.0,
-                resize_grab_radius_corner: 10.0,
-                show_tooltips_only_when_still: true,
-                tooltip_delay: 0.5,
-                tooltip_grace_time: 0.2,
-                selectable_labels: true,
-                multi_widget_text_select: true,
-            },
-            visuals: eframe::egui::Visuals {
-                dark_mode: true,
-                text_alpha_from_coverage: eframe::epaint::AlphaFromCoverage::DARK_MODE_DEFAULT,
-                widgets: eframe::egui::style::Widgets {
-                    noninteractive: eframe::egui::style::WidgetVisuals {
-                        weak_bg_fill: self.base(),
-                        bg_fill: self.base(),
-                        bg_stroke: Stroke::new(2.0, self.overlay2()),
-                        fg_stroke: Stroke::new(2.0, self.subtext()),
-                        corner_radius: CornerRadius::same(self.radius()),
-                        expansion: 0.0,
-                    },
-                    inactive: eframe::egui::style::WidgetVisuals {
-                        weak_bg_fill: self.surface1(),
-                        bg_fill: self.surface2(),
-                        bg_stroke: Default::default(),
-                        fg_stroke: Stroke::new(2.0, self.text()),
-                        corner_radius: CornerRadius::same(self.radius()),
-                        expansion: 0.0,
-                    },
-                    hovered: WidgetVisuals {
-                        weak_bg_fill: self.overlay1(),
-                        bg_fill: self.overlay1(),
-                        bg_stroke: Default::default(),
-                        fg_stroke: Stroke::new(2.5, self.text()),
-                        corner_radius: CornerRadius::same(self.radius()),
-                        expansion: 0.0,
-                    },
-                    active: WidgetVisuals {
-                        weak_bg_fill: self.overlay1(),
-                        bg_fill: self.accent(),
-                        bg_stroke: Default::default(),
-                        fg_stroke: Stroke::new(2.0, self.crust()),
-                        corner_radius: CornerRadius::same(self.radius()),
-                        expansion: 0.0,
-                    },
-                    open: WidgetVisuals {
-                        weak_bg_fill: self.surface2(),
-                        bg_fill: self.surface2(),
-                        bg_stroke: Default::default(),
-                        fg_stroke: Stroke::new(1.0, self.text()),
-                        corner_radius: CornerRadius::same(self.radius()),
-                        expansion: 0.0,
-                    },
-                },
-                selection: eframe::egui::style::Selection {
-                    bg_fill: self.accent(),
-                    stroke: Stroke::new(1.0, self.crust()),
-                },
-                hyperlink_color: self.accent(),
-                faint_bg_color: self.mantle(),
-                extreme_bg_color: self.crust(),
-                code_bg_color: self.crust(),
-                window_corner_radius: eframe::egui::CornerRadius::same(self.spacing as u8),
-                window_fill: self.base(),
-                window_stroke: Default::default(),
-                menu_corner_radius: eframe::egui::CornerRadius::same(self.spacing as u8),
-                panel_fill: self.crust(),
-                ..Default::default()
-            },
-            // debug: eframe::egui::style::DebugOptions {
-            //     debug_on_hover: true,
-            //     ..Default::default()
-            // },
-            explanation_tooltips: true,
-            ..Default::default()
-        }
-    }
-
-    fn text(&self) -> Color32 {
-        self.fg_color
-    }
-    fn subtext(&self) -> Color32 {
-        self.bg_color.lerp_to_gamma(self.fg_color, 0.9)
-    }
-    fn overlay2(&self) -> Color32 {
-        self.bg_color.lerp_to_gamma(self.fg_color, 0.7)
-    }
-    fn overlay1(&self) -> Color32 {
-        self.bg_color.lerp_to_gamma(self.fg_color, 0.5)
-    }
-    fn surface2(&self) -> Color32 {
-        self.bg_color.lerp_to_gamma(self.fg_color, 0.2)
-    }
-    fn surface1(&self) -> Color32 {
-        self.bg_color.lerp_to_gamma(self.fg_color, 0.1)
-    }
-    fn base(&self) -> Color32 {
-        self.bg_color
-    }
-    fn mantle(&self) -> Color32 {
-        self.bg_color.lerp_to_gamma(Color32::BLACK, 0.2)
-    }
-    fn crust(&self) -> Color32 {
-        self.bg_color.lerp_to_gamma(Color32::BLACK, 0.3)
-    }
-    fn accent(&self) -> Color32 {
-        self.accent_color
-    }
-    fn radius(&self) -> u8 {
-        self.spacing as u8
-    }
-    fn rem(&self, value: f32) -> f32 {
-        value * self.base_rem
-    }
-}
-
 /// The App State management struct
 #[derive(Debug)]
 pub struct CorgiApp {
     ui_state: CorgiUI,
+    context: Context,
+    last_save_time: Instant,
     command_channel: mpsc::Sender<ImageGenCommand>,
     status_channel: mpsc::Receiver<StatusMessage>,
     last_rendered: Image,
@@ -252,6 +55,7 @@ impl CorgiApp {
     pub fn create(
         cc: &eframe::CreationContext<'_>,
         cli_options: CorgiCliOptions,
+        context: Context,
     ) -> std::result::Result<Box<dyn eframe::App>, Box<dyn std::error::Error + Send + Sync>> {
         let wgpu = cc
             .wgpu_render_state
@@ -264,8 +68,7 @@ impl CorgiApp {
         let output_image = Image::default();
         let ctx = cc.egui_ctx.clone();
         eframe::egui::Visuals::default();
-        let theme = Theme::default();
-        ctx.set_style(theme.style());
+        ctx.set_style(context.theme().style());
 
         if let Some(image_file) = &cli_options.settings_file {
             initial_image = Image::load_from_file(image_file)?
@@ -284,6 +87,7 @@ impl CorgiApp {
             worker_send,
             cancelled,
             ctx,
+            &context,
         );
         let extents = Extent3d::from(&initial_image.viewport);
         let resources = PreviewRenderResources::init(
@@ -297,7 +101,7 @@ impl CorgiApp {
                 output_image.viewport.height as u32,
             ),
         )?;
-        let ui_state = CorgiUI::new(initial_image, ui_send.clone());
+        let ui_state = CorgiUI::new(&context, initial_image, ui_send.clone());
 
         wgpu.renderer.write().callback_resources.insert(resources);
         thread::spawn(move || {
@@ -313,6 +117,8 @@ impl CorgiApp {
             last_send_time: Instant::now(),
             last_calc_time: Duration::from_millis(16),
             ui_state,
+            context,
+            last_save_time: Instant::now(),
         }))
     }
 }
@@ -348,7 +154,7 @@ impl eframe::App for CorgiApp {
                 }
             }
         }
-        self.ui_state.generate_ui(ctx);
+        self.ui_state.generate_ui(ctx, &mut self.context);
         let image = self.ui_state.image();
         //  sanity check on image size
         if !(image.viewport.width < 10
@@ -402,5 +208,12 @@ impl eframe::App for CorgiApp {
             }
             self.previous_frame = image;
         }
+        if Instant::now() - self.last_save_time > Duration::from_secs(10) {
+            self.context.save();
+            self.last_save_time = Instant::now();
+        }
+    }
+    fn on_exit(&mut self) {
+        self.context.save();
     }
 }

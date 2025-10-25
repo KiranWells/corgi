@@ -1,11 +1,12 @@
 use std::mem::{Discriminant, discriminant};
 
+use corgi::types::{ComplexPoint, FractalKind, Gradient, LayerKind, LightingKind};
 use eframe::egui::{self, Color32, RichText, Sense, Separator, TextStyle, WidgetText};
+use egui_material_icons::icons;
 use egui_taffy::{Tui, TuiBuilderLogic, TuiWidget};
 use rug::Float;
-use taffy::{Overflow, prelude::*};
-
-use corgi::types::{ComplexPoint, FractalKind, Gradient, LayerKind, LightingKind};
+use taffy::Overflow;
+use taffy::prelude::*;
 
 use super::coloring::{OrbitType, StripeType};
 
@@ -577,4 +578,88 @@ pub fn indent_with_line(tui: &mut Tui, add_contents: impl FnOnce(&mut Tui)) {
             add_contents(tui);
         });
     });
+}
+
+pub fn color_edit(tui: &mut egui_taffy::Tui, color: &mut [f32; 3]) {
+    tui.ui_add_manual(
+        |ui| egui::widgets::color_picker::color_edit_button_rgb(ui, color),
+        |res, _ui| res,
+    );
+}
+pub fn color32_edit(tui: &mut egui_taffy::Tui, color: &mut Color32) {
+    tui.ui_add_manual(
+        |ui| {
+            egui::widgets::color_picker::color_edit_button_srgba(
+                ui,
+                color,
+                egui::color_picker::Alpha::Opaque,
+            )
+        },
+        |res, _ui| res,
+    );
+}
+
+pub fn pseudo_color_edit(tui: &mut egui_taffy::Tui, color: &mut [f32; 3]) {
+    tui.horizontal().add(|tui| {
+        tui.ui_add(
+            egui::DragValue::new(&mut color[0])
+                .speed(0.003)
+                .fixed_decimals(3),
+        );
+        tui.ui_add(
+            egui::DragValue::new(&mut color[1])
+                .speed(0.003)
+                .fixed_decimals(3),
+        );
+        tui.ui_add(
+            egui::DragValue::new(&mut color[2])
+                .speed(0.003)
+                .fixed_decimals(3),
+        );
+        if color.map(|x| (0.0..=1.0).contains(&x)).iter().all(|x| *x) {
+            color_edit(tui, color);
+        }
+    });
+}
+
+#[expect(dead_code)]
+pub fn text_edit_with_label(
+    tui: &mut Tui,
+    label: &str,
+    help_text: Option<&str>,
+    text: &mut String,
+) -> egui::Response {
+    let text_width = eframe::egui::WidgetText::from(label)
+        .into_galley(
+            tui.egui_ui(),
+            None,
+            tui.egui_ui().available_width(),
+            eframe::egui::TextStyle::Body,
+        )
+        .size()
+        .x;
+    tui.ui_add_manual(
+        |ui| {
+            ui.spacing_mut().item_spacing.x *= 2.0;
+            ui.horizontal(|ui| {
+                let available = ui.available_width();
+                let desired_width = available - text_width - ui.spacing().item_spacing.x;
+                let mut response = ui.label(label);
+                if let Some(help_text) = help_text {
+                    response = response
+                        .union(ui.label(icons::ICON_QUESTION_MARK))
+                        .on_hover_text(help_text)
+                }
+                response.union(
+                    ui.add(
+                        egui::TextEdit::singleline(text)
+                            .horizontal_align(eframe::egui::Align::Max)
+                            .desired_width(desired_width.floor()),
+                    ),
+                )
+            })
+            .response
+        },
+        |res, _| res,
+    )
 }
