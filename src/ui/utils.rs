@@ -1,7 +1,7 @@
 use std::mem::{Discriminant, discriminant};
 
 use corgi::types::{ComplexPoint, FractalKind, Gradient, LayerKind, LightingKind};
-use eframe::egui::{self, Color32, RichText, Sense, Separator, TextStyle, WidgetText};
+use eframe::egui::{self, Color32, RichText, Sense, TextStyle, WidgetText};
 use egui_material_icons::icons;
 use egui_taffy::{Tui, TuiBuilderLogic, TuiWidget};
 use rug::Float;
@@ -562,18 +562,38 @@ pub fn point_edit(
 
 pub fn indent_with_line(tui: &mut Tui, add_contents: impl FnOnce(&mut Tui)) {
     tui.horizontal().add(|tui| {
-        tui.style(taffy::Style {
-            size: Size {
-                height: percent(1.0),
-                width: auto(),
-            },
-            gap: length(0.0),
-            ..tui.current_style().clone()
-        })
-        .ui_add_manual(
-            |ui| ui.add(Separator::default().vertical().spacing(ui.spacing().indent)),
-            |res, _ui| res,
-        );
+        {
+            let size = taffy::Size {
+                height: auto(),
+                width: length(tui.egui_ui().spacing().indent),
+            };
+            let tui = tui.mut_style(|style| {
+                style.align_self = Some(taffy::AlignItems::Stretch);
+                style.min_size = size;
+                style.max_size = size;
+                style.size = size;
+            });
+
+            tui.add_with_background_ui(
+                |ui, container| {
+                    let inner = container.full_container_without_border_and_padding();
+                    ui.scope_builder(
+                        egui::UiBuilder::new()
+                            .layout(egui::Layout::left_to_right(egui::Align::Center))
+                            .max_rect(inner),
+                        |ui| {
+                            ui.add(
+                                egui::Separator::default()
+                                    .vertical()
+                                    .spacing(ui.spacing().indent),
+                            )
+                        },
+                    )
+                    .inner
+                },
+                |_, _| {},
+            );
+        }
         tui.vertical().add(|tui| {
             add_contents(tui);
         });

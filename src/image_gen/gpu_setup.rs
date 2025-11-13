@@ -18,7 +18,7 @@ use eframe::wgpu::{
 };
 use wgpu::{ExperimentalFeatures, ShaderModule};
 
-use crate::types::{ColorParams, ComputeParams, RenderParams, Viewport};
+use crate::types::{ColorParams, ComputeParams, MAX_GRADIENT_STOPS, RenderParams, Viewport};
 
 /// Contains GPU state that can be shared between all image generation
 /// contexts.
@@ -77,6 +77,7 @@ pub struct Buffers {
     pub step: Buffer,
     pub orbits: Buffer,
     pub stripes: Buffer,
+    pub gradient: Buffer,
 }
 
 /// A struct containing all of the bind groups used by the GPU
@@ -386,6 +387,7 @@ impl Buffers {
             external_coloring: Self::create_buffer::<ColorParams>(device, 1, Uniform),
             internal_coloring: Self::create_buffer::<ColorParams>(device, 1, Uniform),
             render_parameters: Self::create_buffer::<RenderParams>(device, 1, Uniform),
+            gradient: Self::create_buffer::<f32>(device, MAX_GRADIENT_STOPS * 2 * 4, Uniform),
             step: Self::create_buffer::<u32>(device, image_size, ShaderOnly),
             orbits: Self::create_buffer::<f32>(device, image_size * 4, ShaderOnly),
             stripes: Self::create_buffer::<f32>(device, image_size * 4, ShaderOnly),
@@ -442,6 +444,7 @@ impl BindGroups {
             external_coloring,
             internal_coloring,
             render_parameters,
+            gradient,
         } = buffers;
 
         // create the bind groups for the compute shader
@@ -579,6 +582,7 @@ impl BindGroups {
                     Self::create_uniform_layout_entry(0),
                     Self::create_uniform_layout_entry(1),
                     Self::create_uniform_layout_entry(2),
+                    Self::create_uniform_layout_entry(3),
                 ],
             });
 
@@ -596,6 +600,10 @@ impl BindGroups {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: render_parameters.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: gradient.as_entire_binding(),
                 },
             ],
             label: Some("render params group"),

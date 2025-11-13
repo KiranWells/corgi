@@ -1,4 +1,4 @@
-import super::utils::{hsv2rgb, rgb2hsv, isnan, isinf, debug, TAU};
+import super::utils::{hsv2rgb, rgb2hsv, isnan, isinf, debug, TAU, MAX_GRADIENT_STOPS};
 
 // inputs
 @group(0) @binding(0) var<storage> step_buffer : array<i32>;
@@ -29,10 +29,9 @@ struct ColorParams {
     color_frequency: f32,
     color_offset: f32,
     gradient_kind: u32,
+    gradient_size: u32,
     lighting_kind: u32,
     // padding: u32,
-    // padding: u32,
-    gradient: array<vec4f, 3>,
     color_layer_types: vec2u,
     light_layer_types: vec2u,
     color_strengths: array<vec4f, 2>,
@@ -54,6 +53,7 @@ struct RenderParams {
 @group(2) @binding(0) var<uniform> external_coloring : ColorParams;
 @group(2) @binding(1) var<uniform> internal_coloring : ColorParams;
 @group(2) @binding(2) var<uniform> render_params : RenderParams;
+@group(2) @binding(3) var<uniform> gradient : array<vec4f, MAX_GRADIENT_STOPS * 2>;
 
 const LAYER_NONE = 0u;
 const LAYER_STEP = 1u;
@@ -160,10 +160,12 @@ fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     var color_params = external_coloring;
     let internal = step < 0;
-    if step < 0 {
+    var gradient_offset = 0u;
+    if internal {
         step = -step;
         smoothed_step = dz.x;
         color_params = internal_coloring;
+        gradient_offset = external_coloring.gradient_size;
     }
 
     // first, calculate color layers
@@ -211,15 +213,13 @@ fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var color = vec3f(0.0);
     switch color_params.gradient_kind {
         case GRADIENT_FLAT {
-            let g = color_params.gradient;
-            color = g[0].rgb;
+            color = gradient[0 + gradient_offset].rgb;
         }
         case GRADIENT_PROCEDURAL {
-            let g = color_params.gradient;
-            let a = vec3f(g[0].rgb);
-            let b = vec3f(g[0].a, g[1].rg);
-            let c = vec3f(g[1].ba, g[2].r);
-            let d = vec3f(g[2].gba);
+            let a = vec3f(gradient[0 + gradient_offset].rgb);
+            let b = vec3f(gradient[1 + gradient_offset].rgb);
+            let c = vec3f(gradient[2 + gradient_offset].rgb);
+            let d = vec3f(gradient[3 + gradient_offset].rgb);
             color = a + b * cos(
                 TAU * (
                     c * color_value * color_params.color_frequency + color_params.color_offset + d
@@ -227,30 +227,30 @@ fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
             );
         }
         case GRADIENT_MANUAL {
-            let g = color_params.gradient;
-            let a = g[0].rgb;
-            let a_stop = g[0].a;
-            let b = g[1].rgb;
-            let b_stop = g[1].a;
-            let c = g[2].rgb;
-            let c_stop = g[2].a;
             let frac = fract(color_value * color_params.color_frequency + color_params.color_offset);
-            if frac > c_stop {
-                let ratio = (frac - c_stop) / (a_stop - c_stop + 1.0);
-                color = mix(c, a, ratio);
-            } else if frac > b_stop {
-                let ratio = (frac - b_stop) / (c_stop - b_stop);
-                color = mix(b, c, ratio);
-            } else if frac > a_stop {
-                let ratio = (frac - a_stop) / (b_stop - a_stop);
-                color = mix(a, b, ratio);
-            } else {
-                let ratio = (frac - c_stop + 1.0) / (a_stop - c_stop + 1.0);
-                color = mix(c, a, ratio);
+            for (var i = 0u; i < color_params.gradient_size; i+=1) {
+                let stop = gradient[i + gradient_offset];
+                if frac < stop.w {
+                    if i == 0 {
+                        let prev_stop = gradient[color_params.gradient_size - 1 + gradient_offset];
+                        let t = smoothstep(prev_stop.w - 1.0, stop.w, frac);
+                        color = mix(prev_stop.rgb, stop.rgb, t);
+                    } else {
+                        let prev_stop = gradient[i - 1 + gradient_offset];
+                        let t = smoothstep(prev_stop.w, stop.w, frac);
+                        color = mix(prev_stop.rgb, stop.rgb, t);
+                    }
+                    break;
+                }
+                if i == color_params.gradient_size - 1 {
+                    let next_stop = gradient[0 + gradient_offset];
+                    let t = smoothstep(stop.w, next_stop.w + 1.0, frac);
+                    color = mix(stop.rgb, next_stop.rgb, t);
+                }
             }
         }
         case GRADIENT_HUE {
-            color = hsv2rgb(vec3(fract(color_value * color_params.color_frequency + color_params.color_offset), color_params.gradient[0].x, color_params.gradient[0].y));
+            color = hsv2rgb(vec3(fract(color_value * color_params.color_frequency + color_params.color_offset), gradient[0 + gradient_offset].x, gradient[0 + gradient_offset].y));
         }
         default {}
     }

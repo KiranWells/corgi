@@ -50,9 +50,9 @@ pub struct ColorParams {
     pub color_frequency: f32,
     pub color_offset: f32,
     pub gradient_kind: u32,
+    pub gradient_size: u32,
     pub lighting_kind: u32,
-    padding: [u32; 2],
-    pub gradient: [f32; 12],
+    padding: u32,
     pub color_layer_types: [u8; 8],
     pub light_layer_types: [u8; 8],
     pub color_strengths: [f32; 8],
@@ -65,30 +65,15 @@ pub struct ColorParams {
 
 impl From<&Coloring> for ColorParams {
     fn from(value: &Coloring) -> Self {
-        let (gradient_kind, gradient_vec) = match value.gradient {
-            Gradient::Flat(data) => {
-                let mut new_data = data.to_vec();
-                new_data.extend_from_slice(&[0.0; 9]);
-                (0, new_data)
-            }
-            Gradient::Procedural(data) => (1, data.concat()),
-            Gradient::Manual(data) => (2, data.concat()),
-            Gradient::Hsv(saturation, value) => {
-                let mut new_data = vec![saturation, value];
-                new_data.extend_from_slice(&[0.0; 10]);
-                (3, new_data)
-            }
-        };
-        let mut gradient = [0.0; 12];
-        gradient.copy_from_slice(&gradient_vec);
+        let (gradient_kind, gradient_vec) = value.gradient.decompose();
         ColorParams {
             saturation: value.saturation,
             brightness: value.brightness,
             color_frequency: value.color_frequency,
             color_offset: value.color_offset,
             gradient_kind,
+            gradient_size: gradient_vec.len() as u32 / 4,
             lighting_kind: value.lighting_kind as u32,
-            gradient,
             color_layer_types: value.color_layers.map(|x| x.kind as u8),
             light_layer_types: value.light_layers.map(|x| x.kind as u8),
             color_strengths: value.color_layers.map(|x| x.strength),
@@ -97,7 +82,7 @@ impl From<&Coloring> for ColorParams {
             light_params: value.light_layers.map(|x| x.param),
             lights: value.lights,
             overlays: value.overlays,
-            padding: [0; 2],
+            padding: 0,
         }
     }
 }

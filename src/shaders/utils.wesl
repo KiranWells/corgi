@@ -3,6 +3,7 @@ const TAU = 2.0 * PI;
 const ESCAPE_RADIUS = 10000.0;
 const EPSILON = 1.1920929E-17;
 const FRACTEXP_SCALE_FACTOR = 10.0;
+const MAX_GRADIENT_STOPS = 50u;
 // flags
 const STRIPES_ENABLED = 0x1u;
 const TOTAL_ANGLE_ENABLED = 0x2u;

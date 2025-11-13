@@ -237,6 +237,9 @@ fn run_render_step(image: &Image, gpu_data: &GPUData) {
         ..
     } = gpu_data;
     let color_params: RenderParams = image.into();
+    let (_, mut external_colors) = image.external_coloring.gradient.decompose();
+    let (_, internal_colors) = image.internal_coloring.gradient.decompose();
+    external_colors.extend(internal_colors);
     queue.write_buffer(
         &buffers.external_coloring,
         0,
@@ -251,6 +254,11 @@ fn run_render_step(image: &Image, gpu_data: &GPUData) {
         &buffers.render_parameters,
         0,
         bytemuck::cast_slice(&[color_params]),
+    );
+    queue.write_buffer(
+        &buffers.gradient,
+        0,
+        bytemuck::cast_slice(external_colors.as_slice()),
     );
     // create encoder for CPU - GPU communication
     let mut encoder =

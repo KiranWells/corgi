@@ -1,10 +1,11 @@
 use std::mem::discriminant;
 
 use corgi::types::{
-    Coloring, Gradient, Layer, LayerKind, Light, LightingKind, Overlays, next_layer_id,
+    Coloring, Gradient, Layer, LayerKind, Light, LightingKind, MAX_GRADIENT_STOPS, Overlays,
+    next_layer_id,
 };
 use eframe::egui::collapsing_header::{CollapsingState, paint_default_icon};
-use eframe::egui::{self, CornerRadius, RichText, Sense, Stroke};
+use eframe::egui::{self, CornerRadius, Event, RichText, Sense, Stroke};
 use egui_material_icons::icons;
 use egui_taffy::TuiBuilderLogic;
 use taffy::prelude::*;
@@ -105,7 +106,7 @@ impl EditUI for Gradient {
                 x if x == procedural => {
                     Gradient::Procedural([[0.5; 3], [0.5; 3], [1.0; 3], [0.0, 0.1, 0.2]])
                 }
-                x if x == manual => Gradient::Manual([
+                x if x == manual => Gradient::Manual(vec![
                     [0.6, 0.9, 0.8, 0.1],
                     [0.2, 0.2, 0.3, 0.5],
                     [1.0, 1.0, 1.0, 1.0],
@@ -129,40 +130,103 @@ impl EditUI for Gradient {
                     pseudo_color_edit(tui, &mut colors[3]);
                 }
                 Gradient::Manual(colors) => {
-                    let [a, b, c] = colors;
-                    let (a_stop, a) = a.split_first_chunk_mut::<3>().unwrap();
-                    let (b_stop, b) = b.split_first_chunk_mut::<3>().unwrap();
-                    let (c_stop, c) = c.split_first_chunk_mut::<3>().unwrap();
+                    let mut dragged = false;
                     tui.style(taffy::Style {
                         display: taffy::Display::Grid,
-                        grid_template_rows: vec![min_content(); 2],
-                        grid_template_columns: vec![auto(); 3],
+                        grid_template_rows: vec![min_content(); colors.len()],
+                        grid_template_columns: vec![min_content(); 6],
                         align_items: Some(AlignItems::Center),
-                        justify_content: Some(AlignContent::SpaceBetween),
+                        justify_content: Some(AlignContent::Center),
                         gap: length(ctx.style().spacing.item_spacing.x),
                         size: percent(1.0),
                         ..Default::default()
                     })
-                    .add(move |tui| {
-                        color_edit(tui, a_stop);
-                        color_edit(tui, b_stop);
-                        color_edit(tui, c_stop);
-                        tui.ui_add(
-                            egui::DragValue::new(&mut a[0])
-                                .speed(0.003)
-                                .range(0.0..=1.0),
-                        );
-                        tui.ui_add(
-                            egui::DragValue::new(&mut b[0])
-                                .speed(0.003)
-                                .range(0.0..=1.0),
-                        );
-                        tui.ui_add(
-                            egui::DragValue::new(&mut c[0])
-                                .speed(0.003)
-                                .range(0.0..=1.0),
-                        );
+                    .add(|tui| {
+                        for i in 0..colors.len() {
+                            color_edit(tui, colors[i].first_chunk_mut().unwrap());
+                            let res = tui.ui_add(
+                                egui::DragValue::new(&mut colors[i][3])
+                                    .speed(0.001)
+                                    .range(0.0..=1.0),
+                            );
+                            dragged = dragged || res.is_pointer_button_down_on() || res.has_focus();
+                            if tui
+                                .enabled_ui(colors.len() < MAX_GRADIENT_STOPS)
+                                .ui_add(egui::Button::new(icons::ICON_CONTROL_POINT_DUPLICATE))
+                                .on_hover_text("Duplicate")
+                                .clicked()
+                            {
+                                colors.insert(i, colors[i]);
+                            }
+                            if tui
+                                .ui_add(egui::Button::new(icons::ICON_CONTENT_COPY))
+                                .on_hover_text("Copy")
+                                .clicked()
+                            {
+                                tui.egui_ctx().copy_text(format!(
+                                    "{}, {}, {}",
+                                    colors[i][0], colors[i][1], colors[i][2]
+                                ));
+                            }
+                            let paste_response = tui
+                                .ui_add(egui::Button::new(icons::ICON_CONTENT_PASTE))
+                                .on_hover_text("Paste");
+                            if paste_response.clicked() {
+                                tui.egui_ctx()
+                                    .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+                                paste_response.request_focus();
+                            }
+                            if paste_response.has_focus() {
+                                let mut pasted = false;
+                                tui.egui_ui().input(|r| {
+                                    for event in r.events.iter() {
+                                        if let Event::Paste(text) = event {
+                                            pasted = true;
+                                            let splits: Vec<Result<f32, _>> =
+                                                text.split(", ").map(str::parse).collect();
+                                            if splits.len() == 3 && splits.iter().all(Result::is_ok)
+                                            {
+                                                for j in 0..3 {
+                                                    colors[i][j] = splits[j].clone().unwrap();
+                                                }
+                                            }
+                                        }
+                                    }
+                                });
+                                if pasted {
+                                    paste_response.surrender_focus();
+                                }
+                            }
+                            if tui
+                                .ui_add(egui::Button::new(icons::ICON_DELETE))
+                                .on_hover_text("Delete")
+                                .clicked()
+                            {
+                                colors.remove(i);
+                                // Cancel rendering the rest of the list, as we just messed up the indexes.
+                                // This appears not to cause rendering issues, and simplifies the logic.
+                                break;
+                            }
+                        }
                     });
+                    if tui
+                        .horizontal()
+                        .enabled_ui(colors.len() < MAX_GRADIENT_STOPS)
+                        .ui_add(egui::Button::new(format!(
+                            "{} Add Color Stop",
+                            icons::ICON_ADD
+                        )))
+                        .clicked()
+                    {
+                        let ratio = (colors.len() as f32) / (colors.len() as f32 + 1.0);
+                        colors.iter_mut().for_each(|x| x[3] *= ratio);
+                        colors.push([1.0, 1.0, 1.0, 1.0]);
+                    }
+                    if !dragged {
+                        colors.sort_by(|a, b| {
+                            a[3].partial_cmp(&b[3]).unwrap_or(std::cmp::Ordering::Equal)
+                        });
+                    }
                 }
                 Gradient::Hsv(saturation, value) => {
                     input_with_label(

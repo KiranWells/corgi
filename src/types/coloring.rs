@@ -3,6 +3,8 @@ use std::sync::atomic::AtomicU64;
 use egui_material_icons::icons;
 use serde::{Deserialize, Serialize};
 
+pub const MAX_GRADIENT_STOPS: usize = 50;
+
 /// The coloring parameters for the image. These are interpreted
 /// slightly differently for internal and external coloring, as
 /// some coloring algorithms are incompatible between the two.
@@ -108,12 +110,27 @@ impl LayerKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub enum Gradient {
     Flat([f32; 3]),
     Procedural([[f32; 3]; 4]),
-    Manual([[f32; 4]; 3]),
+    Manual(Vec<[f32; 4]>),
     Hsv(f32, f32),
+}
+impl Gradient {
+    pub fn decompose(&self) -> (u32, Vec<f32>) {
+        match self {
+            Gradient::Flat(data) => (0, [data[0], data[1], data[2], 1.0].to_vec()),
+            // the values here are remapped to rgba to make the handling logic in the shader easier
+            Gradient::Procedural(data) => (1, data.map(|x| [x[0], x[1], x[2], 1.0]).concat()),
+            Gradient::Manual(data) => {
+                let mut v = data.clone();
+                v.sort_by(|a, b| a[3].partial_cmp(&b[3]).unwrap_or(std::cmp::Ordering::Equal));
+                (2, v.concat())
+            }
+            Gradient::Hsv(saturation, value) => (3, vec![*saturation, *value, 1.0, 1.0]),
+        }
+    }
 }
 impl Default for Coloring {
     fn default() -> Self {
