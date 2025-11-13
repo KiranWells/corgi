@@ -21,6 +21,7 @@ pub struct WorkerState {
 
 impl WorkerState {
     /// Create state for a new worker thread to render images.
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         wgpu: &egui_wgpu::RenderState,
         preview_settings: Image,
