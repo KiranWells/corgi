@@ -291,11 +291,11 @@ impl CorgiUI {
                                             .set_directory(&self.output_path)
                                             .add_filter(
                                                 "image with metadata",
-                                                &["jpg", "jpeg", "webp", "png"],
+                                                &["avif", "jpg", "jpeg", "webp", "png"],
                                             )
                                             .add_filter(
                                                 "image without metadata",
-                                                &["avif", "gif", "qoi", "tiff", "exr"],
+                                                &["gif", "qoi", "tiff", "exr"],
                                             )
                                             .set_file_name(format!(
                                                 "fractal.{}",
@@ -402,8 +402,10 @@ impl CorgiUI {
             if ui.add(Button::new("Load Image Settings")).clicked()
                 && let Some(path) = rfd::FileDialog::new()
                     .set_directory(context.cache().previous_paths.settings.clone())
-                    .add_filter("corg", &["corg"])
-                    .add_filter("image with metadata", &["jpg", "jpeg", "webp", "png"])
+                    .add_filter(
+                        "settings file or image with metadata",
+                        &["corg", "json", "avif", "jpg", "jpeg", "webp", "png"],
+                    )
                     .pick_file()
             {
                 if let Some(dir) = path.parent() {

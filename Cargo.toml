@@ -14,7 +14,7 @@ name = "Corgi"
 identifier = "com.kiranwells.corgi"
 # TODO
 # icon
-linux_mime_types = ["application/x-corgi-settings","image/png","image/jpeg","image/webp"]
+linux_mime_types = ["application/x-corgi-settings","image/png","image/jpeg","image/webp","image/avif"]
 linux_exec_args = "%f"
 
 [lib]
@@ -35,7 +35,7 @@ eframe = { version = "0.33.0", default-features = false, features = ["default_fo
 egui_material_icons = "0.5.0"
 egui_taffy = "0.10.0"
 image = "0.25"
-little_exif = "0.6.14"
+little_exif = "0.6.18"
 pollster = "0.4.0"
 rfd = { version = "0.15.4", features = ["xdg-portal"] }
 rug = "1.27"

@@ -37,7 +37,7 @@ macro_rules! time {
 }
 
 pub fn is_metadata_supported(path: &Path) -> bool {
-    matches!(path.extension(), Some(x) if x == "jpg" || x == "jpeg" || x == "png" || x == "webp")
+    matches!(path.extension(), Some(x) if x == "jpg" || x == "jpeg" || x == "png" || x == "webp" || x == "avif")
 }
 
 pub fn render_image(

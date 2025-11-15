@@ -61,7 +61,7 @@ impl Default for Cache {
                 settings: home_dir.clone(),
                 image: home_dir,
             },
-            default_image_type: "png".into(),
+            default_image_type: "avif".into(),
         }
     }
 }
