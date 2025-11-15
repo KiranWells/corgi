@@ -1,6 +1,6 @@
 # Corgi
 
-Corgi is a performance-focused fractal rendering engine capable of ultra-deep and highly flexible styling.
+Corgi is a performance-focused fractal rendering engine capable of ultra-deep zooms and highly flexible styling.
 
 ![An example of the UI in use at extreme zoom levels](assets/ui_example_small.avif)
 
