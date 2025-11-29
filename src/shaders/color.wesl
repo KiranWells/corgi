@@ -134,7 +134,8 @@ fn calculate_lighting_layers(x: u32, y: u32, color_params: ColorParams) -> f32 {
             }
             case LAYER_DISTANCE {
                 if !isinf(distance_estimate) && !isnan(distance_estimate) {
-                    brightness += (-log(distance_estimate) + 5.0 + layer_param * 2.5) * layer_strength * 0.1;
+                    let x = -log(distance_estimate / 10.0);
+                    brightness += pow(x, layer_param + 3.75) * layer_strength * 0.002;
                 }
             }
             case LAYER_ORBIT_TRAP {
@@ -212,7 +213,7 @@ fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
             case LAYER_DISTANCE {
                 if !isinf(distance_estimate) && !isnan(distance_estimate) {
-                    color_value += (log(distance_estimate) + layer_param) * 0.1 * layer_strength;
+                    color_value += (log(distance_estimate / (layer_param + 1.0))) * 0.1 * layer_strength;
                 }
             }
             case LAYER_ORBIT_TRAP {
