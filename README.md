@@ -60,3 +60,9 @@ To get more information about what is happening, you can set the `CORGI_LOG_LEVE
 # run with the highest level of detail
 CORGI_LOG_LEVEL=TRACE cargo run --release
 ```
+
+## License
+
+Corgi is distributed under the Apache License (Version 2.0). Some code is adapted from other sources under the MIT license. The corresponding portions of the code have been annotated in the source.
+
+See [LICENSE](./LICENSE) for the Apache License, and [here](https://mit-license.org/) for the MIT license.
