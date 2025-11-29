@@ -116,6 +116,7 @@ pub enum Gradient {
     Procedural([[f32; 3]; 4]),
     Manual(Vec<[f32; 4]>),
     Hsv(f32, f32),
+    Oklch(f32, f32),
 }
 impl Gradient {
     pub fn decompose(&self) -> (u32, Vec<f32>) {
@@ -125,10 +126,15 @@ impl Gradient {
             Gradient::Procedural(data) => (1, data.map(|x| [x[0], x[1], x[2], 1.0]).concat()),
             Gradient::Manual(data) => {
                 let mut v = data.clone();
-                v.sort_by(|a, b| a[3].partial_cmp(&b[3]).unwrap_or(std::cmp::Ordering::Equal));
+                v.sort_by(|a, b| {
+                    a[3].fract()
+                        .partial_cmp(&b[3].fract())
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
                 (2, v.concat())
             }
             Gradient::Hsv(saturation, value) => (3, vec![*saturation, *value, 1.0, 1.0]),
+            Gradient::Oklch(lightness, chroma) => (4, vec![*lightness, *chroma, 1.0, 1.0]),
         }
     }
 }
@@ -172,9 +178,9 @@ impl Default for Coloring {
                 Layer::default(),
             ],
             lights: [
-                Light::new([1.0, 1.0, 1.0], 1.0, [0.0, 0.5, 0.8]),
-                Light::new([0.5, 0.6, 1.0], 1.0, [0.8, 0.0, 0.6]),
-                Light::new([1.0, 0.8, 0.4], 1.0, [0.0, 0.8, 0.5]),
+                Light::new([1.0, 1.0, 1.0], 1.0, [0.0, 0.0, 1.0]),
+                Light::new([0.5, 0.8, 1.0], 1.0, [0.8, 0.6, 0.0]),
+                Light::new([1.0, 0.8, 0.4], 1.0, [-0.6, -0.8, 0.0]),
             ],
             overlays: Overlays {
                 iteration_outline_color: [0.0; 4],
@@ -223,7 +229,7 @@ impl Coloring {
 
     pub fn external_opt_default() -> Self {
         Self {
-            saturation: 1.0,
+            saturation: 0.9,
             brightness: 1.0,
             color_frequency: 1.0,
             color_offset: 0.0,
@@ -260,9 +266,9 @@ impl Coloring {
                 Layer::default(),
             ],
             lights: [
-                Light::new([1.0, 1.0, 1.0], 3.0, [0.0, 0.1, 0.9]),
-                Light::new([0.2, 0.4, 1.0], 3.0, [0.9, 0.0, 0.0]),
-                Light::new([1.0, 0.6, 0.1], 3.0, [0.0, 0.8, 0.1]),
+                Light::new([1.0, 1.0, 1.0], 1.0, [0.0, 0.0, 1.0]),
+                Light::new([0.5, 0.8, 1.0], 1.0, [0.7, 0.7, 0.0]),
+                Light::new([1.0, 0.8, 0.4], 1.0, [-0.7, -0.7, 0.0]),
             ],
             overlays: Overlays {
                 iteration_outline_color: [0.0; 4],

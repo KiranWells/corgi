@@ -86,19 +86,22 @@ impl EditUI for Coloring {
     }
 }
 
+struct StopKind(u8);
+
 impl EditUI for Gradient {
     fn render_edit_ui(&mut self, ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
         let flat = discriminant(&Gradient::Flat(Default::default()));
         let procedural = discriminant(&Gradient::Procedural(Default::default()));
         let manual = discriminant(&Gradient::Manual(Default::default()));
         let hue = discriminant(&Gradient::Hsv(0.0, 0.0));
+        let oklch = discriminant(&Gradient::Oklch(0.0, 0.0));
         let mut tmp = discriminant(self);
         selection_with_label(
             tui,
             "Coloring mode",
             None,
             &mut tmp,
-            vec![flat, manual, procedural, hue],
+            vec![flat, manual, procedural, hue, oklch],
         );
         if tmp != discriminant(self) {
             *self = match tmp {
@@ -107,11 +110,12 @@ impl EditUI for Gradient {
                     Gradient::Procedural([[0.5; 3], [0.5; 3], [1.0; 3], [0.0, 0.1, 0.2]])
                 }
                 x if x == manual => Gradient::Manual(vec![
-                    [0.6, 0.9, 0.8, 0.1],
-                    [0.2, 0.2, 0.3, 0.5],
-                    [1.0, 1.0, 1.0, 1.0],
+                    [0.6, 0.9, 0.8, 0.1 * 0.999 + 2.0],
+                    [0.2, 0.2, 0.3, 0.5 * 0.999 + 2.0],
+                    [1.0, 1.0, 1.0, 1.0 * 0.999 + 2.0],
                 ]),
                 x if x == hue => Gradient::Hsv(0.7, 1.0),
+                x if x == oklch => Gradient::Oklch(1.0, 0.15),
                 _ => unreachable!(),
             };
         }
@@ -134,7 +138,7 @@ impl EditUI for Gradient {
                     tui.style(taffy::Style {
                         display: taffy::Display::Grid,
                         grid_template_rows: vec![min_content(); colors.len()],
-                        grid_template_columns: vec![min_content(); 6],
+                        grid_template_columns: vec![min_content(); 7],
                         align_items: Some(AlignItems::Center),
                         justify_content: Some(AlignContent::Center),
                         gap: length(ctx.style().spacing.item_spacing.x),
@@ -143,13 +147,17 @@ impl EditUI for Gradient {
                     })
                     .add(|tui| {
                         for i in 0..colors.len() {
+                            let mut stop = colors[i][3].fract() / 0.999;
+                            let mut stop_kind = StopKind(colors[i][3].floor() as u8);
                             color_edit(tui, colors[i].first_chunk_mut().unwrap());
                             let res = tui.ui_add(
-                                egui::DragValue::new(&mut colors[i][3])
+                                egui::DragValue::new(&mut stop)
                                     .speed(0.001)
                                     .range(0.0..=1.0),
                             );
                             dragged = dragged || res.is_pointer_button_down_on() || res.has_focus();
+                            stop_kind.render_edit_ui(ctx, tui);
+                            colors[i][3] = stop_kind.0 as f32 + stop * 0.999;
                             if tui
                                 .enabled_ui(colors.len() < MAX_GRADIENT_STOPS)
                                 .ui_add(egui::Button::new(icons::ICON_CONTROL_POINT_DUPLICATE))
@@ -219,12 +227,21 @@ impl EditUI for Gradient {
                         .clicked()
                     {
                         let ratio = (colors.len() as f32) / (colors.len() as f32 + 1.0);
-                        colors.iter_mut().for_each(|x| x[3] *= ratio);
-                        colors.push([1.0, 1.0, 1.0, 1.0]);
+                        colors.iter_mut().for_each(|x| {
+                            x[3] = (x[3].fract() * ratio) + x[3].floor();
+                        });
+                        colors.push([
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0 * 0.999 + colors[colors.len() - 1][3].floor(),
+                        ]);
                     }
                     if !dragged {
                         colors.sort_by(|a, b| {
-                            a[3].partial_cmp(&b[3]).unwrap_or(std::cmp::Ordering::Equal)
+                            a[3].fract()
+                                .partial_cmp(&b[3].fract())
+                                .unwrap_or(std::cmp::Ordering::Equal)
                         });
                     }
                 }
@@ -244,8 +261,50 @@ impl EditUI for Gradient {
                         egui::DragValue::new(value).speed(0.003).range(0.0..=1.0),
                     );
                 }
+                Gradient::Oklch(lightness, chroma) => {
+                    input_with_label(
+                        tui,
+                        "Lightness",
+                        None,
+                        egui::DragValue::new(lightness)
+                            .speed(0.003)
+                            .range(0.0..=1.0),
+                    );
+                    input_with_label(
+                        tui,
+                        "Chroma",
+                        None,
+                        egui::DragValue::new(chroma).speed(0.003).range(0.0..=1.0),
+                    );
+                }
             };
         });
+    }
+}
+
+impl EditUI for StopKind {
+    fn render_edit_ui(&mut self, _ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
+        const MAX_STOP_TYPES: u8 = 3;
+        let label = match self.0 {
+            0 => icons::ICON_STAIRS_2,
+            1 => icons::ICON_DIAGONAL_LINE,
+            2 => icons::ICON_LINE_CURVE,
+            _ => icons::ICON_QUESTION_MARK,
+        };
+        let help = match self.0 {
+            0 => "Constant interpolation",
+            1 => "Linear interpolation",
+            2 => "Smooth interpolation",
+            _ => icons::ICON_QUESTION_MARK,
+        };
+        if tui
+            .ui_add(egui::Button::new(label))
+            .on_hover_text(help)
+            .clicked()
+        {
+            self.0 += 1;
+            self.0 %= MAX_STOP_TYPES;
+        }
     }
 }
 

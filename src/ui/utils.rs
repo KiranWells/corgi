@@ -76,11 +76,13 @@ impl ToLabel for Discriminant<Gradient> {
         let procedural = discriminant(&Gradient::Procedural(Default::default()));
         let manual = discriminant(&Gradient::Manual(Default::default()));
         let hue = discriminant(&Gradient::Hsv(0.0, 0.0));
+        let oklch = discriminant(&Gradient::Oklch(0.0, 0.0));
         match *self {
             x if x == flat => "Flat",
             x if x == procedural => "Procedural",
             x if x == manual => "Manual",
             x if x == hue => "Hue",
+            x if x == oklch => "OkLCh",
             _ => unreachable!(),
         }
     }
@@ -143,13 +145,15 @@ impl ToHelpText for Discriminant<Gradient> {
         let procedural = discriminant(&Gradient::Procedural(Default::default()));
         let manual = discriminant(&Gradient::Manual(Default::default()));
         let hue = discriminant(&Gradient::Hsv(0.0, 0.0));
+        let oklch = discriminant(&Gradient::Oklch(0.0, 0.0));
         match *self {
             x if x == flat => "A single color",
             x if x == procedural => {
                 "Generates a gradient using a procedural equation based on Inigo Quilez's simple color palettes. The result is seamless if the third parameter's values are whole numbers."
             }
             x if x == manual => "A repeating linear gradient with manual colors and gradient stops",
-            x if x == hue => "A gradient with rotating hue",
+            x if x == hue => "A gradient with rotating hue using the HSV color space",
+            x if x == oklch => "A gradient with rotating hue using the OKLCH color space",
             _ => unreachable!(),
         }
     }

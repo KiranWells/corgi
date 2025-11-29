@@ -1,4 +1,24 @@
-import super::utils::{hsv2rgb, rgb2hsv, isnan, isinf, debug, TAU, MAX_GRADIENT_STOPS};
+import super::utils::{
+    debug,
+    INTERPOLATION_LINEAR,
+    INTERPOLATION_SMOOTHSTEP,
+    isinf,
+    isnan,
+    lerp,
+    MAX_GRADIENT_STOPS,
+    mix_advanced,
+    PBRNeutralToneMapping,
+    TAU,
+    tone_map,
+};
+import super::utils::color_spaces::{
+    COLOR_SPACE_OKLAB,
+    hsv_to_linear_srgb,
+    linear_srgb_to_oklab,
+    linear_srgb_to_oklch,
+    oklab_to_linear_srgb,
+    oklch_to_linear_srgb,
+};
 
 // inputs
 @group(0) @binding(0) var<storage> step_buffer : array<i32>;
@@ -66,6 +86,7 @@ const GRADIENT_FLAT = 0u;
 const GRADIENT_PROCEDURAL = 1u;
 const GRADIENT_MANUAL = 2u;
 const GRADIENT_HUE = 3u;
+const GRADIENT_OKLCH = 4u;
 
 const LIGHTING_FLAT = 0u;
 const LIGHTING_GRADIENT = 1u;
@@ -230,27 +251,42 @@ fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let frac = fract(color_value * color_params.color_frequency + color_params.color_offset);
             for (var i = 0u; i < color_params.gradient_size; i+=1) {
                 let stop = gradient[i + gradient_offset];
-                if frac < stop.w {
+                let stop_position = fract(stop.w) / 0.999;
+                let color_space = COLOR_SPACE_OKLAB;
+                let interpolation = u32(floor(stop.w));
+                if frac < stop_position {
                     if i == 0 {
                         let prev_stop = gradient[color_params.gradient_size - 1 + gradient_offset];
-                        let t = smoothstep(prev_stop.w - 1.0, stop.w, frac);
-                        color = mix(prev_stop.rgb, stop.rgb, t);
+                        let t = lerp(fract(prev_stop.w) - 1.0, stop_position, frac);
+                        color = mix_advanced(prev_stop.rgb, stop.rgb, t, color_space, interpolation);
                     } else {
                         let prev_stop = gradient[i - 1 + gradient_offset];
-                        let t = smoothstep(prev_stop.w, stop.w, frac);
-                        color = mix(prev_stop.rgb, stop.rgb, t);
+                        let t = lerp(fract(prev_stop.w), stop_position, frac);
+                        color = mix_advanced(prev_stop.rgb, stop.rgb, t, color_space, interpolation);
                     }
                     break;
                 }
                 if i == color_params.gradient_size - 1 {
                     let next_stop = gradient[0 + gradient_offset];
-                    let t = smoothstep(stop.w, next_stop.w + 1.0, frac);
-                    color = mix(stop.rgb, next_stop.rgb, t);
+                    let t = lerp(stop_position, fract(next_stop.w) + 1.0, frac);
+                    color = mix_advanced(stop.rgb, next_stop.rgb, t, color_space, u32(floor(next_stop.w)));
                 }
             }
+            color = color;
         }
         case GRADIENT_HUE {
-            color = hsv2rgb(vec3(fract(color_value * color_params.color_frequency + color_params.color_offset), gradient[0 + gradient_offset].x, gradient[0 + gradient_offset].y));
+            color = hsv_to_linear_srgb(vec3(
+                fract(color_value * color_params.color_frequency + color_params.color_offset),
+                gradient[0 + gradient_offset].x,
+                gradient[0 + gradient_offset].y,
+            ));
+        }
+        case GRADIENT_OKLCH {
+            color = oklch_to_linear_srgb(vec3(
+                gradient[0 + gradient_offset].x,
+                gradient[0 + gradient_offset].y,
+                fract(color_value * color_params.color_frequency + color_params.color_offset) * TAU,
+            ));
         }
         default {}
     }
@@ -280,24 +316,34 @@ fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
             } else {
                 aspect_scale.y = 1.0 / aspect;
             }
-            let normal = normalize(cross(vec3f(100.0 / f32(render_params.width) * aspect_scale.x, 0.0, plus_x - point), vec3f(0.0, 100.0 / f32(render_params.height) * aspect_scale.y, plus_y - point)));
-            brightness += max(dot(normal, color_params.lights[0].direction), 0.0) * color_params.lights[0].strength * color_params.lights[0].color;
-            brightness += max(dot(normal, color_params.lights[1].direction), 0.0) * color_params.lights[1].strength * color_params.lights[1].color;
-            brightness += max(dot(normal, color_params.lights[2].direction), 0.0) * color_params.lights[2].strength * color_params.lights[2].color;
-            brightness /= 3.0;
+            let normal = normalize(cross(
+                vec3f(100.0 / f32(300) * aspect_scale.x, 0.0, plus_x - point),
+                vec3f(0.0, 100.0 / f32(300) * aspect_scale.y, plus_y - point),
+            ));
+            for (var i = 0u; i < 3; i+=1) {
+                let light = color_params.lights[i];
+                brightness += max(dot(normal, light.direction), 0.0) * light.strength * light.color;
+            }
             if debug(global_id.x) {
-                color = normalize(normal) * 0.5 + 0.5;
+                color = normal * 0.5 + 0.5;
                 brightness = vec3(1.0);
             }
         }
         default {}
     }
-    let hsv_color = rgb2hsv(color);
-    let b = length(brightness) * color_params.brightness / 1.73205080756887729353;
-    color = hsv2rgb(vec3f(hsv_color.x, hsv_color.y * color_params.saturation, hsv_color.z * b));
+    // lighting calculations work best in RGB
     color *= brightness;
-    // above 1.0 brightness, start fading to the light color
-    color = mix(color, clamp(brightness, vec3(0.0), vec3(1.0)), clamp(b-1.0, 0.0, 1.0));
+    // Adjust brightness, tone map, then adjust saturation.
+    // Saturation needs to be done after tone mapping to
+    // prevent desaturation in colors that exceed 1.0 in RGB
+    // after saturation (which is not intuitive).
+    color = linear_srgb_to_oklch(color);
+    color.x *= color_params.brightness;
+    color = oklch_to_linear_srgb(color);
+    color = PBRNeutralToneMapping(color);
+    color = linear_srgb_to_oklch(color);
+    color.y = saturate(color.y * color_params.saturation);
+    color = oklch_to_linear_srgb(color);
 
     // finally, check for ovelays
     if fract(color_params.overlays.iteration_outline_color.a) > 0.0 {

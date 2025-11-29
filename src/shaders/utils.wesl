@@ -1,3 +1,19 @@
+import package::utils::color_spaces::{
+    COLOR_SPACE_HSL,
+    COLOR_SPACE_HSV,
+    COLOR_SPACE_LINEAR_SRGB,
+    COLOR_SPACE_OKLAB,
+    COLOR_SPACE_OKLCH,
+    hsl_to_linear_srgb,
+    hsv_to_linear_srgb,
+    linear_srgb_to_hsl,
+    linear_srgb_to_hsv,
+    linear_srgb_to_oklab,
+    linear_srgb_to_oklch,
+    oklab_to_linear_srgb,
+    oklch_to_linear_srgb,
+};
+
 const PI = 3.1415926535897932384626433832795028841971693993751058209749445923078164062862089986280348253421170679;
 const TAU = 2.0 * PI;
 const ESCAPE_RADIUS = 10000.0;
@@ -10,50 +26,6 @@ const TOTAL_ANGLE_ENABLED = 0x2u;
 const ORBIT_ENABLED = 0x4u;
 const DERIVATIVE_ENABLED = 0x8u;
 const JULIA = 0x10000000u;
-
-fn hsv2rgb(hsv: vec3<f32>) -> vec3<f32> {
-    var rgb: vec3<f32>;
-
-    let i = floor(hsv.x * 6.);
-    let f = hsv.x * 6. - i;
-    let p = hsv.z * (1. - hsv.y);
-    let q = hsv.z * (1. - f * hsv.y);
-    let t = hsv.z * (1. - (1. - f) * hsv.y);
-
-    switch(i32((i % 6.0))){
-        case 0: {rgb = vec3<f32>(hsv.z, t, p);}
-        case 1: {rgb = vec3<f32>(q, hsv.z, p);}
-        case 2: {rgb = vec3<f32>(p, hsv.z, t);}
-        case 3: {rgb = vec3<f32>(p, q, hsv.z);}
-        case 4: {rgb = vec3<f32>(t, p, hsv.z);}
-        case 5: {rgb = vec3<f32>(hsv.z, p, q);}
-        default: {rgb = vec3<f32>(0.0, 0.0, 0.0);}
-    }
-
-    return rgb;
-}
-
-fn rgb2hsv(rgb: vec3f) -> vec3f {
-    var hsv: vec3f;
-    let max = max(max(rgb.r, rgb.g), rgb.b);
-    let min = min(min(rgb.r, rgb.g), rgb.b);
-    hsv.z = max;
-    let c = max-min;
-    if c == 0.0 {
-        hsv.x = 0.0;
-        hsv.y = 0.0;
-    } else {
-        hsv.y = c / max;
-        if max == rgb.r { hsv.x = ((rgb.g - rgb.b) / c); }
-        else if max == rgb.g { hsv.x = ((rgb.b - rgb.r) / c) + 2.0; }
-        else if max == rgb.b { hsv.x = ((rgb.r - rgb.g) / c) + 4.0; }
-        hsv.x /= 6.0;
-        if hsv.x < 0.0 {
-            hsv.x += 1.0;
-        }
-    }
-    return hsv;
-}
 
 fn isnan(x: f32) -> bool {
     let bits = bitcast<u32>(x);
@@ -111,4 +83,101 @@ fn get_stripe_values(z_n: vec2f) -> vec4f {
 
 fn step_frac(start_radius_squared: f32, end_radius_squared: f32) -> f32 {
     return -1.0 + log2(2.0 * log(end_radius_squared)) - log2(0.5 * log(start_radius_squared));
+}
+
+const INTERPOLATION_CONSTANT = 0u;
+const INTERPOLATION_LINEAR = 1u;
+const INTERPOLATION_SMOOTHSTEP = 2u;
+
+fn mix_advanced(color_a: vec3f, color_b: vec3f, t: f32, color_space: u32, interpolation: u32) -> vec3f {
+    // input transform
+    var transformed_a: vec3f;
+    var transformed_b: vec3f;
+    switch color_space {
+        case COLOR_SPACE_LINEAR_SRGB {
+            transformed_a = color_a;
+            transformed_b = color_b;
+        }
+        case COLOR_SPACE_HSL {
+            transformed_a = linear_srgb_to_hsl(color_a);
+            transformed_b = linear_srgb_to_hsl(color_b);
+        }
+        case COLOR_SPACE_HSV {
+            transformed_a = linear_srgb_to_hsv(color_a);
+            transformed_b = linear_srgb_to_hsv(color_b);
+        }
+        case COLOR_SPACE_OKLAB {
+            transformed_a = linear_srgb_to_oklab(color_a);
+            transformed_b = linear_srgb_to_oklab(color_b);
+        }
+        case COLOR_SPACE_OKLCH {
+            transformed_a = linear_srgb_to_oklch(color_a);
+            transformed_b = linear_srgb_to_oklch(color_b);
+        }
+        default { return vec3(0.0); }
+    }
+
+    var transformed_output: vec3f;
+    switch interpolation {
+        case INTERPOLATION_CONSTANT {
+            transformed_output = mix(transformed_b, transformed_a, step(t, 0.99));
+        }
+        case INTERPOLATION_LINEAR {
+            transformed_output = mix(transformed_a, transformed_b, t);
+        }
+        case INTERPOLATION_SMOOTHSTEP {
+            transformed_output = mix(transformed_a, transformed_b, smoothstep(0.0, 1.0, t));
+        }
+        default { return vec3(1.0, 0.0, 1.0); }
+    }
+
+    switch color_space {
+        case COLOR_SPACE_LINEAR_SRGB {
+            return transformed_output;
+        }
+        case COLOR_SPACE_HSL {
+            return hsl_to_linear_srgb(transformed_output);
+        }
+        case COLOR_SPACE_HSV {
+            return hsv_to_linear_srgb(transformed_output);
+        }
+        case COLOR_SPACE_OKLAB {
+            return oklab_to_linear_srgb(transformed_output);
+        }
+        case COLOR_SPACE_OKLCH {
+            return oklch_to_linear_srgb(transformed_output);
+        }
+        default { return vec3(0.0); }
+    }
+}
+
+fn lerp(low: f32, high: f32, t: f32) -> f32 {
+    return (t - low) / (high - low);
+}
+
+// included from https://github.com/KhronosGroup/ToneMapping/blob/b5a2eed5ddf6c2227090449399de9c7affb9e4c9/PBR_Neutral/pbrNeutral.glsl under the Apache 2.0 license
+// Input color is non-negative and resides in the Linear Rec. 709 color space.
+// Output color is also Linear Rec. 709, but in the [0, 1] range.
+
+fn PBRNeutralToneMapping( in_color: vec3f ) -> vec3f {
+    var color = in_color;
+    let startCompression = 0.8 - 0.04;
+    let desaturation = 0.15;
+
+    let x = min(color.r, min(color.g, color.b));
+    if x < 0.08 {
+        color -= x - 6.25 * x * x; 
+    } else {
+        color -= 0.04;
+    }
+
+    let peak = max(color.r, max(color.g, color.b));
+    if (peak < startCompression) {return color;}
+
+    let d = 1. - startCompression;
+    let newPeak = 1. - d * d / (peak + d - startCompression);
+    color *= newPeak / peak;
+
+    let g = 1. - 1. / (desaturation * (peak - newPeak) + 1.);
+    return mix(color, newPeak * vec3(1.0, 1.0, 1.0), g);
 }
