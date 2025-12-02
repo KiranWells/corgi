@@ -100,8 +100,6 @@ pub struct ComputeParams {
     pub iter_offset: u32,
     pub x: f32,
     pub y: f32,
-    pub cx: f32,
-    pub cy: f32,
     pub zoom: f32,
     pub julia_x: f32,
     pub julia_y: f32,
@@ -114,21 +112,13 @@ pub struct ComputeParams {
 pub struct RenderParams {
     pub width: u32,
     pub height: u32,
-    pub max_step: u32,
-    pub zoom: f32,
-    pub misc: f32,
-    pub debug_shutter: f32,
 }
 
 impl From<&Image> for RenderParams {
     fn from(image: &Image) -> Self {
         RenderParams {
-            width: (image.viewport.width as f64 * image.viewport.scaling) as u32,
-            height: (image.viewport.height as f64 * image.viewport.scaling) as u32,
-            max_step: image.max_iter as u32,
-            zoom: image.viewport.zoom as f32,
-            misc: image.misc,
-            debug_shutter: image.debug_shutter,
+            width: (image.viewport.width as f64) as u32,
+            height: (image.viewport.height as f64) as u32,
         }
     }
 }

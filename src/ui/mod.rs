@@ -60,6 +60,7 @@ enum UITab {
 pub struct CorgiUI {
     output_settings: Image,
     explore_settings: Image,
+    viewport_scaling: f64,
     pub rendered_explore_viewport: Viewport,
     pub rendered_output_viewport: Viewport,
     pub output_preview_viewport: Viewport,
@@ -85,7 +86,6 @@ impl CorgiUI {
         let default_output_viewport = Viewport {
             width: 3840,
             height: 2160,
-            scaling: image.viewport.scaling,
             zoom: image.viewport.zoom,
             center: image.viewport.center.clone(),
         };
@@ -96,11 +96,8 @@ impl CorgiUI {
             output_preview_viewport: default_output_viewport.clone(),
             view_state: ViewState::OutputLock,
             render_zoom_offset: -0.5,
+            viewport_scaling: 2.0,
             explore_settings: Image {
-                viewport: Viewport {
-                    scaling: 0.5,
-                    ..image.viewport.clone()
-                },
                 external_coloring: Coloring::external_opt_default(),
                 internal_coloring: Coloring::internal_opt_default(),
                 ..image.clone()
@@ -444,14 +441,18 @@ impl CorgiUI {
                     }
                 }
                 if self.tab == UITab::Explore {
-                    active_image.viewport.scaling = self.explore_settings.viewport.scaling;
                     active_image.external_coloring =
                         self.explore_settings.external_coloring.clone();
                     active_image.internal_coloring =
                         self.explore_settings.internal_coloring.clone();
+                    active_image.viewport.width = (self.explore_settings.viewport.width as f64
+                        / self.viewport_scaling)
+                        as u32;
+                    active_image.viewport.height = (self.explore_settings.viewport.height as f64
+                        / self.viewport_scaling)
+                        as u32;
                     active_image.optimization_level = OptLevel::PerformanceOptimized;
                 } else {
-                    active_image.viewport.scaling = 1.0;
                     active_image.optimization_level = OptLevel::CacheOptimized;
                 }
                 active_image
@@ -503,17 +504,16 @@ impl CorgiUI {
                 }
             }
             self.output_settings.fractal_kind = self.explore_settings.fractal_kind.clone();
-            let mut scaling = (1.0 / self.explore_settings.viewport.scaling) as u32;
             input_with_label(
                 tui,
                 "Preview Scaling",
                 Some("Divides the resolution of the preview image to improve performance."),
-                egui::DragValue::new(&mut scaling)
+                egui::DragValue::new(&mut self.viewport_scaling)
                     .speed(0.01)
                     .range(1..=8)
+                    .max_decimals(0)
                     .update_while_editing(false),
             );
-            self.explore_settings.viewport.scaling = 1.0 / scaling as f64;
         });
         section(tui, "Viewport", true, |tui| {
             point_edit(
@@ -671,10 +671,10 @@ impl CorgiUI {
                     self.handle_viewport_input(ui, pointer_in_rect, &view_image);
                 }
 
-                self.explore_settings.viewport.width = size.x as usize;
-                self.explore_settings.viewport.height = size.y as usize;
-                self.output_preview_viewport.width = size.x as usize;
-                self.output_preview_viewport.height = size.y as usize;
+                self.explore_settings.viewport.width = size.x as u32;
+                self.explore_settings.viewport.height = size.y as u32;
+                self.output_preview_viewport.width = size.x as u32;
+                self.output_preview_viewport.height = size.y as u32;
 
                 // render texture and camera overlay
                 let view_image = self.image();
@@ -741,11 +741,13 @@ impl CorgiUI {
         let x_offset = -(drag.x as f64 / view_image.viewport.width as f64
                             * aspect_scale.x as f64
                             * pixel_scale as f64
+                            / self.viewport_scaling
                             * 1.715) // TODO: why this value? and does this work on other screens?
                             * scale.clone();
         let y_offset = (drag.y as f64 / view_image.viewport.height as f64
             * aspect_scale.y as f64
             * pixel_scale as f64
+            / self.viewport_scaling
             * 1.715)
             * scale;
         match if self.tab == UITab::Render {

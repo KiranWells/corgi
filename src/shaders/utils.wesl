@@ -46,7 +46,7 @@ fn length_squared(v: vec2f) -> f32 {
 }
 
 fn debug(x: u32) -> bool {
-    return x < u32(f32(render_params.width) * render_params.debug_shutter);
+    return x < u32(f32(render_params.width) * 0.0);//render_params.debug_shutter);
 }
 
 fn aspect(width: u32, height: u32) -> vec2f {

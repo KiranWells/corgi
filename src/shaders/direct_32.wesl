@@ -33,8 +33,6 @@ struct Params {
     iter_offset: u32,
     x: f32,
     y: f32,
-    cx: f32,
-    cy: f32,
     zoom: f32,
     julia_x: f32,
     julia_y: f32,

@@ -49,9 +49,8 @@ impl From<FloatParser> for Float {
 /// A representation of the current viewed portion of the fractal
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Viewport {
-    pub width: usize,
-    pub height: usize,
-    pub scaling: f64,
+    pub width: u32,
+    pub height: u32,
     pub zoom: f64,
     pub center: ComplexPoint,
 }
@@ -107,7 +106,7 @@ pub struct ImageDiff {
     pub reprobe: bool,
     pub recompute: bool,
     pub recolor: bool,
-    pub resize: bool,
+    pub rebuild: bool,
 }
 
 impl Default for Image {
@@ -134,7 +133,6 @@ impl Default for Viewport {
         Viewport {
             width: 512,
             height: 512,
-            scaling: 1.0,
             zoom: -1.0,
             center: ComplexPoint {
                 x: Float::with_val(53, -0.5),
@@ -159,10 +157,10 @@ impl Image {
     }
 
     pub fn comp(&self, other: &Self) -> ImageDiff {
-        // if the viewport has changed, resize the GPU data
-        let resize = self.viewport.width != other.viewport.width
+        // determine if we need to reallocate buffers or recompile shaders
+        // (due to changing compile-time parameters)
+        let rebuild = self.viewport.width != other.viewport.width
             || self.viewport.height != other.viewport.height
-            || self.viewport.scaling != other.viewport.scaling
             // if there are more bits set, then there are more enabled features
             || (self.get_flags() & 0xFF).count_ones() > (other.get_flags() & 0xFF).count_ones()
             || self.get_flags() & 0xFF00_0000 != other.get_flags() & 0xFF00_0000
@@ -174,7 +172,7 @@ impl Image {
             || self.viewport.algorithm() == Algorithm::Perturbedf32
                 && other.viewport.algorithm() == Algorithm::Directf32
             || self.fractal_kind != other.fractal_kind
-            || resize;
+            || rebuild;
         // if the probe location has changed or the image viewport has changed, re-generate the delta grid
         // if the image generation parameters have changed, re-run the compute shader
         let recompute =
@@ -189,7 +187,7 @@ impl Image {
             reprobe,
             recompute,
             recolor,
-            resize,
+            rebuild,
         }
     }
 
@@ -397,7 +395,7 @@ impl Viewport {
     }
 
     pub fn buffer_size(&self) -> usize {
-        (self.width as f64 * self.scaling) as usize * (self.height as f64 * self.scaling) as usize
+        (self.width as f64) as usize * (self.height as f64) as usize
     }
 
     pub fn update_prec(&mut self) {
@@ -410,8 +408,8 @@ impl Viewport {
 impl From<&Viewport> for Extent3d {
     fn from(viewport: &Viewport) -> Self {
         Self {
-            width: (viewport.width as f64 * viewport.scaling) as u32,
-            height: (viewport.height as f64 * viewport.scaling) as u32,
+            width: (viewport.width as f64) as u32,
+            height: (viewport.height as f64) as u32,
             depth_or_array_layers: 1,
         }
     }
@@ -420,7 +418,7 @@ impl From<&Viewport> for Extent3d {
 impl ImageDiff {
     pub fn full() -> Self {
         ImageDiff {
-            resize: true,
+            rebuild: true,
             reprobe: true,
             recompute: true,
             recolor: true,

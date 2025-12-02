@@ -36,8 +36,6 @@ struct Params {
     iter_offset: u32,
     x: f32,
     y: f32,
-    cx: f32,
-    cy: f32,
     zoom: f32,
     julia_x: f32,
     julia_y: f32,
@@ -127,7 +125,7 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
     ) * aspect_scale;
 
     // constant iteration values
-    let x_0 = vec2(params.cx, params.cy);
+    let x_0 = probed_point[1];
     var delta_0 = vec2(0.0);
     if (flags & JULIA) == 0 {
         // mandelbrot

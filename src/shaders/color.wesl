@@ -65,10 +65,6 @@ struct ColorParams {
 struct RenderParams {
     width: u32,
     height: u32,
-    max_step: u32,
-    zoom: f32,
-    misc: f32,
-    debug_shutter: f32,
 };
 @group(2) @binding(0) var<uniform> external_coloring : ColorParams;
 @group(2) @binding(1) var<uniform> internal_coloring : ColorParams;
@@ -111,7 +107,6 @@ fn calculate_lighting_layers(x: u32, y: u32, color_params: ColorParams) -> f32 {
         smoothed_step = dz.x;
     }
     let distance_estimate = log(r) * r / dr;
-    let scale = pow(2.0, -render_params.zoom);
     var brightness = 0.0;
     for (var i = 0u; i < 8; i += 1) {
         let layer_kind_big = color_params.light_layer_types[i / 4];
@@ -178,7 +173,6 @@ fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     var smoothed_step = f32(step) + (1.0 - log2(log(r)));
     let distance_estimate = log(r) * r / dr;
-    let scale = pow(2.0, -render_params.zoom);
 
     var color_params = external_coloring;
     let internal = step < 0;

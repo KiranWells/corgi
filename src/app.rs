@@ -96,10 +96,7 @@ impl CorgiApp {
             worker_state.preview_texture(),
             worker_state.output_texture(),
             (extents.width, extents.height),
-            (
-                output_image.viewport.width as u32,
-                output_image.viewport.height as u32,
-            ),
+            (output_image.viewport.width, output_image.viewport.height),
         )?;
         let ui_state = CorgiUI::new(&context, initial_image, ui_send.clone());
 

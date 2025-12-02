@@ -59,8 +59,12 @@ pub fn render_image(
     // - run the compute shader
     // - run the image render
 
-    if diff.resize {
-        gpu_data.resize(&image.viewport, image.max_iter as usize, image.get_flags());
+    if diff.rebuild {
+        gpu_data.resize(
+            (image.viewport.width, image.viewport.height),
+            image.max_iter as usize,
+            image.get_flags(),
+        );
     }
 
     if diff.reprobe {
@@ -191,8 +195,6 @@ fn run_compute_step(
             iter_offset: (i * constants.iter_batch_size) as u32,
             x,
             y,
-            cx: image.probe_location.x.to_f32(),
-            cy: image.probe_location.y.to_f32(),
             zoom: image.viewport.zoom as f32,
             julia_x: julia_point.0,
             julia_y: julia_point.1,
@@ -301,8 +303,8 @@ pub fn save_to_file(
         status_callback(StatusMessage::Progress("Saving image".into(), 0.0));
         let mut img = image::DynamicImage::ImageRgba8(
             ImageBuffer::from_raw(
-                image_settings.viewport.width as u32,
-                image_settings.viewport.height as u32,
+                image_settings.viewport.width,
+                image_settings.viewport.height,
                 data,
             )
             .expect("image data to be properly formatted"),

@@ -178,7 +178,7 @@ impl GPUData {
     ) -> Self {
         let device = &shared.device;
 
-        let texture = Self::create_texture(device, viewport);
+        let texture = Self::create_texture(device, viewport.into());
         let final_texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let buffers = Buffers::init(device, viewport, max_iter);
@@ -238,12 +238,20 @@ impl GPUData {
 
     /// Resizes the image to the new viewport and recreates necessary handles.
     /// Any objects which created a texture view of the image will need to recreate it.
-    pub fn resize(&mut self, new_view: &Viewport, max_iter: usize, flags: u32) {
+    pub fn resize(&mut self, (width, height): (u32, u32), max_iter: usize, flags: u32) {
         // recreate the texture with the new size
-        let texture = Self::create_texture(&self.shared.device, new_view);
+        let texture = Self::create_texture(
+            &self.shared.device,
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        self.buffers.resize(new_view, max_iter, &self.shared.device);
+        self.buffers
+            .resize((width, height), max_iter, &self.shared.device);
 
         let (bind_groups, compute_pipeline_layout, render_pipeline_layout) =
             BindGroups::init(&self.shared.device, &self.buffers, &texture_view);
@@ -302,9 +310,9 @@ impl GPUData {
     }
 
     /// Creates a texture for the image to be rendered to.
-    fn create_texture(device: &Device, viewport: &Viewport) -> wgpu::Texture {
+    fn create_texture(device: &Device, size: wgpu::Extent3d) -> wgpu::Texture {
         device.create_texture(&wgpu::TextureDescriptor {
-            size: viewport.into(),
+            size,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -412,11 +420,11 @@ impl Buffers {
 
     /// Resizes the necessary buffers to the new viewport.
     /// Layouts generated from the buffers will need to be recreated.
-    pub fn resize(&mut self, new_view: &Viewport, max_iter: usize, device: &Device) {
+    pub fn resize(&mut self, (width, height): (u32, u32), max_iter: usize, device: &Device) {
         use BuffType::*;
         // replace all sized buffers (not uniforms)
         self.probe = Self::create_buffer::<f32>(device, max_iter * 2, HostWritable);
-        let image_size = new_view.buffer_size();
+        let image_size = (width * height) as usize;
         self.delta_n = Self::create_buffer::<f32>(device, image_size * 4, ShaderOnly);
         self.delta_prime = Self::create_buffer::<f32>(device, image_size * 4, ShaderOnly);
         self.step = Self::create_buffer::<u32>(device, image_size, ShaderOnly);
