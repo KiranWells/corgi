@@ -186,7 +186,7 @@ fn run_compute_step(
             width: texture_size.width,
             height: texture_size.height,
             max_iter: image.max_iter as u32,
-            chunk_max_iter: if (constants.iter_batch_size + 1) * i > image.max_iter {
+            chunk_max_iter: if (i + 1) * constants.iter_batch_size > image.max_iter {
                 (image.max_iter % constants.iter_batch_size) as u32
             } else {
                 constants.iter_batch_size as u32

@@ -360,15 +360,15 @@ impl Viewport {
     }
 
     /// Gets the fractal coordinates of a pixel from viewport coordinates
-    pub fn get_real_coords(&self, x: f64, y: f64) -> (Float, Float) {
+    pub fn get_real_coords(&self, x: f64, y: f64, scaling: f64) -> (Float, Float) {
         let precision = get_precision(self.zoom);
         let mut scale = Float::with_val(precision, 2.0);
         scale.pow_assign(-self.zoom);
         let aspect_scale = self.aspect_scale();
 
-        let r = ((x / self.width as f64) * 2.0 - 1.0) * scale.clone() * aspect_scale.x
+        let r = ((x / self.width as f64/scaling) * 2.0 - 1.0) * scale.clone() * aspect_scale.x
             + Float::with_val(precision, &self.center.x);
-        let i = ((y / self.height as f64) * 2.0 - 1.0) * scale.clone() * aspect_scale.y
+        let i = ((y / self.height as f64/scaling) * 2.0 - 1.0) * scale.clone() * aspect_scale.y
             + Float::with_val(precision, &self.center.y);
         (r, i)
     }

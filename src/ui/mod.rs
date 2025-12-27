@@ -654,9 +654,11 @@ impl CorgiUI {
                         && pointer_in_rect
                         && let Some(pos) = pointer_pos
                     {
-                        let (x, y) = view_image
-                            .viewport
-                            .get_real_coords((pos.x) as f64, (size.y - pos.y) as f64);
+                        let (x, y) = view_image.viewport.get_real_coords(
+                            (pos.x) as f64,
+                            (size.y - pos.y) as f64,
+                            self.viewport_scaling,
+                        );
                         match self.view_state {
                             ViewState::Viewport => {
                                 self.explore_settings.probe_location = ComplexPoint { x, y }
@@ -685,7 +687,10 @@ impl CorgiUI {
                     &self.output_settings.viewport.center.x,
                     &self.output_settings.viewport.center.y,
                 );
-                render_rect = render_rect.translate(Vec2::new(x as f32, -y as f32));
+                render_rect = render_rect.translate(Vec2::new(
+                    (x / self.viewport_scaling) as f32,
+                    (-y / self.viewport_scaling) as f32,
+                ));
                 render_rect = render_rect.scale_from_center(f32::powf(
                     2.0,
                     -(self.output_settings.viewport.zoom - view_image.viewport.zoom) as f32,
