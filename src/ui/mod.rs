@@ -12,7 +12,7 @@ use std::sync::mpsc;
 
 use corgi::types::serde::SafeSaveLoad;
 use corgi::types::{
-    Coloring, ComplexPoint, Image, ImageGenCommand, OptLevel, RendererId, Status, View,
+    ComplexPoint, ImageGenCommand, ImgSpec, OptLevel, RendererId, Status, Style as ImgStyle, View,
     get_precision,
 };
 use directories::BaseDirs;
@@ -52,8 +52,8 @@ enum UITab {
 /// The main UI state struct.
 #[derive(Debug)]
 pub struct CorgiUI {
-    pub output_settings: Image,
-    explore_settings: Image,
+    pub output_settings: ImgSpec,
+    explore_settings: ImgSpec,
     viewport_scaling: f64,
     style_scaling: f64,
     pub rendered_explore_viewport: View,
@@ -75,7 +75,7 @@ impl CorgiUI {
     /// Create a new state struct; status should be shared with the render thread.
     pub fn new(
         context: &crate::Context,
-        image: Image,
+        image: ImgSpec,
         command_channel: mpsc::Sender<ImageGenCommand>,
     ) -> Self {
         Self {
@@ -86,12 +86,11 @@ impl CorgiUI {
             output_preview_viewport: image.view(),
             viewport_scaling: 2.0,
             style_scaling: 1.0,
-            explore_settings: Image {
-                external_coloring: Coloring::external_opt_default(),
-                internal_coloring: Coloring::internal_opt_default(),
+            explore_settings: ImgSpec {
+                style: ImgStyle::opt_default(),
                 ..image.clone()
             },
-            output_settings: Image {
+            output_settings: ImgSpec {
                 optimization_level: OptLevel::AccuracyOptimized,
                 ..image
             },
@@ -173,11 +172,13 @@ impl CorgiUI {
                             UITab::Color => {
                                 section(tui, "External", true, |tui| {
                                     self.output_settings
+                                        .style
                                         .external_coloring
                                         .render_edit_ui(ctx, tui);
                                 });
                                 section(tui, "Internal", false, |tui| {
                                     self.output_settings
+                                        .style
                                         .internal_coloring
                                         .render_edit_ui(ctx, tui);
                                 });
@@ -188,19 +189,15 @@ impl CorgiUI {
                                         tui,
                                         "Image width",
                                         None,
-                                        egui::DragValue::new(
-                                            &mut self.output_settings.parameters.width,
-                                        )
-                                        .speed(10.0),
+                                        egui::DragValue::new(&mut self.output_settings.width)
+                                            .speed(10.0),
                                     );
                                     input_with_label(
                                         tui,
                                         "Image height",
                                         None,
-                                        egui::DragValue::new(
-                                            &mut self.output_settings.parameters.height,
-                                        )
-                                        .speed(10.0),
+                                        egui::DragValue::new(&mut self.output_settings.height)
+                                            .speed(10.0),
                                     );
                                     tui.horizontal().add(|tui| {
                                         let mut str_path = self
@@ -412,7 +409,7 @@ impl CorgiUI {
                 if let Some(dir) = path.parent() {
                     context.cache_mut().previous_paths.settings = dir.to_owned();
                 }
-                match Image::load_from_file(&path) {
+                match ImgSpec::load(&path) {
                     Ok(image) => {
                         self.output_settings = image;
                     }
@@ -429,42 +426,41 @@ impl CorgiUI {
     }
 
     /// Get the image settings
-    pub fn image(&self) -> Image {
+    pub fn image(&self) -> ImgSpec {
         let mut active_image = self.output_settings.clone();
         match self.tab {
             UITab::Explore => {
-                active_image.external_coloring = self.explore_settings.external_coloring.clone();
-                active_image.internal_coloring = self.explore_settings.internal_coloring.clone();
-                active_image.parameters.zoom -= self
+                active_image.style = self.explore_settings.style.clone();
+                active_image.location.zoom -= self
                     .explore_settings
                     .view()
                     .zoom_offset_from(&active_image.view())
                     + 0.1;
-                active_image.parameters.width =
-                    (self.explore_settings.parameters.width as f64 / self.viewport_scaling) as u32;
-                active_image.parameters.height =
-                    (self.explore_settings.parameters.height as f64 / self.viewport_scaling) as u32;
+                active_image.width =
+                    (self.explore_settings.width as f64 / self.viewport_scaling) as u32;
+                active_image.height =
+                    (self.explore_settings.height as f64 / self.viewport_scaling) as u32;
                 active_image.optimization_level = OptLevel::PerformanceOptimized;
                 active_image
             }
             UITab::Color => {
-                active_image.parameters.zoom -= self
+                active_image.location.zoom -= self
                     .explore_settings
                     .view()
                     .zoom_offset_from(&active_image.view())
                     + 0.1;
-                active_image.parameters.width =
-                    (self.explore_settings.parameters.width as f64 / self.style_scaling) as u32;
-                active_image.parameters.height =
-                    (self.explore_settings.parameters.height as f64 / self.style_scaling) as u32;
+                active_image.width =
+                    (self.explore_settings.width as f64 / self.style_scaling) as u32;
+                active_image.height =
+                    (self.explore_settings.height as f64 / self.style_scaling) as u32;
                 active_image.optimization_level = OptLevel::CacheOptimized;
                 active_image
             }
             UITab::Render => {
-                active_image.parameters.zoom = self.output_preview_viewport.zoom;
-                active_image.parameters.center = self.output_preview_viewport.center.clone();
-                active_image.parameters.width = self.output_preview_viewport.width;
-                active_image.parameters.height = self.output_preview_viewport.height;
+                active_image.location.zoom = self.output_preview_viewport.zoom;
+                active_image.location.center = self.output_preview_viewport.center.clone();
+                active_image.width = self.output_preview_viewport.width;
+                active_image.height = self.output_preview_viewport.height;
                 active_image
             }
         }
@@ -507,19 +503,19 @@ impl CorgiUI {
                 tui,
                 "Fractal Mode",
                 Some("Which fractal algorithm to use. Switching from Mandelbrot to Julia will set the Julia parameter to the current view center."),
-                &mut self.explore_settings.parameters.fractal_kind,
+                &mut self.explore_settings.location.fractal_kind,
                 vec![
                     corgi::types::FractalKind::Mandelbrot,
-                    corgi::types::FractalKind::Julia(img.parameters.center.clone()),
+                    corgi::types::FractalKind::Julia(img.location.center.clone()),
                 ],
             );
-            match &mut self.explore_settings.parameters.fractal_kind {
+            match &mut self.explore_settings.location.fractal_kind {
                 corgi::types::FractalKind::Mandelbrot => {}
                 corgi::types::FractalKind::Julia(pt) => {
-                    point_edit(tui, "Julia parameter", Some("The C value used in the Julia equation. picking values from interesting locations in the Mandelbrot set tend to be interesting in the Julia Set."), get_precision(img.parameters.zoom), pt);
+                    point_edit(tui, "Julia parameter", Some("The C value used in the Julia equation. picking values from interesting locations in the Mandelbrot set tend to be interesting in the Julia Set."), get_precision(img.location.zoom), pt);
                 }
             }
-            self.output_settings.parameters.fractal_kind = self.explore_settings.parameters.fractal_kind.clone();
+            self.output_settings.location.fractal_kind = self.explore_settings.location.fractal_kind.clone();
             input_with_label(
                 tui,
                 "Preview Scaling",
@@ -536,8 +532,8 @@ impl CorgiUI {
                 tui,
                 "Image Center",
                 Some("The location of the center of the image in the complex plane."),
-                get_precision(img.parameters.zoom),
-                &mut self.output_settings.parameters.center,
+                get_precision(img.location.zoom),
+                &mut self.output_settings.location.center,
             );
             input_with_label(
                 tui,
@@ -545,7 +541,7 @@ impl CorgiUI {
                 Some(
                     "Zoom level of the camera. Scales the range of the viewport by 2 raised to the negative of the zoom.",
                 ),
-                egui::DragValue::new(&mut self.output_settings.parameters.zoom)
+                egui::DragValue::new(&mut self.output_settings.location.zoom)
                     .speed(0.03)
                     .update_while_editing(false),
             );
@@ -555,7 +551,7 @@ impl CorgiUI {
                 Some(
                     "The maximum number of iterations to calculate before assuming a point is inside the set. Not all points will run this many iterations, some will quit early.",
                 ),
-                egui::DragValue::new(&mut self.output_settings.parameters.max_iter)
+                egui::DragValue::new(&mut self.output_settings.location.max_iter)
                     .speed(100.0)
                     .range(100..=u32::MAX)
                     .update_while_editing(false),
@@ -567,8 +563,8 @@ impl CorgiUI {
                     Some(
                         "The reference location to use when calculating the fractal using perturbation-based formulas.",
                     ),
-                    get_precision(img.parameters.zoom),
-                    &mut self.output_settings.parameters.probe_location,
+                    get_precision(img.location.zoom),
+                    &mut self.output_settings.location.probe_location,
                 );
                 tui.ui_add(Button::new(format!(
                     "{} Pick new probe point",
@@ -584,13 +580,13 @@ impl CorgiUI {
                 tui,
                 "Image width",
                 None,
-                egui::DragValue::new(&mut self.output_settings.parameters.width).speed(10.0),
+                egui::DragValue::new(&mut self.output_settings.width).speed(10.0),
             );
             input_with_label(
                 tui,
                 "Image height",
                 None,
-                egui::DragValue::new(&mut self.output_settings.parameters.height).speed(10.0),
+                egui::DragValue::new(&mut self.output_settings.height).speed(10.0),
             );
         });
     }
@@ -629,15 +625,15 @@ impl CorgiUI {
                             (size.y - pos.y) as f64,
                             self.viewport_scaling,
                         );
-                        self.output_settings.parameters.probe_location = ComplexPoint { x, y };
+                        self.output_settings.location.probe_location = ComplexPoint { x, y };
                         self.setting_probe = false;
                     }
                 } else {
                     self.handle_viewport_input(ui, pointer_in_rect, &view_image);
                 }
 
-                self.explore_settings.parameters.width = size.x as u32;
-                self.explore_settings.parameters.height = size.y as u32;
+                self.explore_settings.width = size.x as u32;
+                self.explore_settings.height = size.y as u32;
                 self.output_preview_viewport.width = size.x as u32;
                 self.output_preview_viewport.height = size.y as u32;
 
@@ -647,14 +643,14 @@ impl CorgiUI {
                     .scale_from_center2(egui::Vec2::splat(1.0) / view_image.view().aspect_scale());
                 let (x, y) = view_image
                     .view()
-                    .coords_to_px_offset(&self.output_settings.parameters.center);
+                    .coords_to_px_offset(&self.output_settings.location.center);
                 render_rect = render_rect.translate(Vec2::new(
                     (x / self.viewport_scaling) as f32,
                     (-y / self.viewport_scaling) as f32,
                 ));
                 render_rect = render_rect.scale_from_center(f32::powf(
                     2.0,
-                    -(self.output_settings.parameters.zoom - view_image.parameters.zoom),
+                    -(self.output_settings.location.zoom - view_image.location.zoom),
                 ));
                 render_rect =
                     render_rect.scale_from_center2(self.output_settings.view().aspect_scale());
@@ -692,7 +688,7 @@ impl CorgiUI {
         &mut self,
         ui: &mut egui::Ui,
         pointer_in_rect: bool,
-        view_image: &Image,
+        view_image: &ImgSpec,
     ) {
         let response = ui.response();
         // get scroll and drag inputs to change the viewport
@@ -703,37 +699,36 @@ impl CorgiUI {
         let drag = response.drag_delta();
 
         // scroll
-        let precision = get_precision(view_image.parameters.zoom);
+        let precision = get_precision(view_image.location.zoom);
         let mut scale = Float::with_val(precision, 2.0);
-        scale.pow_assign(-view_image.parameters.zoom);
+        scale.pow_assign(-view_image.location.zoom);
         let aspect_scale = view_image.view().aspect_scale();
         let viewport_scaling = if self.tab == UITab::Explore {
             self.viewport_scaling
         } else {
             1.0
         };
-        let x_offset = -(drag.x as f64 / view_image.parameters.width as f64
+        let x_offset = -(drag.x as f64 / view_image.width as f64
                             * aspect_scale.x as f64
                             * pixel_scale as f64
                             / viewport_scaling
                             * 1.715) // TODO: why this value? and does this work on other screens?
                             * scale.clone();
-        let y_offset = (drag.y as f64 / view_image.parameters.height as f64
-            * aspect_scale.y as f64
-            * pixel_scale as f64
-            / viewport_scaling
-            * 1.715)
-            * scale;
+        let y_offset =
+            (drag.y as f64 / view_image.height as f64 * aspect_scale.y as f64 * pixel_scale as f64
+                / viewport_scaling
+                * 1.715)
+                * scale;
         if self.tab == UITab::Render {
             self.output_preview_viewport.center.x += x_offset;
             self.output_preview_viewport.center.y += y_offset;
             self.output_preview_viewport.zoom += scroll.y * pixel_scale * 0.005;
-            self.output_settings.parameters.update_prec();
+            self.output_settings.location.update_prec();
         } else {
-            self.output_settings.parameters.center.x += x_offset;
-            self.output_settings.parameters.center.y += y_offset;
-            self.output_settings.parameters.zoom += scroll.y * pixel_scale * 0.005;
-            self.output_settings.parameters.update_prec();
+            self.output_settings.location.center.x += x_offset;
+            self.output_settings.location.center.y += y_offset;
+            self.output_settings.location.zoom += scroll.y * pixel_scale * 0.005;
+            self.output_settings.location.update_prec();
             self.output_settings.update_probe();
         }
     }

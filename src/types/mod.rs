@@ -24,7 +24,7 @@ pub fn get_precision(zoom: f32) -> u32 {
 
 #[derive(Debug)]
 pub enum ImageGenCommand {
-    Render(RendererId, Box<Image>),
+    Render(RendererId, Box<ImgSpec>),
     SaveToFile(RendererId, PathBuf),
     ShutDown,
 }
@@ -46,7 +46,7 @@ pub enum StatusMessage {
 pub struct Status {
     pub message: String,
     pub progress: Option<f64>,
-    pub rendered_image: Option<Image>,
+    pub rendered_image: Option<ImgSpec>,
 }
 
 #[repr(C)]
@@ -157,11 +157,11 @@ pub struct RenderParams {
     pub height: u32,
 }
 
-impl From<&Image> for RenderParams {
-    fn from(image: &Image) -> Self {
+impl From<&ImgSpec> for RenderParams {
+    fn from(image: &ImgSpec) -> Self {
         RenderParams {
-            width: (image.parameters.width as f64) as u32,
-            height: (image.parameters.height as f64) as u32,
+            width: (image.width as f64) as u32,
+            height: (image.height as f64) as u32,
         }
     }
 }

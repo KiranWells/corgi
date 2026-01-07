@@ -25,7 +25,7 @@ use probe::probe;
 
 use crate::types::serde::SafeSaveLoad;
 use crate::types::{
-    ColorParams, ComputeParams, Image, ImageDiff, ImageTimings, RenderParams, RenderResult,
+    ColorParams, ComputeParams, ImageDiff, ImageTimings, ImgSpec, RenderParams, RenderResult,
     StatusMessage,
 };
 
@@ -37,8 +37,8 @@ pub fn is_metadata_supported(path: &Path) -> bool {
 pub fn render_image(
     gpu_data: &mut GPUData,
     probed_data: &mut Vec<[f32; 2]>,
-    image: &Image,
-    last_image: Option<&Image>,
+    image: &ImgSpec,
+    last_image: Option<&ImgSpec>,
     cancelled: Arc<AtomicBool>,
     mut status_callback: impl FnMut(StatusMessage),
 ) -> RenderResult {
@@ -57,8 +57,8 @@ pub fn render_image(
     if diff.rebuild {
         let start = Instant::now();
         gpu_data.resize(
-            (image.parameters.width, image.parameters.height),
-            image.parameters.max_iter as usize,
+            (image.width, image.height),
+            image.location.max_iter as usize,
             image.get_flags(),
         );
         timings.build = Instant::now() - start;
@@ -71,15 +71,15 @@ pub fn render_image(
     if diff.reprobe {
         let start = Instant::now();
         status_callback(StatusMessage::Progress("Probing point".into(), 0.0));
-        let julia_point = match &image.parameters.fractal_kind {
+        let julia_point = match &image.location.fractal_kind {
             crate::types::FractalKind::Mandelbrot => None,
             crate::types::FractalKind::Julia(pt) => Some(pt),
         };
         // probe the point
         *probed_data = probe::<f32>(
-            &image.parameters.probe_location,
-            image.parameters.max_iter,
-            image.parameters.zoom,
+            &image.location.probe_location,
+            image.location.max_iter,
+            image.location.zoom,
             julia_point,
         );
         status_callback(StatusMessage::Progress("Uploading probe".into(), 0.0));
@@ -104,7 +104,7 @@ pub fn render_image(
     if diff.recompute {
         let start = Instant::now();
         status_callback(StatusMessage::Progress(
-            format!("Computing iteration 1 of {}", image.parameters.max_iter),
+            format!("Computing iteration 1 of {}", image.location.max_iter),
             0.0,
         ));
         if !run_compute_step(
@@ -138,7 +138,7 @@ pub fn render_image(
 #[must_use]
 fn run_compute_step(
     probed_data: &[[f32; 2]],
-    image: &Image,
+    image: &ImgSpec,
     gpu_data: &GPUData,
     cancelled: Arc<AtomicBool>,
     status_callback: &mut impl FnMut(StatusMessage),
@@ -157,18 +157,18 @@ fn run_compute_step(
     let (compute_pipeline, x, y, probe_len) = match image.algorithm() {
         crate::types::Algorithm::Directf32 => (
             direct_f32_pipeline,
-            image.parameters.center.x.to_f32(),
-            image.parameters.center.y.to_f32(),
-            image.parameters.max_iter as usize,
+            image.location.center.x.to_f32(),
+            image.location.center.y.to_f32(),
+            image.location.max_iter as usize,
         ),
         crate::types::Algorithm::Perturbedf32 => {
             let (x, y) = image
                 .view()
-                .coords_to_px_offset(&image.parameters.probe_location);
+                .coords_to_px_offset(&image.location.probe_location);
             (
                 perturbed_f32_pipeline,
-                x as f32 / image.parameters.width as f32,
-                y as f32 / image.parameters.height as f32,
+                x as f32 / image.width as f32,
+                y as f32 / image.height as f32,
                 probed_data.len(),
             )
         }
@@ -176,7 +176,7 @@ fn run_compute_step(
 
     // Compute passes have encountered timeouts on some GPUs, so we split the compute passes into
     // multiple smaller passes.
-    for i in 0..=(image.parameters.max_iter / constants.iter_batch_size) {
+    for i in 0..=(image.location.max_iter / constants.iter_batch_size) {
         // Create encoder for CPU - GPU communication
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
@@ -198,7 +198,7 @@ fn run_compute_step(
         }
 
         let command_buffer = encoder.finish();
-        let julia_point = match &image.parameters.fractal_kind {
+        let julia_point = match &image.location.fractal_kind {
             crate::types::FractalKind::Mandelbrot => (0.0, 0.0),
             crate::types::FractalKind::Julia(pt) => (pt.x.to_f32(), pt.y.to_f32()),
         };
@@ -206,9 +206,9 @@ fn run_compute_step(
         let parameters = ComputeParams {
             width: texture_size.width,
             height: texture_size.height,
-            max_iter: image.parameters.max_iter,
-            chunk_max_iter: if (i + 1) * constants.iter_batch_size > image.parameters.max_iter {
-                image.parameters.max_iter % constants.iter_batch_size
+            max_iter: image.location.max_iter,
+            chunk_max_iter: if (i + 1) * constants.iter_batch_size > image.location.max_iter {
+                image.location.max_iter % constants.iter_batch_size
             } else {
                 constants.iter_batch_size
             },
@@ -216,7 +216,7 @@ fn run_compute_step(
             iter_offset: i * constants.iter_batch_size,
             x,
             y,
-            zoom: image.parameters.zoom,
+            zoom: image.location.zoom,
             julia_x: julia_point.0,
             julia_y: julia_point.1,
         };
@@ -247,10 +247,10 @@ fn run_compute_step(
             format!(
                 "Computing iteration {} of {}",
                 i * constants.iter_batch_size + parameters.chunk_max_iter,
-                image.parameters.max_iter
+                image.location.max_iter
             ),
             (i * constants.iter_batch_size + parameters.chunk_max_iter) as f64
-                / image.parameters.max_iter as f64,
+                / image.location.max_iter as f64,
         ));
         if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
             status_callback(StatusMessage::Progress("Cancelled".into(), 1.0));
@@ -261,7 +261,7 @@ fn run_compute_step(
 }
 
 /// Runs the render shader on the GPU
-fn run_render_step(image: &Image, gpu_data: &GPUData) {
+fn run_render_step(image: &ImgSpec, gpu_data: &GPUData) {
     let GPUData {
         shared: SharedState { device, queue, .. },
         bind_groups,
@@ -270,18 +270,18 @@ fn run_render_step(image: &Image, gpu_data: &GPUData) {
         ..
     } = gpu_data;
     let color_params: RenderParams = image.into();
-    let (_, mut external_colors) = image.external_coloring.gradient.decompose();
-    let (_, internal_colors) = image.internal_coloring.gradient.decompose();
+    let (_, mut external_colors) = image.style.external_coloring.gradient.decompose();
+    let (_, internal_colors) = image.style.internal_coloring.gradient.decompose();
     external_colors.extend(internal_colors);
     queue.write_buffer(
         &buffers.external_coloring,
         0,
-        bytemuck::cast_slice(&[ColorParams::from(&image.external_coloring)]),
+        bytemuck::cast_slice(&[ColorParams::from(&image.style.external_coloring)]),
     );
     queue.write_buffer(
         &buffers.internal_coloring,
         0,
-        bytemuck::cast_slice(&[ColorParams::from(&image.internal_coloring)]),
+        bytemuck::cast_slice(&[ColorParams::from(&image.style.internal_coloring)]),
     );
     queue.write_buffer(
         &buffers.render_parameters,
@@ -325,7 +325,7 @@ fn run_render_step(image: &Image, gpu_data: &GPUData) {
 
 pub fn save_to_file(
     gpu_data: &GPUData,
-    image_settings: &Image,
+    image_settings: &ImgSpec,
     path: &Path,
     mut status_callback: impl FnMut(StatusMessage),
 ) {
@@ -333,12 +333,8 @@ pub fn save_to_file(
     if let Some(data) = gpu_data.get_texture_data() {
         status_callback(StatusMessage::Progress("Saving image".into(), 0.0));
         let mut img = image::DynamicImage::ImageRgba8(
-            ImageBuffer::from_raw(
-                image_settings.parameters.width,
-                image_settings.parameters.height,
-                data,
-            )
-            .expect("image data to be properly formatted"),
+            ImageBuffer::from_raw(image_settings.width, image_settings.height, data)
+                .expect("image data to be properly formatted"),
         );
         img = image::DynamicImage::ImageRgb8(img.flipv().into_rgb8());
         if let Err(err) = img.save(path) {

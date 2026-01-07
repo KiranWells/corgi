@@ -5,7 +5,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
-use corgi::types::{Debouncer, Image, ImageGenCommand, ImageTimings, StatusMessage};
+use corgi::types::serde::SafeSaveLoad;
+use corgi::types::{Debouncer, ImageGenCommand, ImageTimings, ImgSpec, StatusMessage};
 
 use crate::config::Context;
 use crate::ui::{CorgiUI, PreviewRenderResources};
@@ -51,8 +52,8 @@ pub struct CorgiApp {
 #[derive(Debug)]
 struct ImgDebouncer {
     debouncer: Debouncer,
-    last_rendered: Image,
-    previous_frame: Image,
+    last_rendered: ImgSpec,
+    previous_frame: ImgSpec,
     timings: ImageTimings,
 }
 
@@ -63,7 +64,7 @@ enum PollState {
 }
 
 impl ImgDebouncer {
-    pub fn new(initial_duration: Duration, image: Image) -> Self {
+    pub fn new(initial_duration: Duration, image: ImgSpec) -> Self {
         Self {
             debouncer: Debouncer::new(initial_duration),
             last_rendered: image.clone(),
@@ -71,12 +72,9 @@ impl ImgDebouncer {
             timings: ImageTimings::default(),
         }
     }
-    pub fn poll(&mut self, image: Image, mouse_down: bool) -> PollState {
+    pub fn poll(&mut self, image: ImgSpec, mouse_down: bool) -> PollState {
         //  sanity check on image size
-        if image.parameters.width < 10
-            || image.parameters.height < 10
-            || image.parameters.width * image.parameters.height > 20_000_000
-        {
+        if image.width < 10 || image.height < 10 || image.width * image.height > 20_000_000 {
             return PollState::Inactive;
         }
         // send the new image to the render thread, but only if
@@ -126,14 +124,14 @@ impl CorgiApp {
         let (ui_send, worker_recv) = mpsc::channel::<ImageGenCommand>();
         let (worker_send, ui_recv) = mpsc::channel::<StatusMessage>();
         let cancelled = Arc::new(AtomicBool::new(false));
-        let mut initial_image = Image::default();
-        let output_image = Image::default();
+        let mut initial_image = ImgSpec::default();
+        let output_image = ImgSpec::default();
         let ctx = cc.egui_ctx.clone();
         eframe::egui::Visuals::default();
         ctx.set_style(context.theme().style());
 
         if let Some(image_file) = &cli_options.settings_file {
-            initial_image = Image::load_from_file(image_file)?
+            initial_image = ImgSpec::load(image_file)?
         }
 
         egui_material_icons::initialize(&cc.egui_ctx);
@@ -159,10 +157,7 @@ impl CorgiApp {
             worker_state.texture(corgi::types::RendererId::Style),
             worker_state.texture(corgi::types::RendererId::Render),
             (extents.width, extents.height),
-            (
-                output_image.parameters.width,
-                output_image.parameters.height,
-            ),
+            (output_image.width, output_image.height),
         )?;
         let ui_state = CorgiUI::new(&context, initial_image, ui_send.clone());
 

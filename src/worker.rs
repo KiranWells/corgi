@@ -2,14 +2,14 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, mpsc};
 
 use corgi::image_gen::{GPUData, SharedState, render_image, save_to_file};
-use corgi::types::{Image, ImageGenCommand, RenderResult, RendererId, StatusMessage};
+use corgi::types::{ImageGenCommand, ImgSpec, RenderResult, RendererId, StatusMessage};
 use eframe::egui::ahash::{HashMap, HashMapExt};
 use eframe::egui::mutex::RwLock;
 use eframe::{egui, egui_wgpu, wgpu};
 
 pub struct WorkerState {
     renderers: HashMap<RendererId, GPUData>,
-    last_images: HashMap<RendererId, Image>,
+    last_images: HashMap<RendererId, ImgSpec>,
     probe_buffer: Vec<[f32; 2]>,
     command_channel: mpsc::Receiver<ImageGenCommand>,
     status_channel: mpsc::Sender<StatusMessage>,
@@ -22,8 +22,8 @@ impl WorkerState {
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         wgpu: &egui_wgpu::RenderState,
-        preview_settings: Image,
-        output_settings: Image,
+        preview_settings: ImgSpec,
+        output_settings: ImgSpec,
         recv: mpsc::Receiver<ImageGenCommand>,
         send: mpsc::Sender<StatusMessage>,
         cancelled: Arc<AtomicBool>,
@@ -38,7 +38,7 @@ impl WorkerState {
                     RendererId::Explore,
                     GPUData::init(
                         preview_settings.extents(),
-                        preview_settings.parameters.max_iter as usize,
+                        preview_settings.location.max_iter as usize,
                         shared.clone(),
                         "Explore",
                         corgi::image_gen::Constants {
@@ -50,7 +50,7 @@ impl WorkerState {
                     RendererId::Style,
                     GPUData::init(
                         preview_settings.extents(),
-                        preview_settings.parameters.max_iter as usize,
+                        preview_settings.location.max_iter as usize,
                         shared.clone(),
                         "Style",
                         corgi::image_gen::Constants {
@@ -62,7 +62,7 @@ impl WorkerState {
                     RendererId::Render,
                     GPUData::init(
                         output_settings.extents(),
-                        output_settings.parameters.max_iter as usize,
+                        output_settings.location.max_iter as usize,
                         shared.clone(),
                         "Render",
                         corgi::image_gen::Constants {

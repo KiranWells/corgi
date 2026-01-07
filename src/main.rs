@@ -18,7 +18,8 @@ use color_eyre::eyre::eyre;
 use corgi::image_gen::{
     Constants, GPUData, SharedState, get_device_and_queue, render_image, save_to_file,
 };
-use corgi::types::{Image, OptLevel, StatusMessage};
+use corgi::types::serde::SafeSaveLoad;
+use corgi::types::{ImgSpec, OptLevel, StatusMessage};
 use directories::ProjectDirs;
 use eframe::{egui, egui_wgpu, wgpu};
 use pollster::FutureExt;
@@ -64,11 +65,11 @@ fn main() -> Result<()> {
         if !settings_file.exists() {
             return Err(eyre!("Settings file does not exist"));
         }
-        let mut image = Image::load_from_file(&settings_file)?;
+        let mut image = ImgSpec::load(&settings_file)?;
         image.optimization_level = OptLevel::AccuracyOptimized;
         let mut gpu_data = GPUData::init(
             image.extents(),
-            image.parameters.max_iter as usize,
+            image.location.max_iter as usize,
             SharedState::new(device, queue),
             "cli renderer",
             Constants {

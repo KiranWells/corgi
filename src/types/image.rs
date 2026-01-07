@@ -1,18 +1,11 @@
-use std::fs::read_to_string;
-use std::path::PathBuf;
-
-use color_eyre::eyre::{Result, eyre};
 use eframe::egui::Vec2;
 use eframe::wgpu::Extent3d;
-use little_exif::exif_tag::ExifTag;
-use little_exif::metadata::Metadata;
 use rug::Float;
 use rug::ops::{CompleteRound, PowAssign};
 use serde::{Deserialize, Serialize};
 
 use super::{Coloring, Transform, get_precision};
-use crate::image_gen::is_metadata_supported;
-use crate::types::{Layer, LayerKind, next_layer_id};
+use crate::types::LayerKind;
 
 // We use a custom implementation for serde
 // of Float to get a radix of 10. This increases
@@ -45,6 +38,9 @@ impl From<FloatParser> for Float {
     }
 }
 
+/// A representation of the current viewed portion of the fractal,
+/// Useful to track the location and size of an image or viewport
+/// relative to others.
 #[derive(Debug, Clone)]
 pub struct View {
     pub center: ComplexPoint,
@@ -53,13 +49,10 @@ pub struct View {
     pub height: u32,
 }
 
-/// A representation of the current viewed portion of the fractal
+/// A representation of a particular location for a particular
+/// fractal, and the associated state necessary to see that location.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub struct Parameters {
-    // canvas
-    pub width: u32,
-    pub height: u32,
-    pub samples: u8,
+pub struct Location {
     // fractal parameters
     pub fractal_kind: FractalKind,
     // viewport
@@ -70,17 +63,11 @@ pub struct Parameters {
     pub probe_location: ComplexPoint,
 }
 
-/// A representation of the current viewed portion of the fractal
+/// Describes how to turn the various fractal measurements into a visible color
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-#[serde(default)]
-pub struct Viewport {
-    // canvas
-    pub width: u32,
-    pub height: u32,
-    pub samples: u8,
-    // viewport
-    pub center: ComplexPoint,
-    pub zoom: f32,
+pub struct Style {
+    pub external_coloring: Coloring,
+    pub internal_coloring: Coloring,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -91,103 +78,28 @@ pub struct ComplexPoint {
     pub y: Float,
 }
 
-/// A representation of the current image being rendered, including
-/// the viewport, coloring, and other parameters
+/// A representation of the current fractal being rendered, including
+/// the fractal location, settings, coloring, and image parameters
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(default)]
-pub struct Image {
-    pub parameters: Parameters,
-    pub external_coloring: Coloring,
-    pub internal_coloring: Coloring,
+pub struct ImgSpec {
+    pub location: Location,
+    pub style: Style,
+    // canvas
+    pub width: u32,
+    pub height: u32,
+    pub samples: u8,
     #[serde(skip)]
     pub optimization_level: OptLevel,
 }
 
-impl Image {
+impl ImgSpec {
     pub fn view(&self) -> View {
         View {
-            center: self.parameters.center.clone(),
-            zoom: self.parameters.zoom,
-            width: self.parameters.width,
-            height: self.parameters.height,
-        }
-    }
-}
-
-/// A representation of the current image being rendered, including
-/// the viewport, coloring, and other parameters
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-#[serde(default)]
-pub struct _Image {
-    // fractal parameters
-    pub fractal_kind: FractalKind,
-    pub viewport: Viewport,
-    pub max_iter: u32,
-    // internal rendering details
-    pub probe_location: ComplexPoint,
-    pub external_coloring: Coloring,
-    pub internal_coloring: Coloring,
-    #[serde(skip)]
-    pub optimization_level: OptLevel,
-}
-
-impl Default for _Image {
-    fn default() -> Self {
-        Self {
-            viewport: Viewport {
-                width: 512,
-                height: 512,
-                samples: 1,
-                zoom: -1.0,
-                center: ComplexPoint {
-                    x: Float::with_val(53, -0.5),
-                    y: Float::with_val(53, 0.0),
-                },
-            },
-            fractal_kind: FractalKind::Mandelbrot,
-            max_iter: 10000,
-            probe_location: ComplexPoint {
-                x: Float::with_val(53, -0.5),
-                y: Float::with_val(53, 0.0),
-            },
-            external_coloring: Coloring::default(),
-            internal_coloring: Coloring::internal_default(),
-            optimization_level: OptLevel::AccuracyOptimized,
-        }
-    }
-}
-
-impl Default for Viewport {
-    fn default() -> Self {
-        Self {
-            width: 512,
-            height: 512,
-            samples: 1,
-            zoom: -1.0,
-            center: ComplexPoint {
-                x: Float::with_val(53, -0.5),
-                y: Float::with_val(53, 0.0),
-            },
-        }
-    }
-}
-
-impl From<_Image> for Image {
-    fn from(value: _Image) -> Self {
-        Self {
-            parameters: Parameters {
-                width: value.viewport.width,
-                height: value.viewport.height,
-                samples: 1,
-                fractal_kind: value.fractal_kind,
-                center: value.viewport.center,
-                zoom: value.viewport.zoom,
-                max_iter: value.max_iter,
-                probe_location: value.probe_location,
-            },
-            external_coloring: value.external_coloring,
-            internal_coloring: value.internal_coloring,
-            optimization_level: value.optimization_level,
+            center: self.location.center.clone(),
+            zoom: self.location.zoom,
+            width: self.width,
+            height: self.height,
         }
     }
 }
@@ -221,24 +133,23 @@ pub struct ImageDiff {
     pub rebuild: bool,
 }
 
-impl Default for Image {
+impl Default for ImgSpec {
     fn default() -> Self {
         Self {
-            parameters: Parameters::default(),
-            external_coloring: Coloring::default(),
-            internal_coloring: Coloring::internal_default(),
+            location: Location::default(),
+            style: Style::default(),
+            width: 3840,
+            height: 2160,
+            samples: 1,
             optimization_level: OptLevel::AccuracyOptimized,
         }
     }
 }
 
-impl Default for Parameters {
+impl Default for Location {
     fn default() -> Self {
-        Parameters {
+        Location {
             fractal_kind: FractalKind::Mandelbrot,
-            width: 3840,
-            height: 2160,
-            samples: 1,
             zoom: -1.0,
             max_iter: 10000,
             center: ComplexPoint {
@@ -253,6 +164,15 @@ impl Default for Parameters {
     }
 }
 
+impl Default for Style {
+    fn default() -> Self {
+        Self {
+            external_coloring: Coloring::default(),
+            internal_coloring: Coloring::internal_default(),
+        }
+    }
+}
+
 impl Default for ComplexPoint {
     fn default() -> Self {
         Self {
@@ -262,7 +182,16 @@ impl Default for ComplexPoint {
     }
 }
 
-impl Image {
+impl Style {
+    pub fn opt_default() -> Self {
+        Self {
+            external_coloring: Coloring::external_opt_default(),
+            internal_coloring: Coloring::internal_opt_default(),
+        }
+    }
+}
+
+impl ImgSpec {
     pub fn algorithm(&self) -> Algorithm {
         self.view().algorithm()
     }
@@ -270,25 +199,25 @@ impl Image {
     pub fn comp(&self, other: &Self) -> ImageDiff {
         // determine if we need to reallocate buffers or recompile shaders
         // (due to changing compile-time parameters)
-        let rebuild = self.parameters.width != other.parameters.width
-            || self.parameters.height != other.parameters.height
+        let rebuild = self.width != other.width
+            || self.height != other.height
             // if there are more bits set, then there are more enabled features
             || (self.get_flags() & 0xFF).count_ones() > (other.get_flags() & 0xFF).count_ones()
             || self.get_flags() & 0xFF00_0000 != other.get_flags() & 0xFF00_0000
-            || self.parameters.max_iter != other.parameters.max_iter;
+            || self.location.max_iter != other.location.max_iter;
         // if the max iteration or probe location has changed, re-run the probe
-        let reprobe = self.parameters.max_iter != other.parameters.max_iter
-            || self.parameters.probe_location != other.parameters.probe_location
+        let reprobe = self.location.max_iter != other.location.max_iter
+            || self.location.probe_location != other.location.probe_location
             || self.algorithm() == Algorithm::Perturbedf32
                 && other.algorithm() == Algorithm::Directf32
-            || self.parameters.fractal_kind != other.parameters.fractal_kind
+            || self.location.fractal_kind != other.location.fractal_kind
             || rebuild;
         // if the probe location has changed or the image viewport has changed, re-generate the delta grid
         // if the image generation parameters have changed, re-run the compute shader
-        let recompute = self.parameters != other.parameters || reprobe;
+        let recompute = self.location != other.location || reprobe;
         // if the image coloring parameters have changed, re-run the image render
-        let recolor = self.external_coloring != other.external_coloring
-            || self.internal_coloring != other.internal_coloring
+        let recolor = self.style.external_coloring != other.style.external_coloring
+            || self.style.internal_coloring != other.style.internal_coloring
             || recompute;
         ImageDiff {
             reprobe,
@@ -298,47 +227,17 @@ impl Image {
         }
     }
 
-    pub fn load_from_file(path: &PathBuf) -> Result<Self> {
-        let mut image: Image = if is_metadata_supported(path) {
-            let meta = Metadata::new_from_path(path)?;
-            let tag = meta
-                .get_tag(&ExifTag::ImageDescription(String::new()))
-                .next()
-                .ok_or(eyre!("No Description tag"))?;
-            let ExifTag::ImageDescription(desc) = tag else {
-                return Err(eyre!("Tag is not a Description"));
-            };
-            let img: _Image = serde_json::from_str(desc)?;
-            img.into()
-        } else {
-            let img: _Image = read_to_string(path)
-                .map_err(color_eyre::Report::from)
-                .and_then(|s| serde_json::from_str(&s).map_err(color_eyre::Report::from))?;
-            img.into()
-        };
-        fn update_ids(layers: &mut [Layer]) {
-            for layer in layers {
-                layer.id = next_layer_id();
-            }
-        }
-        update_ids(&mut image.internal_coloring.color_layers);
-        update_ids(&mut image.internal_coloring.light_layers);
-        update_ids(&mut image.external_coloring.color_layers);
-        update_ids(&mut image.external_coloring.light_layers);
-        Ok(image)
-    }
-
     pub fn update_probe(&mut self) {
         let mut relative_pos = self
             .view()
-            .coords_to_px_offset(&self.parameters.probe_location);
+            .coords_to_px_offset(&self.location.probe_location);
         relative_pos = (
-            relative_pos.0 / self.parameters.width as f64,
-            relative_pos.1 / self.parameters.height as f64,
+            relative_pos.0 / self.width as f64,
+            relative_pos.1 / self.height as f64,
         );
         if relative_pos.0.abs() > 10.0 || relative_pos.1.abs() > 10.0 {
             // reset probe
-            self.parameters.probe_location = self.parameters.center.clone();
+            self.location.probe_location = self.location.center.clone();
         }
     }
 
@@ -348,7 +247,7 @@ impl Image {
         const ORBIT_ENABLED: u32 = 0x4;
         const DERIVATIVE_ENABLED: u32 = 0x8;
         const JULIA: u32 = 0x1000_0000;
-        let kind_flags = match &self.parameters.fractal_kind {
+        let kind_flags = match &self.location.fractal_kind {
             FractalKind::Mandelbrot => 0,
             FractalKind::Julia(_) => JULIA,
         };
@@ -365,16 +264,22 @@ impl Image {
                 if self.contains_kind(LayerKind::Stripe) {
                     flags |= STRIPES_ENABLED;
                 }
-                if self.internal_coloring.contains_kind(LayerKind::Step)
-                    || self.internal_coloring.contains_kind(LayerKind::SmoothStep)
+                if self.style.internal_coloring.contains_kind(LayerKind::Step)
+                    || self
+                        .style
+                        .internal_coloring
+                        .contains_kind(LayerKind::SmoothStep)
                 {
                     flags |= TOTAL_ANGLE_ENABLED;
                 }
                 if self.contains_kind(LayerKind::OrbitTrap) {
                     flags |= ORBIT_ENABLED;
                 }
-                if self.external_coloring.contains_kind(LayerKind::Distance)
-                    || self.external_coloring.overlays.set_outline.is_some()
+                if self
+                    .style
+                    .external_coloring
+                    .contains_kind(LayerKind::Distance)
+                    || self.style.external_coloring.overlays.set_outline.is_some()
                 {
                     flags |= DERIVATIVE_ENABLED;
                 }
@@ -382,8 +287,10 @@ impl Image {
             }
         }
     }
+
     pub fn contains_kind(&self, kind: LayerKind) -> bool {
-        self.external_coloring.contains_kind(kind) || self.internal_coloring.contains_kind(kind)
+        self.style.external_coloring.contains_kind(kind)
+            || self.style.internal_coloring.contains_kind(kind)
     }
 }
 
@@ -478,7 +385,8 @@ impl View {
         (self.width as f64) as usize * (self.height as f64) as usize
     }
 }
-impl Parameters {
+
+impl Location {
     pub fn update_prec(&mut self) {
         let prec = get_precision(self.zoom);
         self.center.x = Float::with_val(prec, self.center.x.clone());
@@ -495,11 +403,12 @@ impl View {
         }
     }
 }
-impl Image {
+
+impl ImgSpec {
     pub fn extents(&self) -> Extent3d {
         Extent3d {
-            width: (self.parameters.width as f64) as u32,
-            height: (self.parameters.height as f64) as u32,
+            width: (self.width as f64) as u32,
+            height: (self.height as f64) as u32,
             depth_or_array_layers: 1,
         }
     }
