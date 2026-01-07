@@ -12,7 +12,7 @@ use std::sync::mpsc;
 
 use corgi::types::serde::SafeSaveLoad;
 use corgi::types::{
-    Coloring, ComplexPoint, Image, ImageGenCommand, OptLevel, Parameters, RendererId, Status, View,
+    Coloring, ComplexPoint, Image, ImageGenCommand, OptLevel, RendererId, Status, View,
     get_precision,
 };
 use directories::BaseDirs;
@@ -78,18 +78,12 @@ impl CorgiUI {
         image: Image,
         command_channel: mpsc::Sender<ImageGenCommand>,
     ) -> Self {
-        let default_output_viewport = View {
-            width: 3840,
-            height: 2160,
-            ..image.view()
-        };
         Self {
-            // TODO: change the default views to respect the input image
             status: Status::default(),
             rendered_explore_viewport: image.view(),
             rendered_style_viewport: image.view(),
-            rendered_output_viewport: default_output_viewport.clone(),
-            output_preview_viewport: default_output_viewport.clone(),
+            rendered_output_viewport: image.view(),
+            output_preview_viewport: image.view(),
             viewport_scaling: 2.0,
             style_scaling: 1.0,
             explore_settings: Image {
@@ -98,12 +92,6 @@ impl CorgiUI {
                 ..image.clone()
             },
             output_settings: Image {
-                parameters: Parameters {
-                    width: 3840,
-                    height: 2160,
-                    samples: 1,
-                    ..image.parameters.clone()
-                },
                 optimization_level: OptLevel::AccuracyOptimized,
                 ..image
             },

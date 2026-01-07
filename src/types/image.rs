@@ -236,8 +236,8 @@ impl Default for Parameters {
     fn default() -> Self {
         Parameters {
             fractal_kind: FractalKind::Mandelbrot,
-            width: 512,
-            height: 512,
+            width: 3840,
+            height: 2160,
             samples: 1,
             zoom: -1.0,
             max_iter: 10000,
