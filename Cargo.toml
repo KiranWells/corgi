@@ -45,11 +45,11 @@ taffy = "0.7.7"
 toml = { version = "0.9.8", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
-wesl = "0.2.0"
+wesl = "0.3.2"
 wgpu = "27"
 
 [build-dependencies]
-wesl = "0.2.0"
+wesl = "0.3.2"
 
 [profile.dev.package."*"]
 opt-level = 3
