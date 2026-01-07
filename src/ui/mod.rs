@@ -42,14 +42,6 @@ pub trait EditUI {
     fn render_edit_ui(&mut self, ctx: &egui::Context, tui: &mut egui_taffy::Tui);
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ViewState {
-    Viewport,
-    OutputView,
-    OutputLock,
-    Output,
-}
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum UITab {
     Explore,
@@ -68,10 +60,8 @@ pub struct CorgiUI {
     pub rendered_style_viewport: View,
     pub rendered_output_viewport: View,
     pub output_preview_viewport: View,
-    render_zoom_offset: f32,
     setting_probe: bool,
     tab: UITab,
-    view_state: ViewState,
     show_camera: bool,
     pub swap: bool,
     pub status: Status,
@@ -100,8 +90,6 @@ impl CorgiUI {
             rendered_style_viewport: image.view(),
             rendered_output_viewport: default_output_viewport.clone(),
             output_preview_viewport: default_output_viewport.clone(),
-            view_state: ViewState::OutputLock,
-            render_zoom_offset: -0.5,
             viewport_scaling: 2.0,
             style_scaling: 1.0,
             explore_settings: Image {
@@ -459,6 +447,11 @@ impl CorgiUI {
             UITab::Explore => {
                 active_image.external_coloring = self.explore_settings.external_coloring.clone();
                 active_image.internal_coloring = self.explore_settings.internal_coloring.clone();
+                active_image.parameters.zoom -= self
+                    .explore_settings
+                    .view()
+                    .zoom_offset_from(&active_image.view())
+                    + 0.1;
                 active_image.parameters.width =
                     (self.explore_settings.parameters.width as f64 / self.viewport_scaling) as u32;
                 active_image.parameters.height =
@@ -467,6 +460,11 @@ impl CorgiUI {
                 active_image
             }
             UITab::Color => {
+                active_image.parameters.zoom -= self
+                    .explore_settings
+                    .view()
+                    .zoom_offset_from(&active_image.view())
+                    + 0.1;
                 active_image.parameters.width =
                     (self.explore_settings.parameters.width as f64 / self.style_scaling) as u32;
                 active_image.parameters.height =
@@ -594,52 +592,6 @@ impl CorgiUI {
         });
         section(tui, "Camera", false, |tui| {
             tui.ui_add(egui::Checkbox::new(&mut self.show_camera, "Show Camera"));
-            if self.show_camera {
-                match self.view_state {
-                    ViewState::Viewport | ViewState::OutputView => {
-                        tui.horizontal().add(|tui| {
-                            if tui
-                                .ui_add(Button::new(format!(
-                                    "{} Move Camera Here",
-                                    icons::ICON_CROP_FREE
-                                )))
-                                .clicked()
-                            {
-                                self.output_settings.parameters.center =
-                                    self.explore_settings.parameters.center.clone();
-                                self.output_settings.parameters.zoom =
-                                    self.explore_settings.parameters.zoom + 0.5;
-                                self.output_settings.update_probe();
-                                self.render_zoom_offset = -0.5;
-                                self.view_state = ViewState::OutputLock;
-                            }
-                            if tui
-                                .ui_add(Button::new(format!(
-                                    "{} Return to Camera",
-                                    icons::ICON_BACK_TO_TAB
-                                )))
-                                .clicked()
-                            {
-                                self.view_state = ViewState::OutputLock;
-                            }
-                        });
-                    }
-                    ViewState::OutputLock => {
-                        if tui
-                            .ui_add(Button::new(format!("{} Pin Camera", icons::ICON_LOCK)))
-                            .clicked()
-                        {
-                            self.explore_settings.parameters.center =
-                                self.output_settings.parameters.center.clone();
-                            self.explore_settings.parameters.zoom =
-                                self.output_settings.parameters.zoom + self.render_zoom_offset;
-                            self.explore_settings.update_probe();
-                            self.view_state = ViewState::OutputView;
-                        }
-                    }
-                    ViewState::Output => {}
-                }
-            }
             input_with_label(
                 tui,
                 "Image width",
@@ -689,16 +641,7 @@ impl CorgiUI {
                             (size.y - pos.y) as f64,
                             self.viewport_scaling,
                         );
-                        match self.view_state {
-                            ViewState::Viewport => {
-                                self.explore_settings.parameters.probe_location =
-                                    ComplexPoint { x, y }
-                            }
-                            ViewState::OutputView | ViewState::OutputLock | ViewState::Output => {
-                                self.output_settings.parameters.probe_location =
-                                    ComplexPoint { x, y }
-                            }
-                        }
+                        self.output_settings.parameters.probe_location = ComplexPoint { x, y };
                         self.setting_probe = false;
                     }
                 } else {
@@ -793,44 +736,17 @@ impl CorgiUI {
             / viewport_scaling
             * 1.715)
             * scale;
-        match if self.tab == UITab::Render {
-            ViewState::Output
+        if self.tab == UITab::Render {
+            self.output_preview_viewport.center.x += x_offset;
+            self.output_preview_viewport.center.y += y_offset;
+            self.output_preview_viewport.zoom += scroll.y * pixel_scale * 0.005;
+            self.output_settings.parameters.update_prec();
         } else {
-            self.view_state
-        } {
-            ViewState::Viewport => {
-                self.explore_settings.parameters.center.x += x_offset;
-                self.explore_settings.parameters.center.y += y_offset;
-                self.explore_settings.parameters.zoom += scroll.y * pixel_scale * 0.005;
-                self.explore_settings.parameters.update_prec();
-                self.explore_settings.update_probe();
-            }
-            ViewState::OutputView => {
-                if drag.x != 0.0 || drag.y != 0.0 {
-                    self.explore_settings.parameters.center.x =
-                        self.output_settings.parameters.center.x.clone() + x_offset;
-                    self.explore_settings.parameters.center.y =
-                        self.output_settings.parameters.center.y.clone() + y_offset;
-                    self.explore_settings.parameters.zoom = view_image.parameters.zoom;
-                    self.explore_settings.parameters.update_prec();
-                    self.explore_settings.update_probe();
-                    self.view_state = ViewState::Viewport;
-                }
-                self.render_zoom_offset += scroll.y * pixel_scale * 0.005;
-            }
-            ViewState::OutputLock => {
-                self.output_settings.parameters.center.x += x_offset;
-                self.output_settings.parameters.center.y += y_offset;
-                self.output_settings.parameters.zoom += scroll.y * pixel_scale * 0.005;
-                self.output_settings.parameters.update_prec();
-                self.output_settings.update_probe();
-            }
-            ViewState::Output => {
-                self.output_preview_viewport.center.x += x_offset;
-                self.output_preview_viewport.center.y += y_offset;
-                self.output_preview_viewport.zoom += scroll.y * pixel_scale * 0.005;
-                self.output_settings.parameters.update_prec();
-            }
+            self.output_settings.parameters.center.x += x_offset;
+            self.output_settings.parameters.center.y += y_offset;
+            self.output_settings.parameters.zoom += scroll.y * pixel_scale * 0.005;
+            self.output_settings.parameters.update_prec();
+            self.output_settings.update_probe();
         }
     }
 }
