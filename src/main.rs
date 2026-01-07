@@ -67,8 +67,8 @@ fn main() -> Result<()> {
         let mut image = Image::load_from_file(&settings_file)?;
         image.optimization_level = OptLevel::AccuracyOptimized;
         let mut gpu_data = GPUData::init(
-            &image.viewport,
-            image.max_iter as usize,
+            image.extents(),
+            image.parameters.max_iter as usize,
             SharedState::new(device, queue),
             "cli renderer",
             Constants {
@@ -82,11 +82,10 @@ fn main() -> Result<()> {
                     println!("{:>6.2}% | {}", percent * 100.0, msg);
                     let _ = std::io::stdout().lock().flush();
                 }
-                corgi::types::StatusMessage::NewPreviewViewport(..) => todo!(),
-                corgi::types::StatusMessage::NewOutputViewport(..) => todo!(),
+                _ => todo!(),
             }
         }
-        render_image(
+        let _ = render_image(
             &mut gpu_data,
             &mut vec![],
             &image,

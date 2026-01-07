@@ -5,8 +5,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
-use corgi::types::{Debouncer, Image, ImageGenCommand, StatusMessage};
-use wgpu::Extent3d;
+use corgi::types::{Debouncer, Image, ImageGenCommand, ImageTimings, StatusMessage};
 
 use crate::config::Context;
 use crate::ui::{CorgiUI, PreviewRenderResources};
@@ -44,11 +43,74 @@ pub struct CorgiApp {
     last_save_time: Instant,
     command_channel: mpsc::Sender<ImageGenCommand>,
     status_channel: mpsc::Receiver<StatusMessage>,
+    debouncer: ImgDebouncer,
+    cancel_worker: std::sync::Arc<AtomicBool>,
+    worker_handle: Option<std::thread::JoinHandle<()>>,
+}
+
+#[derive(Debug)]
+struct ImgDebouncer {
+    debouncer: Debouncer,
     last_rendered: Image,
     previous_frame: Image,
-    last_send_time: Instant,
-    last_calc_time: Duration,
-    debouncer: Debouncer,
+    timings: ImageTimings,
+}
+
+enum PollState {
+    Trigger,
+    Repoll,
+    Inactive,
+}
+
+impl ImgDebouncer {
+    pub fn new(initial_duration: Duration, image: Image) -> Self {
+        Self {
+            debouncer: Debouncer::new(initial_duration),
+            last_rendered: image.clone(),
+            previous_frame: image,
+            timings: ImageTimings::default(),
+        }
+    }
+    pub fn poll(&mut self, image: Image, mouse_down: bool) -> PollState {
+        //  sanity check on image size
+        if image.parameters.width < 10
+            || image.parameters.height < 10
+            || image.parameters.width * image.parameters.height > 20_000_000
+        {
+            return PollState::Inactive;
+        }
+        // send the new image to the render thread, but only if
+        // - the image is different
+        // - the image has not changed for a full frame
+        let poll_state = if self.last_rendered != image {
+            let diff = image.comp(&self.last_rendered);
+            let calc_time = self.timings.estimate_time(diff);
+            let do_send = match calc_time {
+                x if x < Duration::from_millis(30) => true,
+                x if x < Duration::from_millis(500) => image == self.previous_frame && !mouse_down,
+                _ => {
+                    self.debouncer.wait_time = (calc_time / 2).max(Duration::from_millis(300));
+                    image == self.previous_frame && !mouse_down && self.debouncer.poll()
+                }
+            };
+            if do_send {
+                self.debouncer.reset();
+                self.last_rendered = image.clone();
+                PollState::Trigger
+            } else {
+                self.debouncer.trigger();
+                PollState::Repoll
+            }
+        } else {
+            PollState::Inactive
+        };
+        self.previous_frame = image;
+        poll_state
+    }
+
+    pub fn update_timings(&mut self, new_timings: &ImageTimings) {
+        self.timings.merge(new_timings);
+    }
 }
 
 impl CorgiApp {
@@ -85,37 +147,42 @@ impl CorgiApp {
             output_image.clone(),
             worker_recv,
             worker_send,
-            cancelled,
+            cancelled.clone(),
             ctx,
             &context,
         );
-        let extents = Extent3d::from(&initial_image.viewport);
+        let extents = initial_image.extents();
         let resources = PreviewRenderResources::init(
             &wgpu.device,
             wgpu.target_format,
-            worker_state.preview_texture(),
-            worker_state.output_texture(),
+            worker_state.texture(corgi::types::RendererId::Explore),
+            worker_state.texture(corgi::types::RendererId::Style),
+            worker_state.texture(corgi::types::RendererId::Render),
             (extents.width, extents.height),
-            (output_image.viewport.width, output_image.viewport.height),
+            (
+                output_image.parameters.width,
+                output_image.parameters.height,
+            ),
         )?;
         let ui_state = CorgiUI::new(&context, initial_image, ui_send.clone());
 
         wgpu.renderer.write().callback_resources.insert(resources);
-        thread::spawn(move || {
+        let handle = thread::spawn(move || {
             worker_state.run();
         });
 
         Ok(Box::new(CorgiApp {
             command_channel: ui_send,
             status_channel: ui_recv,
-            debouncer: Debouncer::new(std::time::Duration::from_millis(300)),
-            last_rendered: ui_state.image().clone(),
-            previous_frame: ui_state.image().clone(),
-            last_send_time: Instant::now(),
-            last_calc_time: Duration::from_millis(16),
+            debouncer: ImgDebouncer::new(
+                std::time::Duration::from_millis(300),
+                ui_state.image().clone(),
+            ),
             ui_state,
             context,
             last_save_time: Instant::now(),
+            cancel_worker: cancelled,
+            worker_handle: Some(handle),
         }))
     }
 }
@@ -128,82 +195,57 @@ impl eframe::App for CorgiApp {
                     self.ui_state.status.message = message;
                     self.ui_state.status.progress = Some(progress);
                 }
-                StatusMessage::NewPreviewViewport(new_calc_time, viewport) => {
+                StatusMessage::RenderFinished(id, timings, viewport) => {
+                    tracing::debug!("Image finished. {timings}");
                     self.ui_state.status.message = "Finished rendering".into();
                     self.ui_state.status.progress = None;
-                    self.ui_state.rendered_explore_viewport = viewport;
                     self.ui_state.swap = true;
-                    // use a running average
-                    self.last_calc_time = (self.last_calc_time + new_calc_time) / 2;
-                    tracing::debug!(
-                        "Ready for display in {:?}",
-                        Instant::now() - self.last_send_time
-                    );
-                }
-                StatusMessage::NewOutputViewport(calc_time, viewport) => {
-                    self.ui_state.status.message = "Finished rendering output".into();
-                    self.ui_state.status.progress = None;
-                    self.ui_state.rendered_output_viewport = viewport.clone();
-                    self.ui_state.output_preview_viewport = viewport;
-                    self.ui_state.output_preview_viewport.zoom -= 1.0;
-                    self.ui_state.swap = true;
-                    tracing::debug!("Finished in {calc_time:?}");
+                    self.debouncer.update_timings(&timings);
+                    match id {
+                        corgi::types::RendererId::Explore => {
+                            self.ui_state.rendered_explore_viewport = viewport;
+                        }
+                        corgi::types::RendererId::Style => {
+                            self.ui_state.rendered_style_viewport = viewport;
+                        }
+                        corgi::types::RendererId::Render => {
+                            self.ui_state.rendered_output_viewport = viewport.clone();
+                            self.ui_state.output_preview_viewport.zoom = viewport.zoom
+                                - self
+                                    .ui_state
+                                    .output_preview_viewport
+                                    .zoom_offset_from(&viewport);
+                            self.ui_state.output_preview_viewport.center = viewport.center;
+                            self.ui_state.rendering_output = false;
+                        }
+                    }
                 }
             }
         }
-        self.ui_state.generate_ui(ctx, &mut self.context);
-        let image = self.ui_state.image();
-        //  sanity check on image size
-        if !(image.viewport.width < 10
-            || image.viewport.height < 10
-            || image.viewport.width * image.viewport.height > 20_000_000)
-        {
-            // send the new image to the render thread, but only if
-            // - the image is different
-            // - the image has not changed for a full frame
-            let mouse_down = ctx.input(|is| is.pointer.primary_down());
-            if self.ui_state.has_active_viewport() && self.last_rendered != image {
-                let diff = image.comp(&self.last_rendered);
-                let calc_time = if diff.reprobe || diff.recompute {
-                    self.last_calc_time
-                } else {
-                    // if the image just needs recoloring, we assume it will be fast
-                    Duration::from_millis(1)
-                };
-                let do_send = match calc_time {
-                    x if x < Duration::from_millis(30) => true,
-                    x if x < Duration::from_millis(500) => {
-                        image == self.previous_frame && !mouse_down
+        self.ui_state.generate_ui(ctx, &mut self.context, || {
+            self.cancel_worker
+                .store(true, std::sync::atomic::Ordering::Relaxed)
+        });
+        if self.ui_state.has_active_viewport() {
+            let image = self.ui_state.image();
+            match self
+                .debouncer
+                .poll(image.clone(), ctx.input(|is| is.pointer.primary_down()))
+            {
+                PollState::Trigger => {
+                    self.cancel_worker
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+
+                    if let Err(err) = self.ui_state.send_render() {
+                        tracing::warn!("Failed to send image update: {err}")
                     }
-                    _ => {
-                        self.debouncer.wait_time = (calc_time / 2).max(Duration::from_millis(500));
-                        image == self.previous_frame && !mouse_down && self.debouncer.poll()
-                    }
-                };
-                if do_send {
-                    if self
-                        .command_channel
-                        .send(ImageGenCommand::NewPreviewSettings(image.clone()))
-                        .is_ok()
-                    {
-                        self.last_send_time = Instant::now();
-                        self.last_rendered = image.clone();
-                        self.debouncer.reset();
-                        if calc_time < Duration::from_millis(16) {
-                            ctx.request_repaint();
-                        }
-                    } else {
-                        tracing::warn!("Failed to send image update")
-                    }
-                } else {
-                    if self.previous_frame != image {
-                        self.debouncer.trigger();
-                    }
+                }
+                PollState::Repoll => {
                     // we need to force a re-check next frame
                     ctx.request_repaint();
                 }
+                PollState::Inactive => {}
             }
-            self.previous_frame = image;
         }
         if Instant::now() - self.last_save_time > Duration::from_secs(10) {
             self.context.save();
@@ -212,5 +254,7 @@ impl eframe::App for CorgiApp {
     }
     fn on_exit(&mut self) {
         self.context.save();
+        let _ = self.command_channel.send(ImageGenCommand::ShutDown);
+        let _ = self.worker_handle.take().unwrap().join();
     }
 }

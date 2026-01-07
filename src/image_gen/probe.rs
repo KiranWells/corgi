@@ -28,8 +28,8 @@ impl FromFloat for f32 {
 /// The resulting vector will be of length `max_iter` or less if the point escapes.
 pub fn probe<T>(
     ComplexPoint { x, y }: &ComplexPoint,
-    max_iter: u64,
-    zoom: f64,
+    max_iter: u32,
+    zoom: f32,
     julia_point: Option<&ComplexPoint>,
 ) -> Vec<[T; 2]>
 where

@@ -8,6 +8,7 @@ mod coloring;
 mod image;
 pub mod serde;
 
+use std::fmt::Display;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -17,24 +18,29 @@ pub use self::image::*;
 pub const ESCAPE_RADIUS: f64 = 1e10;
 
 /// Get the precision for a given zoom level
-pub fn get_precision(zoom: f64) -> u32 {
+pub fn get_precision(zoom: f32) -> u32 {
     ((zoom * 1.25) as u32).max(53)
 }
 
 #[derive(Debug)]
 pub enum ImageGenCommand {
-    NewPreviewSettings(Image),
-    NewOutputSettings(Image),
-    SaveToFile(PathBuf),
+    Render(RendererId, Box<Image>),
+    SaveToFile(RendererId, PathBuf),
+    ShutDown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RendererId {
+    Explore,
+    Style,
+    Render,
 }
 
 #[derive(Debug)]
 pub enum StatusMessage {
     Progress(String, f64),
-    NewPreviewViewport(Duration, Viewport),
-    NewOutputViewport(Duration, Viewport),
+    RenderFinished(RendererId, ImageTimings, View),
 }
-
 /// Shared status between the main thread and the render thread
 #[derive(Default, Debug, Clone)]
 pub struct Status {
@@ -54,19 +60,35 @@ pub struct ColorParams {
     pub gradient_size: u32,
     pub lighting_kind: u32,
     padding: u32,
-    pub color_layer_types: [u8; 8],
-    pub light_layer_types: [u8; 8],
-    pub color_strengths: [f32; 8],
-    pub color_params: [f32; 8],
-    pub light_strengths: [f32; 8],
-    pub light_params: [f32; 8],
-    pub lights: [Light; 3],
-    pub overlays: Overlays,
+    pub color_layer_types: [u8; MAX_LAYERS],
+    pub light_layer_types: [u8; MAX_LAYERS],
+    pub color_strengths: [f32; MAX_LAYERS],
+    pub color_params: [f32; MAX_LAYERS],
+    pub light_strengths: [f32; MAX_LAYERS],
+    pub light_params: [f32; MAX_LAYERS],
+    pub lights: [Light; MAX_LIGHTS],
+    pub overlays: OverlayParams,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct OverlayParams {
+    pub iteration_outline: [f32; 4],
+    pub set_outline: [f32; 4],
 }
 
 impl From<&Coloring> for ColorParams {
     fn from(value: &Coloring) -> Self {
         let (gradient_kind, gradient_vec) = value.gradient.decompose();
+        fn map_to_array<T: Default + Copy, U, const N: usize>(
+            v: &[U],
+            f: impl Fn(&U) -> T,
+        ) -> [T; N] {
+            let mut arr = [T::default(); N];
+            let newv = v.iter().map(f).collect::<Vec<T>>();
+            arr[..newv.len()].copy_from_slice(&newv);
+            arr
+        }
         ColorParams {
             saturation: value.saturation,
             brightness: value.brightness,
@@ -75,16 +97,36 @@ impl From<&Coloring> for ColorParams {
             gradient_kind,
             gradient_size: gradient_vec.len() as u32 / 4,
             lighting_kind: value.lighting_kind as u32,
-            color_layer_types: value.color_layers.map(|x| x.kind as u8),
-            light_layer_types: value.light_layers.map(|x| x.kind as u8),
-            color_strengths: value.color_layers.map(|x| x.strength),
-            color_params: value.color_layers.map(|x| x.param),
-            light_strengths: value.light_layers.map(|x| x.strength),
-            light_params: value.light_layers.map(|x| x.param),
-            lights: value.lights,
-            overlays: value.overlays,
+            color_layer_types: map_to_array(&value.color_layers, |x| x.kind as u8),
+            light_layer_types: map_to_array(&value.light_layers, |x| x.kind as u8),
+            color_strengths: map_to_array(&value.color_layers, |x| x.strength),
+            color_params: map_to_array(&value.color_layers, |x| x.param),
+            light_strengths: map_to_array(&value.light_layers, |x| x.strength),
+            light_params: map_to_array(&value.light_layers, |x| x.param),
+            lights: map_to_array(&value.lights, Light::clone),
+            overlays: (&value.overlays).into(),
             padding: 0,
         }
+    }
+}
+
+impl From<&Overlays> for OverlayParams {
+    fn from(value: &Overlays) -> Self {
+        Self {
+            iteration_outline: pack_outline(&value.iteration_outline),
+            set_outline: pack_outline(&value.set_outline),
+        }
+    }
+}
+
+fn pack_outline(value: &Option<Outline>) -> [f32; 4] {
+    if let Some(inner) = value {
+        let mut packed = inner.color.to_rgba_unmultiplied();
+        packed[3] *= 0.999;
+        packed[3] += inner.parameter as f32;
+        packed
+    } else {
+        [0.0; 4]
     }
 }
 
@@ -118,8 +160,8 @@ pub struct RenderParams {
 impl From<&Image> for RenderParams {
     fn from(image: &Image) -> Self {
         RenderParams {
-            width: (image.viewport.width as f64) as u32,
-            height: (image.viewport.height as f64) as u32,
+            width: (image.parameters.width as f64) as u32,
+            height: (image.parameters.height as f64) as u32,
         }
     }
 }
@@ -235,5 +277,74 @@ impl Debouncer {
         } else {
             None
         }
+    }
+}
+
+#[derive(Debug)]
+pub enum RenderResult {
+    Unfinished,
+    Finished(ImageTimings),
+}
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ImageTimings {
+    pub probe: Duration,
+    pub compute: Duration,
+    pub color: Duration,
+    pub build: Duration,
+}
+
+impl ImageTimings {
+    pub fn estimate_time(&self, diff: ImageDiff) -> Duration {
+        let mut estimated_time = Duration::ZERO;
+        if diff.reprobe {
+            estimated_time += self.probe;
+        }
+        if diff.recompute {
+            estimated_time += self.compute;
+        }
+        if diff.recolor {
+            estimated_time += self.color;
+        }
+        if diff.rebuild {
+            estimated_time += self.build;
+        }
+        estimated_time
+    }
+    pub fn merge(&mut self, new_timings: &Self) {
+        if !new_timings.probe.is_zero() {
+            self.probe = (self.probe + new_timings.probe) / 2;
+        }
+        if !new_timings.compute.is_zero() {
+            self.compute = (self.compute + new_timings.compute) / 2;
+        }
+        if !new_timings.color.is_zero() {
+            self.color = (self.color + new_timings.color) / 2;
+        }
+        if !new_timings.build.is_zero() {
+            self.build = (self.build + new_timings.build) / 2;
+        }
+    }
+}
+
+impl Display for ImageTimings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Total: {:?} ",
+            self.build + self.probe + self.compute + self.color
+        )?;
+        if !self.build.is_zero() {
+            write!(f, "Build: {:?} ", self.build)?;
+        }
+        if !self.probe.is_zero() {
+            write!(f, "Probe: {:?} ", self.probe)?;
+        }
+        if !self.compute.is_zero() {
+            write!(f, "Compute: {:?} ", self.compute)?;
+        }
+        if !self.color.is_zero() {
+            write!(f, "Color: {:?}", self.color)?;
+        }
+        Ok(())
     }
 }

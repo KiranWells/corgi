@@ -125,7 +125,6 @@ impl ToLabel for StripeType {
 impl ToLabel for LayerKind {
     fn label(&self) -> &'static str {
         match self {
-            LayerKind::None => unreachable!(),
             LayerKind::Step => "Step",
             LayerKind::SmoothStep => "Smooth Step",
             LayerKind::Distance => "Distance",
@@ -209,7 +208,6 @@ impl ToHelpText for FractalKind {
 impl ToHelpText for LayerKind {
     fn help_text(&self) -> &'static str {
         match self {
-            LayerKind::None => unreachable!(),
             LayerKind::Step => {
                 "Uses the number of iterations required for the point to escape. Has hard lines between colors."
             }

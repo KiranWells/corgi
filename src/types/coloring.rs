@@ -1,24 +1,28 @@
 use std::sync::atomic::AtomicU64;
 
+use eframe::egui;
 use egui_material_icons::icons;
 use serde::{Deserialize, Serialize};
 
 pub const MAX_GRADIENT_STOPS: usize = 50;
+pub const MAX_LAYERS: usize = 8;
+pub const MAX_LIGHTS: usize = 3;
 
 /// The coloring parameters for the image. These are interpreted
 /// slightly differently for internal and external coloring, as
 /// some coloring algorithms are incompatible between the two.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Coloring {
     pub saturation: f32,
     pub brightness: f32,
     pub color_frequency: f32,
     pub color_offset: f32,
     pub gradient: Gradient,
-    pub color_layers: [Layer; 8],
+    pub color_layers: Vec<Layer>,
     pub lighting_kind: LightingKind,
-    pub light_layers: [Layer; 8],
-    pub lights: [Light; 3],
+    pub light_layers: Vec<Layer>,
+    pub lights: Vec<Light>,
     pub overlays: Overlays,
 }
 
@@ -55,8 +59,8 @@ impl Default for Layer {
     fn default() -> Self {
         Self {
             id: 0,
-            kind: LayerKind::None,
-            strength: 0.5,
+            kind: LayerKind::SmoothStep,
+            strength: 1.0,
             param: 0.0,
         }
     }
@@ -68,19 +72,25 @@ pub fn next_layer_id() -> u64 {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+pub struct Overlays {
+    pub iteration_outline: Option<Outline>,
+    pub set_outline: Option<Outline>,
+}
+
+#[repr(C)]
 #[derive(
     Clone, Copy, Debug, PartialEq, Deserialize, Serialize, bytemuck::Pod, bytemuck::Zeroable,
 )]
-pub struct Overlays {
-    pub iteration_outline_color: [f32; 4],
-    pub set_outline_color: [f32; 4],
+pub struct Outline {
+    pub color: egui::Rgba,
+    pub parameter: u32,
 }
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 pub enum LayerKind {
-    None = 0,
-    Step,
+    Step = 1,
     SmoothStep,
     Distance,
     OrbitTrap,
@@ -90,7 +100,6 @@ pub enum LayerKind {
 impl LayerKind {
     pub fn text(self) -> &'static str {
         match self {
-            LayerKind::None => "None",
             LayerKind::Step => "Step Count",
             LayerKind::SmoothStep => "Smooth Step Count",
             LayerKind::Distance => "Distance Estimate",
@@ -100,7 +109,6 @@ impl LayerKind {
     }
     pub fn icon_text(self) -> String {
         match self {
-            LayerKind::None => format!("{} None", icons::ICON_REMOVE_SELECTION),
             LayerKind::Step => format!("{} Step Count", icons::ICON_STAIRS_2),
             LayerKind::SmoothStep => format!("{} Smooth Step Count", icons::ICON_ELEVATION),
             LayerKind::Distance => format!("{} Distance Estimate", icons::ICON_TARGET),
@@ -146,45 +154,23 @@ impl Default for Coloring {
             color_frequency: 1.0,
             color_offset: 0.0,
             gradient: Gradient::Hsv(0.7, 1.0),
-            color_layers: [
-                Layer {
-                    id: next_layer_id(),
-                    kind: LayerKind::SmoothStep,
-                    strength: 1.0,
-                    param: 0.0,
-                },
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-            ],
+            color_layers: vec![Layer {
+                id: next_layer_id(),
+                kind: LayerKind::SmoothStep,
+                strength: 1.0,
+                param: 0.0,
+            }],
             lighting_kind: LightingKind::Gradient,
-            light_layers: [
-                Layer {
-                    id: next_layer_id(),
-                    kind: LayerKind::Distance,
-                    strength: 1.0,
-                    param: 0.0,
-                },
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-            ],
-            lights: [
-                Light::new([1.0, 1.0, 1.0], 1.0, [0.0, 0.0, 1.0]),
-                Light::new([0.5, 0.8, 1.0], 1.0, [0.8, 0.6, 0.0]),
-                Light::new([1.0, 0.8, 0.4], 1.0, [-0.6, -0.8, 0.0]),
-            ],
+            light_layers: vec![Layer {
+                id: next_layer_id(),
+                kind: LayerKind::Distance,
+                strength: 1.0,
+                param: 0.0,
+            }],
+            lights: vec![],
             overlays: Overlays {
-                iteration_outline_color: [0.0; 4],
-                set_outline_color: [0.0, 0.0, 0.0, 30.0],
+                iteration_outline: None,
+                set_outline: None,
             },
         }
     }
@@ -198,31 +184,18 @@ impl Coloring {
             color_frequency: 1.0,
             color_offset: 0.0,
             gradient: Gradient::Flat([1.0; 3]),
-            color_layers: [Layer::default(); 8],
+            color_layers: vec![],
             lighting_kind: LightingKind::Gradient,
-            light_layers: [
-                Layer {
-                    id: next_layer_id(),
-                    kind: LayerKind::OrbitTrap,
-                    strength: 1.0,
-                    param: 0.0,
-                },
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-            ],
-            lights: [
-                Light::new([1.0, 1.0, 1.0], 1.5, [0.0, 0.6, 0.4]),
-                Light::new([0.5, 0.6, 1.0], 1.5, [0.0, 0.3, 1.0]),
-                Light::new([1.0, 0.8, 0.4], 1.0, [0.0, 0.3, 1.0]),
-            ],
+            light_layers: vec![Layer {
+                id: next_layer_id(),
+                kind: LayerKind::OrbitTrap,
+                strength: 1.0,
+                param: 0.0,
+            }],
+            lights: vec![],
             overlays: Overlays {
-                iteration_outline_color: [0.0; 4],
-                set_outline_color: [0.0; 4],
+                iteration_outline: None,
+                set_outline: None,
             },
         }
     }
@@ -234,45 +207,27 @@ impl Coloring {
             color_frequency: 1.0,
             color_offset: 0.0,
             gradient: Gradient::Procedural([[0.5; 3], [0.5; 3], [1.0; 3], [0.0, 0.1, 0.2]]),
-            color_layers: [
-                Layer {
-                    id: next_layer_id(),
-                    kind: LayerKind::SmoothStep,
-                    strength: 3.0,
-                    param: 0.0,
-                },
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-            ],
+            color_layers: vec![Layer {
+                id: next_layer_id(),
+                kind: LayerKind::SmoothStep,
+                strength: 3.0,
+                param: 0.0,
+            }],
             lighting_kind: LightingKind::Shaded,
-            light_layers: [
-                Layer {
-                    id: next_layer_id(),
-                    kind: LayerKind::Step,
-                    strength: 3.0,
-                    param: 0.0,
-                },
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-                Layer::default(),
-            ],
-            lights: [
+            light_layers: vec![Layer {
+                id: next_layer_id(),
+                kind: LayerKind::Step,
+                strength: 3.0,
+                param: 0.0,
+            }],
+            lights: vec![
                 Light::new([1.0, 1.0, 1.0], 1.0, [0.0, 0.0, 1.0]),
                 Light::new([0.5, 0.8, 1.0], 1.0, [0.7, 0.7, 0.0]),
                 Light::new([1.0, 0.8, 0.4], 1.0, [-0.7, -0.7, 0.0]),
             ],
             overlays: Overlays {
-                iteration_outline_color: [0.0; 4],
-                set_outline_color: [0.0; 4],
+                iteration_outline: None,
+                set_outline: None,
             },
         }
     }
@@ -284,15 +239,20 @@ impl Coloring {
             color_frequency: 1.0,
             color_offset: 0.0,
             gradient: Gradient::Flat([0.1; 3]),
-            color_layers: [Layer::default(); 8],
+            color_layers: vec![],
             lighting_kind: LightingKind::Flat,
-            light_layers: [Layer::default(); 8],
-            lights: [Light::default(); 3],
+            light_layers: vec![],
+            lights: vec![],
             overlays: Overlays {
-                iteration_outline_color: [0.0; 4],
-                set_outline_color: [0.0; 4],
+                iteration_outline: None,
+                set_outline: None,
             },
         }
+    }
+
+    pub fn contains_kind(&self, kind: LayerKind) -> bool {
+        self.color_layers.iter().filter(|x| x.kind == kind).count() > 0
+            || self.light_layers.iter().filter(|x| x.kind == kind).count() > 0
     }
 }
 

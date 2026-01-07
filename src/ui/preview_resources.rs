@@ -1,13 +1,16 @@
+use std::ops::Deref;
 use std::sync::Arc;
 
 use color_eyre::Result;
-use corgi::types::{Transform, Viewport};
+use corgi::types::{Transform, View};
 use eframe::egui::mutex::RwLock;
 use eframe::egui::{self};
 use eframe::egui_wgpu::{self, CallbackTrait};
 use eframe::wgpu::util::DeviceExt;
 use eframe::wgpu::{self, Device, include_wgsl};
 use wgpu::{Extent3d, Queue};
+
+use crate::ui::UITab;
 
 /// Resources necessary for rendering the preview image
 struct SubResources {
@@ -17,27 +20,36 @@ struct SubResources {
     texture_bind_group: wgpu::BindGroup,
     uniform_buffer: wgpu::Buffer,
     texture: wgpu::Texture,
-    shared_texture: Arc<RwLock<wgpu::Texture>>,
     size: (u32, u32),
 }
 
 pub struct PreviewRenderResources {
     preview: SubResources,
     output: SubResources,
+    explore_texture: Arc<RwLock<wgpu::Texture>>,
+    style_texture: Arc<RwLock<wgpu::Texture>>,
+    output_texture: Arc<RwLock<wgpu::Texture>>,
 }
 
 impl PreviewRenderResources {
     pub fn init(
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
-        preview_texture: Arc<RwLock<wgpu::Texture>>,
+        explore_texture: Arc<RwLock<wgpu::Texture>>,
+        style_texture: Arc<RwLock<wgpu::Texture>>,
         output_texture: Arc<RwLock<wgpu::Texture>>,
         preview_size: (u32, u32),
         output_size: (u32, u32),
     ) -> Result<Self> {
-        let preview = SubResources::init(device, format, preview_texture, preview_size)?;
-        let output = SubResources::init(device, format, output_texture, output_size)?;
-        Ok(Self { preview, output })
+        let preview = SubResources::init(device, format, preview_size)?;
+        let output = SubResources::init(device, format, output_size)?;
+        Ok(Self {
+            preview,
+            output,
+            explore_texture,
+            style_texture,
+            output_texture,
+        })
     }
 }
 
@@ -46,7 +58,6 @@ impl SubResources {
     pub fn init(
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
-        shared_texture: Arc<RwLock<wgpu::Texture>>,
         size: (u32, u32),
     ) -> Result<Self> {
         let shader = device.create_shader_module(include_wgsl!("../shaders/preview.wgsl"));
@@ -194,27 +205,37 @@ impl SubResources {
             texture_bind_group,
             uniform_buffer,
             texture,
-            shared_texture,
             size,
         })
     }
 
     /// Resize the render resources. This must be called when the render thread resizes,
     /// and will refresh the texture view and the uniform buffer.
-    pub fn resize(&mut self, device: &Device, queue: &Queue, new_size: (u32, u32)) -> Result<()> {
-        *self = Self::init(device, self.format, self.shared_texture.clone(), new_size)?;
-        self.swap(device, queue);
+    pub fn resize(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        new_size: (u32, u32),
+        source_texture: &impl Deref<Target = wgpu::Texture>,
+    ) -> Result<()> {
+        *self = Self::init(device, self.format, new_size)?;
+        self.swap(device, queue, source_texture);
         Ok(())
     }
 
-    pub fn swap(&self, device: &Device, queue: &Queue) {
-        if self.texture.size() != self.shared_texture.read().size() {
+    pub fn swap(
+        &self,
+        device: &Device,
+        queue: &Queue,
+        source_texture: &impl Deref<Target = wgpu::Texture>,
+    ) {
+        if self.texture.size() != source_texture.size() {
             return;
         }
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         encoder.copy_texture_to_texture(
-            self.shared_texture.read().as_image_copy(),
+            source_texture.as_image_copy(),
             self.texture.as_image_copy(),
             self.texture.size(),
         );
@@ -241,10 +262,10 @@ impl SubResources {
 }
 
 pub struct PaintCallback {
-    pub rendered_viewport: Viewport,
-    pub view: Viewport,
+    pub rendered_viewport: View,
+    pub view: View,
     pub swap: bool,
-    pub output: bool,
+    pub tab: UITab,
 }
 
 impl CallbackTrait for PaintCallback {
@@ -259,22 +280,26 @@ impl CallbackTrait for PaintCallback {
         let res = callback_resources
             .get_mut::<PreviewRenderResources>()
             .expect("to get render resources");
-        let res = if self.output {
+        let texture = match self.tab {
+            UITab::Explore => res.explore_texture.read(),
+            UITab::Color => res.style_texture.read(),
+            UITab::Render => res.output_texture.read(),
+        };
+        let res = if self.tab == UITab::Render {
             &mut res.output
         } else {
             &mut res.preview
         };
         if self.swap {
             // copy the preview texture to the used texture
-            tracing::debug!("Swapping");
-            res.swap(device, queue);
+            res.swap(device, queue, &texture);
         }
 
-        let extents = Extent3d::from(&self.rendered_viewport);
+        let extents = self.rendered_viewport.extents();
         let size = (extents.width, extents.height);
         if size != *res.size() {
             // resize the render resources, refreshing the texture reference
-            res.resize(device, queue, size)
+            res.resize(device, queue, size, &texture)
                 .expect("to resize render resources");
         }
         let transforms = self.rendered_viewport.transforms_from(&self.view);
@@ -292,7 +317,7 @@ impl CallbackTrait for PaintCallback {
         let res = callback_resources
             .get::<PreviewRenderResources>()
             .expect("to get render resources");
-        let res = if self.output {
+        let res = if self.tab == UITab::Render {
             &res.output
         } else {
             &res.preview

@@ -18,7 +18,7 @@ use eframe::wgpu::{
 };
 use wgpu::{ExperimentalFeatures, ShaderModule};
 
-use crate::types::{ColorParams, ComputeParams, MAX_GRADIENT_STOPS, RenderParams, Viewport};
+use crate::types::{ColorParams, ComputeParams, MAX_GRADIENT_STOPS, RenderParams};
 
 /// Contains GPU state that can be shared between all image generation
 /// contexts.
@@ -109,7 +109,7 @@ pub struct Constants {
     /// This needs to be set low enough to ensure the GPU is not
     /// busy for too long; that causes stuttering and possibly
     /// shader execution failures.
-    pub iter_batch_size: u64,
+    pub iter_batch_size: u32,
 }
 
 /// Selects a device and queue suitable for non-UI rendering.
@@ -170,7 +170,7 @@ impl SharedState {
 impl GPUData {
     /// Initializes the GPU handles for use in rendering an image.
     pub fn init(
-        viewport: &Viewport,
+        size: wgpu::Extent3d,
         max_iter: usize,
         shared: SharedState,
         label: &str,
@@ -178,10 +178,10 @@ impl GPUData {
     ) -> Self {
         let device = &shared.device;
 
-        let texture = Self::create_texture(device, viewport.into());
+        let texture = Self::create_texture(device, size);
         let final_texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let buffers = Buffers::init(device, viewport, max_iter);
+        let buffers = Buffers::init(device, size, max_iter);
         let (bind_groups, compute_pipeline_layout, color_pipeline_layout) =
             BindGroups::init(device, &buffers, &final_texture_view);
 
@@ -384,9 +384,9 @@ impl GPUData {
 
 impl Buffers {
     /// Creates all of the buffers used by the image renderer.
-    fn init(device: &Device, viewport: &Viewport, max_iter: usize) -> Self {
+    fn init(device: &Device, size: wgpu::Extent3d, max_iter: usize) -> Self {
         use BuffType::*;
-        let image_size = viewport.buffer_size();
+        let image_size = (size.width * size.height) as usize;
         Self {
             probe: Self::create_buffer::<f32>(device, max_iter * 2 * 2, HostWritable),
             delta_n: Self::create_buffer::<f32>(device, image_size * 4, ShaderOnly),

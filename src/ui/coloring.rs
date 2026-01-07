@@ -1,8 +1,8 @@
 use std::mem::discriminant;
 
 use corgi::types::{
-    Coloring, Gradient, Layer, LayerKind, Light, LightingKind, MAX_GRADIENT_STOPS, Overlays,
-    next_layer_id,
+    Coloring, Gradient, Layer, LayerKind, Light, LightingKind, MAX_GRADIENT_STOPS, Outline,
+    Overlays, next_layer_id,
 };
 use eframe::egui::collapsing_header::{CollapsingState, paint_default_icon};
 use eframe::egui::{self, CornerRadius, Event, RichText, Sense, Stroke};
@@ -317,7 +317,6 @@ impl EditUI for Layer {
     fn render_edit_ui(&mut self, _ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
         let strength_help_text = "How strongly this layer influences the end value";
         match self.kind {
-            LayerKind::None => unreachable!(),
             LayerKind::Step => {
                 input_with_label(
                     tui,
@@ -420,69 +419,92 @@ impl EditUI for Layer {
 
 impl EditUI for Overlays {
     fn render_edit_ui(&mut self, _ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
-        let mut rgba = egui::Rgba::from_rgba_unmultiplied(
-            self.iteration_outline_color[0],
-            self.iteration_outline_color[1],
-            self.iteration_outline_color[2],
-            self.iteration_outline_color[3].fract(),
-        );
-        let mut steps = self.iteration_outline_color[3] as i32;
-        tui.horizontal().add(|tui| {
-            tui.grow().label("Step Outline");
-            tui.ui_add_manual(
-                |ui| {
-                    egui::widgets::color_picker::color_edit_button_rgba(
-                        ui,
-                        &mut rgba,
-                        egui::color_picker::Alpha::BlendOrAdditive,
-                    )
-                },
-                |res, _ui| res,
-            );
-            tui.ui_add(
-                egui::DragValue::new(&mut steps)
-                    .speed(0.1)
-                    .range(1..=i32::MAX),
-            );
-        });
-        self.iteration_outline_color = rgba.to_rgba_unmultiplied();
-        if self.iteration_outline_color[3] > 0.999 {
-            self.iteration_outline_color[3] = 0.999;
+        if let Some(iteration_outline) = self.iteration_outline.as_mut() {
+            tui.horizontal().add(|tui| {
+                tui.grow().label("Step Outline");
+                tui.ui_add_manual(
+                    |ui| {
+                        egui::widgets::color_picker::color_edit_button_rgba(
+                            ui,
+                            &mut iteration_outline.color,
+                            egui::color_picker::Alpha::BlendOrAdditive,
+                        )
+                    },
+                    |res, _ui| res,
+                );
+                tui.ui_add(
+                    egui::DragValue::new(&mut iteration_outline.parameter)
+                        .speed(0.1)
+                        .range(1..=i32::MAX),
+                )
+                .on_hover_text("Step Distance");
+            });
+            if iteration_outline.color.a() == 0.0
+                || tui
+                    .horizontal()
+                    .ui_add(egui::Button::new(format!("{} Remove", icons::ICON_REMOVE)))
+                    .clicked()
+            {
+                self.iteration_outline = None;
+            }
+        } else if tui
+            .horizontal()
+            .ui_add(egui::Button::new(format!(
+                "{} Add Iteration Outline",
+                icons::ICON_ADD
+            )))
+            .clicked()
+        {
+            self.iteration_outline = Some(Outline {
+                color: egui::Rgba::WHITE,
+                parameter: 1,
+            })
         }
-        self.iteration_outline_color[3] += steps as f32;
 
-        let set_col = self.set_outline_color;
-        let mut rgba = egui::Rgba::from_rgba_unmultiplied(
-            set_col[0],
-            set_col[1],
-            set_col[2],
-            set_col[3].fract(),
-        );
-        let mut scale = set_col[3].floor() / 10.0;
-        tui.horizontal().add(|tui| {
-            tui.grow().label("Set Outline");
-            tui.ui_add_manual(
-                |ui| {
-                    egui::widgets::color_picker::color_edit_button_rgba(
-                        ui,
-                        &mut rgba,
-                        egui::color_picker::Alpha::BlendOrAdditive,
-                    )
-                },
-                |res, _ui| res,
-            );
-            tui.ui_add(
-                egui::DragValue::new(&mut scale)
-                    .speed(0.03)
-                    .range(0.1..=f32::MAX)
-                    .max_decimals(1),
-            );
-        });
-        self.set_outline_color = rgba.to_rgba_unmultiplied();
-        if self.set_outline_color[3] > 0.999 {
-            self.set_outline_color[3] = 0.999;
+        if let Some(set_outline) = self.set_outline.as_mut() {
+            let mut scale = set_outline.parameter as f32 / 10.0;
+            tui.horizontal().add(|tui| {
+                tui.grow().label("Set Outline");
+                tui.ui_add_manual(
+                    |ui| {
+                        egui::widgets::color_picker::color_edit_button_rgba(
+                            ui,
+                            &mut set_outline.color,
+                            egui::color_picker::Alpha::BlendOrAdditive,
+                        )
+                    },
+                    |res, _ui| res,
+                );
+                tui.ui_add(
+                    egui::DragValue::new(&mut scale)
+                        .speed(0.03)
+                        .range(0.1..=f32::MAX)
+                        .max_decimals(1),
+                )
+                .on_hover_text("Outline thickness");
+            });
+            set_outline.parameter = (scale * 10.0) as u32;
+            if set_outline.color.a() == 0.0
+                || tui
+                    .horizontal()
+                    .ui_add(egui::Button::new(format!("{} Remove", icons::ICON_REMOVE)))
+                    .clicked()
+            {
+                self.set_outline = None;
+            }
+        } else if tui
+            .horizontal()
+            .ui_add(egui::Button::new(format!(
+                "{} Add Set Outline",
+                icons::ICON_ADD
+            )))
+            .clicked()
+        {
+            self.set_outline = Some(Outline {
+                color: egui::Rgba::WHITE,
+                parameter: 30,
+            })
         }
-        self.set_outline_color[3] += scale * 10.0;
     }
 }
 
@@ -503,7 +525,7 @@ impl EditUI for LightingKind {
     }
 }
 
-impl EditUI for [Layer; 8] {
+impl EditUI for Vec<Layer> {
     fn render_edit_ui(&mut self, ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
         fn background(ui: &mut egui::Ui, container: &egui_taffy::TaffyContainerUi) {
             let rect = container.full_container();
@@ -536,7 +558,7 @@ impl EditUI for [Layer; 8] {
             ..current_style
         })
         .add_with_background_ui(background, |tui, _| {
-            let valid_ct = self.iter().filter(|l| l.kind != LayerKind::None).count();
+            let valid_ct = self.len();
             let mut add_layer = false;
             tui.horizontal().add(|tui| {
                 tui.style(taffy::Style {
@@ -555,12 +577,9 @@ impl EditUI for [Layer; 8] {
                 }
             });
             let mut layer_ct = 0;
-            let mut new_layers = [Layer::default(); 8];
+            let mut new_layers = vec![];
             let mut swap_first = -1;
             for (i, layer) in self.iter_mut().enumerate() {
-                if layer.kind == LayerKind::None {
-                    break;
-                }
                 let mut remove = false;
                 let mut duplicate = false;
                 let id = tui
@@ -736,11 +755,11 @@ impl EditUI for [Layer; 8] {
                     },
                 );
                 if !remove {
-                    new_layers[layer_ct] = *layer;
+                    new_layers.push(*layer);
                     layer_ct += 1;
                 }
                 if duplicate {
-                    new_layers[layer_ct] = *layer;
+                    new_layers.push(*layer);
                     new_layers[layer_ct].id = next_layer_id();
                     layer_ct += 1;
                 }
@@ -750,12 +769,12 @@ impl EditUI for [Layer; 8] {
             }
             *self = new_layers;
             if layer_ct < 8 && add_layer {
-                self[layer_ct] = Layer {
+                self.push(Layer {
                     id: next_layer_id(),
                     kind: LayerKind::Step,
                     strength: 1.0,
                     param: 0.0,
-                };
+                });
             }
         });
     }

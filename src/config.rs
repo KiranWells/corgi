@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Config {
-    pub max_shader_batch_iters: u64,
+    pub max_shader_batch_iters: u32,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

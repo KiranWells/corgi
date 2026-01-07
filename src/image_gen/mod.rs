@@ -14,7 +14,7 @@ mod probe;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use eframe::wgpu::{self, Extent3d};
 pub use gpu_setup::{Constants, GPUData, SharedState, get_device_and_queue};
@@ -22,24 +22,18 @@ use image::ImageBuffer;
 use little_exif::exif_tag::ExifTag;
 use little_exif::metadata::Metadata;
 use probe::probe;
-use tracing::debug;
 
-use crate::types::{ColorParams, ComputeParams, Image, ImageDiff, RenderParams, StatusMessage};
-
-macro_rules! time {
-    ($name:literal; $($expression:tt)*) => {{
-        let start = std::time::Instant::now();
-        let result = { $($expression)* };
-        let elapsed = start.elapsed();
-        debug!("{} done in {:?}", $name, elapsed);
-        result
-    }};
-}
+use crate::types::serde::SafeSaveLoad;
+use crate::types::{
+    ColorParams, ComputeParams, Image, ImageDiff, ImageTimings, RenderParams, RenderResult,
+    StatusMessage,
+};
 
 pub fn is_metadata_supported(path: &Path) -> bool {
     matches!(path.extension(), Some(x) if x == "jpg" || x == "jpeg" || x == "png" || x == "webp" || x == "avif")
 }
 
+#[must_use]
 pub fn render_image(
     gpu_data: &mut GPUData,
     probed_data: &mut Vec<[f32; 2]>,
@@ -47,10 +41,11 @@ pub fn render_image(
     last_image: Option<&Image>,
     cancelled: Arc<AtomicBool>,
     mut status_callback: impl FnMut(StatusMessage),
-) {
+) -> RenderResult {
     let diff = last_image
         .map(|img| image.comp(img))
         .unwrap_or(ImageDiff::full());
+    let mut timings = ImageTimings::default();
 
     // the actual image generation process
     // - resize the GPU data
@@ -60,46 +55,68 @@ pub fn render_image(
     // - run the image render
 
     if diff.rebuild {
+        let start = Instant::now();
         gpu_data.resize(
-            (image.viewport.width, image.viewport.height),
-            image.max_iter as usize,
+            (image.parameters.width, image.parameters.height),
+            image.parameters.max_iter as usize,
             image.get_flags(),
         );
+        timings.build = Instant::now() - start;
+    }
+    if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+        status_callback(StatusMessage::Progress("Cancelled".into(), 1.0));
+        return RenderResult::Unfinished;
     }
 
     if diff.reprobe {
+        let start = Instant::now();
         status_callback(StatusMessage::Progress("Probing point".into(), 0.0));
-        let julia_point = match &image.fractal_kind {
+        let julia_point = match &image.parameters.fractal_kind {
             crate::types::FractalKind::Mandelbrot => None,
             crate::types::FractalKind::Julia(pt) => Some(pt),
         };
         // probe the point
-        *probed_data = time!(
-            "Probing point";
-            probe::<f32>(&image.probe_location, image.max_iter, image.viewport.zoom, julia_point)
+        *probed_data = probe::<f32>(
+            &image.parameters.probe_location,
+            image.parameters.max_iter,
+            image.parameters.zoom,
+            julia_point,
         );
         status_callback(StatusMessage::Progress("Uploading probe".into(), 0.0));
         // update the probe buffer
-        time!("probe upload";
-            gpu_data.shared.queue.write_buffer(
-                &gpu_data.buffers.probe,
-                0,
-                bytemuck::cast_slice(&probed_data[..]),
-            );
-            gpu_data.shared.queue.submit([]);
-            let _ = gpu_data.shared.device.poll(wgpu::PollType::wait_indefinitely());
+        gpu_data.shared.queue.write_buffer(
+            &gpu_data.buffers.probe,
+            0,
+            bytemuck::cast_slice(&probed_data[..]),
         );
+        gpu_data.shared.queue.submit([]);
+        let _ = gpu_data
+            .shared
+            .device
+            .poll(wgpu::PollType::wait_indefinitely());
+        timings.probe = Instant::now() - start;
+    }
+    if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+        status_callback(StatusMessage::Progress("Cancelled".into(), 1.0));
+        return RenderResult::Unfinished;
     }
 
     if diff.recompute {
+        let start = Instant::now();
         status_callback(StatusMessage::Progress(
-            format!("Computing iteration 1 of {}", image.max_iter),
+            format!("Computing iteration 1 of {}", image.parameters.max_iter),
             0.0,
         ));
-        time!(
-            "Running compute shader";
-            run_compute_step(probed_data, image, gpu_data, cancelled, &mut status_callback)
-        );
+        if !run_compute_step(
+            probed_data,
+            image,
+            gpu_data,
+            cancelled,
+            &mut status_callback,
+        ) {
+            return RenderResult::Unfinished;
+        }
+        timings.compute = Instant::now() - start;
     }
 
     // This holds the lock until the render finishes.
@@ -107,21 +124,25 @@ pub fn render_image(
     // the color step should always complete with a low-enough time budget to
     // avoid dropped frames.
     if diff.recolor {
+        let start = Instant::now();
         status_callback(StatusMessage::Progress("Rendering Colors".into(), 0.0));
-        time!("Running image render"; run_render_step(image, gpu_data));
+        run_render_step(image, gpu_data);
+        timings.color = Instant::now() - start;
     }
+    RenderResult::Finished(timings)
 }
 
 /// Runs the compute shader on the GPU. This is the most expensive step, so the output
 /// should be cached as much as possible. This step only needs to be run if the probe
 /// location, max iteration, or image viewport has changed.
+#[must_use]
 fn run_compute_step(
     probed_data: &[[f32; 2]],
     image: &Image,
     gpu_data: &GPUData,
-    _cancelled: Arc<AtomicBool>,
+    cancelled: Arc<AtomicBool>,
     status_callback: &mut impl FnMut(StatusMessage),
-) {
+) -> bool {
     let GPUData {
         shared: SharedState { device, queue, .. },
         bind_groups,
@@ -131,23 +152,23 @@ fn run_compute_step(
         constants,
         ..
     } = gpu_data;
-    let texture_size: Extent3d = (&image.viewport).into();
+    let texture_size: Extent3d = image.extents();
 
     let (compute_pipeline, x, y, probe_len) = match image.algorithm() {
         crate::types::Algorithm::Directf32 => (
             direct_f32_pipeline,
-            image.viewport.center.x.to_f32(),
-            image.viewport.center.y.to_f32(),
-            image.max_iter as usize,
+            image.parameters.center.x.to_f32(),
+            image.parameters.center.y.to_f32(),
+            image.parameters.max_iter as usize,
         ),
         crate::types::Algorithm::Perturbedf32 => {
             let (x, y) = image
-                .viewport
-                .coords_to_px_offset(&image.probe_location.x, &image.probe_location.y);
+                .view()
+                .coords_to_px_offset(&image.parameters.probe_location);
             (
                 perturbed_f32_pipeline,
-                x as f32 / image.viewport.width as f32,
-                y as f32 / image.viewport.height as f32,
+                x as f32 / image.parameters.width as f32,
+                y as f32 / image.parameters.height as f32,
                 probed_data.len(),
             )
         }
@@ -155,7 +176,7 @@ fn run_compute_step(
 
     // Compute passes have encountered timeouts on some GPUs, so we split the compute passes into
     // multiple smaller passes.
-    for i in 0..=(image.max_iter / constants.iter_batch_size) {
+    for i in 0..=(image.parameters.max_iter / constants.iter_batch_size) {
         // Create encoder for CPU - GPU communication
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
@@ -177,7 +198,7 @@ fn run_compute_step(
         }
 
         let command_buffer = encoder.finish();
-        let julia_point = match &image.fractal_kind {
+        let julia_point = match &image.parameters.fractal_kind {
             crate::types::FractalKind::Mandelbrot => (0.0, 0.0),
             crate::types::FractalKind::Julia(pt) => (pt.x.to_f32(), pt.y.to_f32()),
         };
@@ -185,17 +206,17 @@ fn run_compute_step(
         let parameters = ComputeParams {
             width: texture_size.width,
             height: texture_size.height,
-            max_iter: image.max_iter as u32,
-            chunk_max_iter: if (i + 1) * constants.iter_batch_size > image.max_iter {
-                (image.max_iter % constants.iter_batch_size) as u32
+            max_iter: image.parameters.max_iter,
+            chunk_max_iter: if (i + 1) * constants.iter_batch_size > image.parameters.max_iter {
+                image.parameters.max_iter % constants.iter_batch_size
             } else {
-                constants.iter_batch_size as u32
+                constants.iter_batch_size
             },
             probe_len: probe_len as u32,
-            iter_offset: (i * constants.iter_batch_size) as u32,
+            iter_offset: i * constants.iter_batch_size,
             x,
             y,
-            zoom: image.viewport.zoom as f32,
+            zoom: image.parameters.zoom,
             julia_x: julia_point.0,
             julia_y: julia_point.1,
         };
@@ -212,21 +233,31 @@ fn run_compute_step(
         let si = queue.submit(Some(command_buffer));
         // This slows down render times, so we avoid it in release
         #[cfg(debug_assertions)]
-        time!("Compute step batch";
-            let _ = device.poll(wgpu::PollType::Wait { submission_index: Some(si), timeout: Some(Duration::from_secs(1)) });
-        );
+        {
+            let start = Instant::now();
+            let _ = device.poll(wgpu::PollType::Wait {
+                submission_index: Some(si),
+                timeout: Some(Duration::from_secs(1)),
+            });
+            tracing::trace!("Compute step batch took {:?}", Instant::now() - start);
+        }
         #[cfg(not(debug_assertions))]
         let _ = si;
         status_callback(StatusMessage::Progress(
             format!(
                 "Computing iteration {} of {}",
-                i * constants.iter_batch_size + parameters.chunk_max_iter as u64,
-                image.max_iter
+                i * constants.iter_batch_size + parameters.chunk_max_iter,
+                image.parameters.max_iter
             ),
-            (i * constants.iter_batch_size + parameters.chunk_max_iter as u64) as f64
-                / image.max_iter as f64,
+            (i * constants.iter_batch_size + parameters.chunk_max_iter) as f64
+                / image.parameters.max_iter as f64,
         ));
+        if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+            status_callback(StatusMessage::Progress("Cancelled".into(), 1.0));
+            return false;
+        }
     }
+    true
 }
 
 /// Runs the render shader on the GPU
@@ -266,7 +297,7 @@ fn run_render_step(image: &Image, gpu_data: &GPUData) {
     let mut encoder =
         device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-    let texture_size: Extent3d = (&image.viewport).into();
+    let texture_size: Extent3d = image.extents();
     // begin render dispatch
     {
         let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -303,8 +334,8 @@ pub fn save_to_file(
         status_callback(StatusMessage::Progress("Saving image".into(), 0.0));
         let mut img = image::DynamicImage::ImageRgba8(
             ImageBuffer::from_raw(
-                image_settings.viewport.width,
-                image_settings.viewport.height,
+                image_settings.parameters.width,
+                image_settings.parameters.height,
                 data,
             )
             .expect("image data to be properly formatted"),
@@ -320,7 +351,7 @@ pub fn save_to_file(
             // add metadata
             if is_metadata_supported(path) {
                 let mut meta = Metadata::new();
-                let serialized = serde_json::to_string(image_settings);
+                let serialized = image_settings.stringify();
                 match serialized {
                     Err(err) => {
                         tracing::error!("Failed to save image: {err}");
