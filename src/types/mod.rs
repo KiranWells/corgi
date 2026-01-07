@@ -6,6 +6,7 @@ A Collection of types used throughout the application, and their associated func
 
 mod coloring;
 mod image;
+pub mod serde;
 
 use std::path::PathBuf;
 use std::time::Duration;
