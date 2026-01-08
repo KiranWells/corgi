@@ -7,46 +7,19 @@ use serde::{Deserialize, Serialize};
 use super::{Coloring, Transform, get_precision};
 use crate::types::LayerKind;
 
-// We use a custom implementation for serde
-// of Float to get a radix of 10. This increases
-// the space it takes on disk, but that is a smaller
-// concern for this app.
-#[derive(Deserialize, Serialize)]
-#[serde(remote = "Float")]
-struct FloatParser {
-    #[serde(getter = "Float::value")]
-    value: String,
-    #[serde(getter = "Float::prec")]
-    precision: u32,
-}
-
-trait Translate {
-    fn value(&self) -> String;
-}
-
-impl Translate for Float {
-    fn value(&self) -> String {
-        self.to_string_radix(10, None)
-    }
-}
-
-impl From<FloatParser> for Float {
-    fn from(value: FloatParser) -> Self {
-        Float::parse(value.value.clone())
-            .map(|val| val.complete(value.precision))
-            .unwrap_or(Float::new(53))
-    }
-}
-
-/// A representation of the current viewed portion of the fractal,
-/// Useful to track the location and size of an image or viewport
-/// relative to others.
-#[derive(Debug, Clone)]
-pub struct View {
-    pub center: ComplexPoint,
-    pub zoom: f32,
+/// A representation of the current fractal being rendered, including
+/// the fractal location, settings, coloring, and image parameters
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ImgSpec {
+    pub location: Location,
+    pub style: Style,
+    // canvas
     pub width: u32,
     pub height: u32,
+    pub samples: u8,
+    #[serde(skip)]
+    pub optimization_level: OptLevel,
 }
 
 /// A representation of a particular location for a particular
@@ -70,38 +43,31 @@ pub struct Style {
     pub internal_coloring: Coloring,
 }
 
+/// A representation of the current viewed portion of the fractal,
+/// Useful to track the location and size of an image or viewport
+/// relative to others.
+#[derive(Debug, Clone)]
+pub struct View {
+    pub center: ComplexPoint,
+    pub zoom: f32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ImageDiff {
+    pub reprobe: bool,
+    pub recompute: bool,
+    pub recolor: bool,
+    pub rebuild: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ComplexPoint {
     #[serde(with = "FloatParser")]
     pub x: Float,
     #[serde(with = "FloatParser")]
     pub y: Float,
-}
-
-/// A representation of the current fractal being rendered, including
-/// the fractal location, settings, coloring, and image parameters
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-#[serde(default)]
-pub struct ImgSpec {
-    pub location: Location,
-    pub style: Style,
-    // canvas
-    pub width: u32,
-    pub height: u32,
-    pub samples: u8,
-    #[serde(skip)]
-    pub optimization_level: OptLevel,
-}
-
-impl ImgSpec {
-    pub fn view(&self) -> View {
-        View {
-            center: self.location.center.clone(),
-            zoom: self.location.zoom,
-            width: self.width,
-            height: self.height,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -123,14 +89,6 @@ pub enum FractalKind {
     #[default]
     Mandelbrot,
     Julia(ComplexPoint),
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct ImageDiff {
-    pub reprobe: bool,
-    pub recompute: bool,
-    pub recolor: bool,
-    pub rebuild: bool,
 }
 
 impl Default for ImgSpec {
@@ -182,18 +140,18 @@ impl Default for ComplexPoint {
     }
 }
 
-impl Style {
-    pub fn opt_default() -> Self {
-        Self {
-            external_coloring: Coloring::external_opt_default(),
-            internal_coloring: Coloring::internal_opt_default(),
-        }
-    }
-}
-
 impl ImgSpec {
     pub fn algorithm(&self) -> Algorithm {
         self.view().algorithm()
+    }
+
+    pub fn view(&self) -> View {
+        View {
+            center: self.location.center.clone(),
+            zoom: self.location.zoom,
+            width: self.width,
+            height: self.height,
+        }
     }
 
     pub fn comp(&self, other: &Self) -> ImageDiff {
@@ -292,6 +250,31 @@ impl ImgSpec {
         self.style.external_coloring.contains_kind(kind)
             || self.style.internal_coloring.contains_kind(kind)
     }
+
+    pub fn extents(&self) -> Extent3d {
+        Extent3d {
+            width: (self.width as f64) as u32,
+            height: (self.height as f64) as u32,
+            depth_or_array_layers: 1,
+        }
+    }
+}
+
+impl Style {
+    pub fn opt_default() -> Self {
+        Self {
+            external_coloring: Coloring::external_opt_default(),
+            internal_coloring: Coloring::internal_opt_default(),
+        }
+    }
+}
+
+impl Location {
+    pub fn update_prec(&mut self) {
+        let prec = get_precision(self.zoom);
+        self.center.x = Float::with_val(prec, self.center.x.clone());
+        self.center.y = Float::with_val(prec, self.center.y.clone());
+    }
 }
 
 impl View {
@@ -384,27 +367,7 @@ impl View {
     pub fn buffer_size(&self) -> usize {
         (self.width as f64) as usize * (self.height as f64) as usize
     }
-}
 
-impl Location {
-    pub fn update_prec(&mut self) {
-        let prec = get_precision(self.zoom);
-        self.center.x = Float::with_val(prec, self.center.x.clone());
-        self.center.y = Float::with_val(prec, self.center.y.clone());
-    }
-}
-
-impl View {
-    pub fn extents(&self) -> Extent3d {
-        Extent3d {
-            width: (self.width as f64) as u32,
-            height: (self.height as f64) as u32,
-            depth_or_array_layers: 1,
-        }
-    }
-}
-
-impl ImgSpec {
     pub fn extents(&self) -> Extent3d {
         Extent3d {
             width: (self.width as f64) as u32,
@@ -422,5 +385,36 @@ impl ImageDiff {
             recompute: true,
             recolor: true,
         }
+    }
+}
+
+// We use a custom implementation for serde
+// of Float to get a radix of 10. This increases
+// the space it takes on disk, but that is a smaller
+// concern for this app.
+#[derive(Deserialize, Serialize)]
+#[serde(remote = "Float")]
+struct FloatParser {
+    #[serde(getter = "Float::value")]
+    value: String,
+    #[serde(getter = "Float::prec")]
+    precision: u32,
+}
+
+trait Translate {
+    fn value(&self) -> String;
+}
+
+impl Translate for Float {
+    fn value(&self) -> String {
+        self.to_string_radix(10, None)
+    }
+}
+
+impl From<FloatParser> for Float {
+    fn from(value: FloatParser) -> Self {
+        Float::parse(value.value.clone())
+            .map(|val| val.complete(value.precision))
+            .unwrap_or(Float::new(53))
     }
 }
