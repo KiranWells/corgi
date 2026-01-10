@@ -689,14 +689,15 @@ impl CorgiUI {
         view_image: &ImgSpec,
     ) {
         let response = ui.response();
-        // get scroll and drag inputs to change the viewport
-        let (mut scroll, pixel_scale) = ui.input(|i| (i.smooth_scroll_delta, i.pixels_per_point));
+        // get inputs to change the viewport
+        let (mut scroll, pixel_scale, mouse) =
+            ui.input(|i| (i.smooth_scroll_delta, i.pixels_per_point, i.pointer.clone()));
         if !pointer_in_rect {
             scroll = Vec2::ZERO;
         }
         let drag = response.drag_delta();
 
-        // scroll
+        // calculate deltas
         let precision = get_precision(view_image.location.zoom);
         let mut scale = Float::with_val(precision, 2.0);
         scale.pow_assign(-view_image.location.zoom);
@@ -706,27 +707,69 @@ impl CorgiUI {
             UITab::Style => self.style_state.scaling,
             UITab::Render => 1.0,
         };
-        let x_offset = -(drag.x as f64 / view_image.width as f64
-                            * aspect_scale.x as f64
-                            * pixel_scale as f64
-                            * viewport_scaling
-                            * 1.715) // TODO: why this value? and does this work on other screens?
-                            * scale.clone();
-        let y_offset = (drag.y as f64 / view_image.height as f64
-            * aspect_scale.y as f64
-            * pixel_scale as f64
-            * viewport_scaling
-            * 1.715)
-            * scale;
+        let drag_scaling = pixel_scale as f64 * viewport_scaling * 1.715; // TODO: why this value? and does this work on other screens?
+        let x_offset =
+            -(drag.x as f64 / view_image.width as f64 * aspect_scale.x as f64 * drag_scaling)
+                * scale.clone();
+        let y_offset =
+            (drag.y as f64 / view_image.height as f64 * aspect_scale.y as f64 * drag_scaling)
+                * scale;
+        let scroll_zoom = scroll.y * pixel_scale * 0.005;
+        let drag_zoom = (drag.x + drag.y) * pixel_scale * 0.01;
+
+        // apply deltas to relevant view or location
         if self.tab == UITab::Render {
-            self.current_view.center.x += x_offset;
-            self.current_view.center.y += y_offset;
-            self.current_view.zoom += scroll.y * pixel_scale * 0.005;
+            self.current_view.zoom += scroll_zoom;
+            if scroll.y != 0.0
+                && let Some(pos) = mouse.latest_pos()
+            {
+                let unzoomed_pos =
+                    view_image
+                        .view()
+                        .get_real_coords(pos.x as f64, pos.y as f64, viewport_scaling);
+                let zoomed_pos =
+                    self.current_view
+                        .get_real_coords(pos.x as f64, pos.y as f64, viewport_scaling);
+                self.current_view.center.x += unzoomed_pos.0 - zoomed_pos.0;
+                self.current_view.center.y -= unzoomed_pos.1 - zoomed_pos.1;
+            }
+            if mouse.primary_down() {
+                self.current_view.center.x += x_offset;
+                self.current_view.center.y += y_offset;
+            }
+            if mouse.secondary_down() {
+                // rotate
+            }
+            if mouse.middle_down() {
+                self.current_view.zoom += drag_zoom;
+            }
             self.root_spec.location.update_prec();
         } else {
-            self.root_spec.location.center.x += x_offset;
-            self.root_spec.location.center.y += y_offset;
-            self.root_spec.location.zoom += scroll.y * pixel_scale * 0.005;
+            self.root_spec.location.zoom += scroll_zoom;
+            if scroll.y != 0.0
+                && let Some(pos) = mouse.latest_pos()
+            {
+                let unzoomed_pos =
+                    view_image
+                        .view()
+                        .get_real_coords(pos.x as f64, pos.y as f64, viewport_scaling);
+                let new_view = self.image().view();
+                let zoomed_pos =
+                    new_view.get_real_coords(pos.x as f64, pos.y as f64, viewport_scaling);
+                self.root_spec.location.center.x += unzoomed_pos.0 - zoomed_pos.0;
+                self.root_spec.location.center.y -= unzoomed_pos.1 - zoomed_pos.1;
+            }
+            // including "none" down to support touch
+            if mouse.primary_down() || !mouse.any_down() {
+                self.root_spec.location.center.x += x_offset;
+                self.root_spec.location.center.y += y_offset;
+            }
+            if mouse.secondary_down() {
+                // rotate
+            }
+            if mouse.middle_down() {
+                self.root_spec.location.zoom += drag_zoom;
+            }
             self.root_spec.location.update_prec();
             self.root_spec.update_probe();
         }
