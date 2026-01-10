@@ -45,30 +45,43 @@ pub trait EditUI {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum UITab {
     Explore,
-    Color,
+    Style,
     Render,
+}
+
+#[derive(Debug)]
+struct ExploreTabState {
+    rendered_view: View,
+    style: ImgStyle,
+    scaling: f64,
+}
+#[derive(Debug)]
+struct StyleTabState {
+    rendered_view: View,
+    scaling: f64,
+}
+#[derive(Debug)]
+struct RenderTabState {
+    rendered_view: View,
+    save_path: PathBuf,
 }
 
 /// The main UI state struct.
 #[derive(Debug)]
 pub struct CorgiUI {
-    pub output_settings: ImgSpec,
-    explore_settings: ImgSpec,
-    viewport_scaling: f64,
-    style_scaling: f64,
-    pub rendered_explore_viewport: View,
-    pub rendered_style_viewport: View,
-    pub rendered_output_viewport: View,
-    pub output_preview_viewport: View,
-    setting_probe: bool,
     tab: UITab,
+    explore_state: ExploreTabState,
+    style_state: StyleTabState,
+    render_state: RenderTabState,
+    root_spec: ImgSpec,
+    current_view: View,
+    setting_probe: bool,
     show_camera: bool,
+    show_settings: bool,
+    rendering_output: bool,
     pub swap: bool,
     pub status: Status,
     command_channel: mpsc::Sender<ImageGenCommand>,
-    output_path: PathBuf,
-    show_settings: bool,
-    pub rendering_output: bool,
 }
 
 impl CorgiUI {
@@ -79,29 +92,32 @@ impl CorgiUI {
         command_channel: mpsc::Sender<ImageGenCommand>,
     ) -> Self {
         Self {
-            status: Status::default(),
-            rendered_explore_viewport: image.view(),
-            rendered_style_viewport: image.view(),
-            rendered_output_viewport: image.view(),
-            output_preview_viewport: image.view(),
-            viewport_scaling: 2.0,
-            style_scaling: 1.0,
-            explore_settings: ImgSpec {
+            tab: UITab::Explore,
+            explore_state: ExploreTabState {
+                rendered_view: image.view(),
                 style: ImgStyle::opt_default(),
-                ..image.clone()
+                scaling: 0.5,
             },
-            output_settings: ImgSpec {
+            style_state: StyleTabState {
+                rendered_view: image.view(),
+                scaling: 1.0,
+            },
+            render_state: RenderTabState {
+                rendered_view: image.view(),
+                save_path: context.cache().previous_paths.image.clone(),
+            },
+            current_view: image.view(),
+            root_spec: ImgSpec {
                 optimization_level: OptLevel::AccuracyOptimized,
                 ..image
             },
             show_camera: false,
             setting_probe: false,
             swap: false,
-            command_channel,
-            tab: UITab::Explore,
-            output_path: context.cache().previous_paths.image.clone(),
             show_settings: false,
             rendering_output: false,
+            status: Status::default(),
+            command_channel,
         }
     }
 
@@ -138,7 +154,7 @@ impl CorgiUI {
                     );
                     ui.selectable_value(
                         &mut self.tab,
-                        UITab::Color,
+                        UITab::Style,
                         format!("{} Style", icons::ICON_STYLE),
                     );
                     ui.selectable_value(
@@ -169,15 +185,15 @@ impl CorgiUI {
                         })
                         .show(|tui| match self.tab {
                             UITab::Explore => self.explore_tab(tui),
-                            UITab::Color => {
+                            UITab::Style => {
                                 section(tui, "External", true, |tui| {
-                                    self.output_settings
+                                    self.root_spec
                                         .style
                                         .external_coloring
                                         .render_edit_ui(ctx, tui);
                                 });
                                 section(tui, "Internal", false, |tui| {
-                                    self.output_settings
+                                    self.root_spec
                                         .style
                                         .internal_coloring
                                         .render_edit_ui(ctx, tui);
@@ -189,19 +205,19 @@ impl CorgiUI {
                                         tui,
                                         "Image width",
                                         None,
-                                        egui::DragValue::new(&mut self.output_settings.width)
-                                            .speed(10.0),
+                                        egui::DragValue::new(&mut self.root_spec.width).speed(10.0),
                                     );
                                     input_with_label(
                                         tui,
                                         "Image height",
                                         None,
-                                        egui::DragValue::new(&mut self.output_settings.height)
+                                        egui::DragValue::new(&mut self.root_spec.height)
                                             .speed(10.0),
                                     );
                                     tui.horizontal().add(|tui| {
                                         let mut str_path = self
-                                            .output_path
+                                            .render_state
+                                            .save_path
                                             .to_str()
                                             .unwrap_or("Invalid Path")
                                             .to_string();
@@ -240,17 +256,17 @@ impl CorgiUI {
                                         {
                                             str_path = str_path.replacen("~", home_dir, 1);
                                         }
-                                        self.output_path = str_path.into();
+                                        self.render_state.save_path = str_path.into();
 
                                         if tui
                                             .ui_add(Button::new(icons::ICON_FOLDER_OPEN))
                                             .clicked()
                                             && let Some(path) = rfd::FileDialog::new()
-                                                .set_directory(&self.output_path)
+                                                .set_directory(&self.render_state.save_path)
                                                 .pick_folder()
                                         {
                                             context.cache_mut().previous_paths.image = path.clone();
-                                            self.output_path = path;
+                                            self.render_state.save_path = path;
                                         }
                                     });
                                 });
@@ -270,7 +286,7 @@ impl CorgiUI {
                                 .add(|tui| {
                                     if !self.rendering_output {
                                         if tui.ui_add(Button::new("Render")).clicked() {
-                                            let image = self.output_settings.clone();
+                                            let image = self.root_spec.clone();
                                             let _ =
                                                 self.command_channel.send(ImageGenCommand::Render(
                                                     RendererId::Render,
@@ -284,7 +300,7 @@ impl CorgiUI {
                                     }
                                     if tui.ui_add(Button::new("Save to file")).clicked()
                                         && let Some(path) = rfd::FileDialog::new()
-                                            .set_directory(&self.output_path)
+                                            .set_directory(&self.render_state.save_path)
                                             .add_filter(
                                                 "image with metadata",
                                                 &["avif", "jpg", "jpeg", "webp", "png"],
@@ -389,7 +405,7 @@ impl CorgiUI {
                     context.cache_mut().previous_paths.settings = dir.to_owned();
                 }
                 // write to file
-                match self.output_settings.save(&path) {
+                match self.root_spec.save(&path) {
                     Err(err) => {
                         tracing::error!("Failed to save image settings: {err:?}");
                         self.status.message = format!("Failed to save image settings: {err:?}")
@@ -411,7 +427,7 @@ impl CorgiUI {
                 }
                 match ImgSpec::load(&path) {
                     Ok(image) => {
-                        self.output_settings = image;
+                        self.root_spec = image;
                     }
                     Err(err) => {
                         tracing::error!("Failed to load image settings `{path:?}`: {err}");
@@ -427,40 +443,29 @@ impl CorgiUI {
 
     /// Get the image settings
     pub fn image(&self) -> ImgSpec {
-        let mut active_image = self.output_settings.clone();
+        let mut active_image = self.root_spec.clone();
         match self.tab {
             UITab::Explore => {
-                active_image.style = self.explore_settings.style.clone();
-                active_image.location.zoom -= self
-                    .explore_settings
-                    .view()
-                    .zoom_offset_from(&active_image.view())
-                    + 0.1;
-                active_image.width =
-                    (self.explore_settings.width as f64 / self.viewport_scaling) as u32;
-                active_image.height =
-                    (self.explore_settings.height as f64 / self.viewport_scaling) as u32;
+                active_image.style = self.explore_state.style.clone();
+                active_image.width = self.current_view.width;
+                active_image.height = self.current_view.height;
+                active_image.location.zoom -=
+                    self.current_view.zoom_offset_from(&self.root_spec.view()) + 0.1;
+                active_image.scale(self.explore_state.scaling);
                 active_image.optimization_level = OptLevel::PerformanceOptimized;
                 active_image
             }
-            UITab::Color => {
-                active_image.location.zoom -= self
-                    .explore_settings
-                    .view()
-                    .zoom_offset_from(&active_image.view())
-                    + 0.1;
-                active_image.width =
-                    (self.explore_settings.width as f64 / self.style_scaling) as u32;
-                active_image.height =
-                    (self.explore_settings.height as f64 / self.style_scaling) as u32;
+            UITab::Style => {
+                active_image.width = self.current_view.width;
+                active_image.height = self.current_view.height;
+                active_image.location.zoom -=
+                    self.current_view.zoom_offset_from(&self.root_spec.view()) + 0.1;
+                active_image.scale(self.style_state.scaling);
                 active_image.optimization_level = OptLevel::CacheOptimized;
                 active_image
             }
             UITab::Render => {
-                active_image.location.zoom = self.output_preview_viewport.zoom;
-                active_image.location.center = self.output_preview_viewport.center.clone();
-                active_image.width = self.output_preview_viewport.width;
-                active_image.height = self.output_preview_viewport.height;
+                active_image.set_view(self.current_view.clone());
                 active_image
             }
         }
@@ -475,7 +480,7 @@ impl CorgiUI {
         Ok(self.command_channel.send(ImageGenCommand::Render(
             match self.tab {
                 UITab::Explore => RendererId::Explore,
-                UITab::Color => RendererId::Style,
+                UITab::Style => RendererId::Style,
                 UITab::Render => unreachable!(),
             },
             Box::new(self.image()),
@@ -503,27 +508,26 @@ impl CorgiUI {
                 tui,
                 "Fractal Mode",
                 Some("Which fractal algorithm to use. Switching from Mandelbrot to Julia will set the Julia parameter to the current view center."),
-                &mut self.explore_settings.location.fractal_kind,
+                &mut self.root_spec.location.fractal_kind,
                 vec![
                     corgi::types::FractalKind::Mandelbrot,
                     corgi::types::FractalKind::Julia(img.location.center.clone()),
                 ],
             );
-            match &mut self.explore_settings.location.fractal_kind {
+            match &mut self.root_spec.location.fractal_kind {
                 corgi::types::FractalKind::Mandelbrot => {}
                 corgi::types::FractalKind::Julia(pt) => {
                     point_edit(tui, "Julia parameter", Some("The C value used in the Julia equation. picking values from interesting locations in the Mandelbrot set tend to be interesting in the Julia Set."), get_precision(img.location.zoom), pt);
                 }
             }
-            self.output_settings.location.fractal_kind = self.explore_settings.location.fractal_kind.clone();
             input_with_label(
                 tui,
                 "Preview Scaling",
-                Some("Divides the resolution of the preview image to improve performance."),
-                egui::DragValue::new(&mut self.viewport_scaling)
+                Some("Scales the resolution of the preview image to improve performance."),
+                egui::DragValue::new(&mut self.explore_state.scaling)
                     .speed(0.01)
-                    .range(1..=8)
-                    .max_decimals(0)
+                    .range(0.1..=1.0)
+                    .max_decimals(2)
                     .update_while_editing(false),
             );
         });
@@ -533,7 +537,7 @@ impl CorgiUI {
                 "Image Center",
                 Some("The location of the center of the image in the complex plane."),
                 get_precision(img.location.zoom),
-                &mut self.output_settings.location.center,
+                &mut self.root_spec.location.center,
             );
             input_with_label(
                 tui,
@@ -541,7 +545,7 @@ impl CorgiUI {
                 Some(
                     "Zoom level of the camera. Scales the range of the viewport by 2 raised to the negative of the zoom.",
                 ),
-                egui::DragValue::new(&mut self.output_settings.location.zoom)
+                egui::DragValue::new(&mut self.root_spec.location.zoom)
                     .speed(0.03)
                     .update_while_editing(false),
             );
@@ -551,7 +555,7 @@ impl CorgiUI {
                 Some(
                     "The maximum number of iterations to calculate before assuming a point is inside the set. Not all points will run this many iterations, some will quit early.",
                 ),
-                egui::DragValue::new(&mut self.output_settings.location.max_iter)
+                egui::DragValue::new(&mut self.root_spec.location.max_iter)
                     .speed(100.0)
                     .range(100..=u32::MAX)
                     .update_while_editing(false),
@@ -564,7 +568,7 @@ impl CorgiUI {
                         "The reference location to use when calculating the fractal using perturbation-based formulas.",
                     ),
                     get_precision(img.location.zoom),
-                    &mut self.output_settings.location.probe_location,
+                    &mut self.root_spec.location.probe_location,
                 );
                 tui.ui_add(Button::new(format!(
                     "{} Pick new probe point",
@@ -580,13 +584,13 @@ impl CorgiUI {
                 tui,
                 "Image width",
                 None,
-                egui::DragValue::new(&mut self.output_settings.width).speed(10.0),
+                egui::DragValue::new(&mut self.root_spec.width).speed(10.0),
             );
             input_with_label(
                 tui,
                 "Image height",
                 None,
-                egui::DragValue::new(&mut self.output_settings.height).speed(10.0),
+                egui::DragValue::new(&mut self.root_spec.height).speed(10.0),
             );
         });
     }
@@ -623,19 +627,17 @@ impl CorgiUI {
                         let (x, y) = view_image.view().get_real_coords(
                             (pos.x) as f64,
                             (size.y - pos.y) as f64,
-                            self.viewport_scaling,
+                            self.explore_state.scaling,
                         );
-                        self.output_settings.location.probe_location = ComplexPoint { x, y };
+                        self.root_spec.location.probe_location = ComplexPoint { x, y };
                         self.setting_probe = false;
                     }
                 } else {
                     self.handle_viewport_input(ui, pointer_in_rect, &view_image);
                 }
 
-                self.explore_settings.width = size.x as u32;
-                self.explore_settings.height = size.y as u32;
-                self.output_preview_viewport.width = size.x as u32;
-                self.output_preview_viewport.height = size.y as u32;
+                self.current_view.width = size.x as u32;
+                self.current_view.height = size.y as u32;
 
                 // render texture and camera overlay
                 let view_image = self.image();
@@ -643,27 +645,23 @@ impl CorgiUI {
                     .scale_from_center2(egui::Vec2::splat(1.0) / view_image.view().aspect_scale());
                 let (x, y) = view_image
                     .view()
-                    .coords_to_px_offset(&self.output_settings.location.center);
+                    .coords_to_px_offset(&self.root_spec.location.center);
                 render_rect = render_rect.translate(Vec2::new(
-                    (x / self.viewport_scaling) as f32,
-                    (-y / self.viewport_scaling) as f32,
+                    (x / self.explore_state.scaling) as f32,
+                    (-y / self.explore_state.scaling) as f32,
                 ));
                 render_rect = render_rect.scale_from_center(f32::powf(
                     2.0,
-                    -(self.output_settings.location.zoom - view_image.location.zoom),
+                    -(self.root_spec.location.zoom - view_image.location.zoom),
                 ));
-                render_rect =
-                    render_rect.scale_from_center2(self.output_settings.view().aspect_scale());
+                render_rect = render_rect.scale_from_center2(self.root_spec.view().aspect_scale());
                 let cb = PaintCallback {
                     rendered_viewport: match self.tab {
-                        UITab::Render => self.rendered_output_viewport.clone(),
-                        UITab::Explore => self.rendered_explore_viewport.clone(),
-                        UITab::Color => self.rendered_style_viewport.clone(),
+                        UITab::Render => self.render_state.rendered_view.clone(),
+                        UITab::Explore => self.explore_state.rendered_view.clone(),
+                        UITab::Style => self.style_state.rendered_view.clone(),
                     },
-                    view: match self.tab {
-                        UITab::Explore | UITab::Color => view_image.view(),
-                        UITab::Render => self.output_preview_viewport.clone(),
-                    },
+                    view: view_image.view(),
                     swap: self.swap,
                     tab: self.tab,
                 };
@@ -703,33 +701,51 @@ impl CorgiUI {
         let mut scale = Float::with_val(precision, 2.0);
         scale.pow_assign(-view_image.location.zoom);
         let aspect_scale = view_image.view().aspect_scale();
-        let viewport_scaling = if self.tab == UITab::Explore {
-            self.viewport_scaling
-        } else {
-            1.0
+        let viewport_scaling = match self.tab {
+            UITab::Explore => self.explore_state.scaling,
+            UITab::Style => self.style_state.scaling,
+            UITab::Render => 1.0,
         };
         let x_offset = -(drag.x as f64 / view_image.width as f64
                             * aspect_scale.x as f64
                             * pixel_scale as f64
-                            / viewport_scaling
+                            * viewport_scaling
                             * 1.715) // TODO: why this value? and does this work on other screens?
                             * scale.clone();
-        let y_offset =
-            (drag.y as f64 / view_image.height as f64 * aspect_scale.y as f64 * pixel_scale as f64
-                / viewport_scaling
-                * 1.715)
-                * scale;
+        let y_offset = (drag.y as f64 / view_image.height as f64
+            * aspect_scale.y as f64
+            * pixel_scale as f64
+            * viewport_scaling
+            * 1.715)
+            * scale;
         if self.tab == UITab::Render {
-            self.output_preview_viewport.center.x += x_offset;
-            self.output_preview_viewport.center.y += y_offset;
-            self.output_preview_viewport.zoom += scroll.y * pixel_scale * 0.005;
-            self.output_settings.location.update_prec();
+            self.current_view.center.x += x_offset;
+            self.current_view.center.y += y_offset;
+            self.current_view.zoom += scroll.y * pixel_scale * 0.005;
+            self.root_spec.location.update_prec();
         } else {
-            self.output_settings.location.center.x += x_offset;
-            self.output_settings.location.center.y += y_offset;
-            self.output_settings.location.zoom += scroll.y * pixel_scale * 0.005;
-            self.output_settings.location.update_prec();
-            self.output_settings.update_probe();
+            self.root_spec.location.center.x += x_offset;
+            self.root_spec.location.center.y += y_offset;
+            self.root_spec.location.zoom += scroll.y * pixel_scale * 0.005;
+            self.root_spec.location.update_prec();
+            self.root_spec.update_probe();
+        }
+    }
+
+    pub fn update_rendered_view(&mut self, id: RendererId, viewport: View) {
+        match id {
+            corgi::types::RendererId::Explore => {
+                self.explore_state.rendered_view = viewport;
+            }
+            corgi::types::RendererId::Style => {
+                self.style_state.rendered_view = viewport;
+            }
+            corgi::types::RendererId::Render => {
+                self.render_state.rendered_view = viewport.clone();
+                self.current_view.zoom_to_fit(&viewport);
+                self.current_view.center = viewport.center;
+                self.rendering_output = false;
+            }
         }
     }
 }

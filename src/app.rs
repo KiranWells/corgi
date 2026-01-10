@@ -196,24 +196,7 @@ impl eframe::App for CorgiApp {
                     self.ui_state.status.progress = None;
                     self.ui_state.swap = true;
                     self.debouncer.update_timings(&timings);
-                    match id {
-                        corgi::types::RendererId::Explore => {
-                            self.ui_state.rendered_explore_viewport = viewport;
-                        }
-                        corgi::types::RendererId::Style => {
-                            self.ui_state.rendered_style_viewport = viewport;
-                        }
-                        corgi::types::RendererId::Render => {
-                            self.ui_state.rendered_output_viewport = viewport.clone();
-                            self.ui_state.output_preview_viewport.zoom = viewport.zoom
-                                - self
-                                    .ui_state
-                                    .output_preview_viewport
-                                    .zoom_offset_from(&viewport);
-                            self.ui_state.output_preview_viewport.center = viewport.center;
-                            self.ui_state.rendering_output = false;
-                        }
-                    }
+                    self.ui_state.update_rendered_view(id, viewport);
                 }
             }
         }

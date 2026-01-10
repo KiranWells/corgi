@@ -9,8 +9,7 @@ use crate::types::LayerKind;
 
 /// A representation of the current fractal being rendered, including
 /// the fractal location, settings, coloring, and image parameters
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-#[serde(default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ImgSpec {
     pub location: Location,
     pub style: Style,
@@ -18,13 +17,12 @@ pub struct ImgSpec {
     pub width: u32,
     pub height: u32,
     pub samples: u8,
-    #[serde(skip)]
     pub optimization_level: OptLevel,
 }
 
 /// A representation of a particular location for a particular
 /// fractal, and the associated state necessary to see that location.
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Location {
     // fractal parameters
     pub fractal_kind: FractalKind,
@@ -37,7 +35,7 @@ pub struct Location {
 }
 
 /// Describes how to turn the various fractal measurements into a visible color
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Style {
     pub external_coloring: Coloring,
     pub internal_coloring: Coloring,
@@ -152,6 +150,18 @@ impl ImgSpec {
             width: self.width,
             height: self.height,
         }
+    }
+
+    pub fn set_view(&mut self, view: View) {
+        self.location.center = view.center;
+        self.location.zoom = view.zoom;
+        self.width = view.width;
+        self.height = view.height;
+    }
+
+    pub fn scale(&mut self, scale: f64) {
+        self.width = (self.width as f64 * scale) as u32;
+        self.height = (self.height as f64 * scale) as u32;
     }
 
     pub fn comp(&self, other: &Self) -> ImageDiff {
@@ -297,6 +307,10 @@ impl View {
         }
     }
 
+    pub fn zoom_to_fit(&mut self, other: &Self) {
+        self.zoom = other.zoom - self.zoom_offset_from(other) - 0.1;
+    }
+
     pub fn zoom_offset_from(&self, other: &Self) -> f32 {
         let aspect = self.aspect_ratio() as f32;
         let other_aspect = other.aspect_ratio() as f32;
@@ -335,9 +349,9 @@ impl View {
         scale.pow_assign(-self.zoom);
         let aspect_scale = self.aspect_scale();
 
-        let r = ((x / self.width as f64 / scaling) * 2.0 - 1.0) * scale.clone() * aspect_scale.x
+        let r = ((x / self.width as f64 * scaling) * 2.0 - 1.0) * scale.clone() * aspect_scale.x
             + Float::with_val(precision, &self.center.x);
-        let i = ((y / self.height as f64 / scaling) * 2.0 - 1.0) * scale.clone() * aspect_scale.y
+        let i = ((y / self.height as f64 * scaling) * 2.0 - 1.0) * scale.clone() * aspect_scale.y
             + Float::with_val(precision, &self.center.y);
         (r, i)
     }

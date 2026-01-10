@@ -282,7 +282,7 @@ impl CallbackTrait for PaintCallback {
             .expect("to get render resources");
         let texture = match self.tab {
             UITab::Explore => res.explore_texture.read(),
-            UITab::Color => res.style_texture.read(),
+            UITab::Style => res.style_texture.read(),
             UITab::Render => res.output_texture.read(),
         };
         let res = if self.tab == UITab::Render {
