@@ -1,4 +1,4 @@
-const PACKAGES: &[&str] = &["color", "direct_32", "perturbed_32"];
+const PACKAGES: &[&str] = &["color", "direct_32", "perturbed_32", "preview"];
 
 fn main() {
     println!("cargo::rerun-if-changed=build.rs");

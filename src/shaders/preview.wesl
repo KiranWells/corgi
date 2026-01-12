@@ -1,7 +1,10 @@
+import super::utils::rotation_matrix;
+
 struct Uniforms {
     angle: f32,
     _padding: f32,
-    scale: vec2<f32>,
+    prescale: vec2<f32>,
+    postscale: vec2<f32>,
     offset: vec2<f32>,
 }
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -34,7 +37,13 @@ fn vs_main(
         case 3u: {vertex = vec2<f32>(1., 1.);}
         default: {vertex = vec2<f32>(0., 0.);}
     }
-    out.clip_position = vec4<f32>((vertex + uniforms.offset) * uniforms.scale, 0.5, 1.0);
+    out.clip_position = vec4<f32>(
+        vertex
+            * uniforms.prescale
+            * rotation_matrix(uniforms.angle)
+            * uniforms.postscale
+            + uniforms.offset,
+        0.5, 1.0);
     switch (in_vertex_index) {
         case 0u: {vertex = vec2<f32>(0., 0.);}
         case 1u: {vertex = vec2<f32>(0., 1.);}

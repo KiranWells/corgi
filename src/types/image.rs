@@ -1,11 +1,11 @@
-use eframe::egui::Vec2;
+use eframe::egui::{Pos2, Vec2};
 use eframe::wgpu::Extent3d;
 use rug::Float;
 use rug::ops::{CompleteRound, PowAssign};
 use serde::{Deserialize, Serialize};
 
 use super::{Coloring, Transform, get_precision};
-use crate::types::LayerKind;
+use crate::types::{LayerKind, Rotate};
 
 /// A representation of the current fractal being rendered, including
 /// the fractal location, settings, coloring, and image parameters
@@ -29,6 +29,8 @@ pub struct Location {
     // viewport
     pub center: ComplexPoint,
     pub zoom: f32,
+    /// relative to positive x (real), in radians
+    pub angle: f32,
     pub max_iter: u32,
     // internal rendering details
     pub probe_location: ComplexPoint,
@@ -48,6 +50,7 @@ pub struct Style {
 pub struct View {
     pub center: ComplexPoint,
     pub zoom: f32,
+    pub angle: f32,
     pub width: u32,
     pub height: u32,
 }
@@ -107,6 +110,7 @@ impl Default for Location {
         Location {
             fractal_kind: FractalKind::Mandelbrot,
             zoom: -1.0,
+            angle: 0.0,
             max_iter: 10000,
             center: ComplexPoint {
                 x: Float::with_val(53, -0.5),
@@ -147,21 +151,27 @@ impl ImgSpec {
         View {
             center: self.location.center.clone(),
             zoom: self.location.zoom,
+            angle: self.location.angle,
             width: self.width,
             height: self.height,
         }
     }
 
+    pub fn size(&self) -> Vec2 {
+        Vec2::new(self.width as f32, self.height as f32)
+    }
+
     pub fn set_view(&mut self, view: View) {
         self.location.center = view.center;
         self.location.zoom = view.zoom;
+        self.location.angle = view.angle;
         self.width = view.width;
         self.height = view.height;
     }
 
-    pub fn scale(&mut self, scale: f64) {
-        self.width = (self.width as f64 * scale) as u32;
-        self.height = (self.height as f64 * scale) as u32;
+    pub fn scale(&mut self, scale: f32) {
+        self.width = (self.width as f32 * scale) as u32;
+        self.height = (self.height as f32 * scale) as u32;
     }
 
     pub fn comp(&self, other: &Self) -> ImageDiff {
@@ -198,12 +208,9 @@ impl ImgSpec {
     pub fn update_probe(&mut self) {
         let mut relative_pos = self
             .view()
-            .coords_to_px_offset(&self.location.probe_location);
-        relative_pos = (
-            relative_pos.0 / self.width as f64,
-            relative_pos.1 / self.height as f64,
-        );
-        if relative_pos.0.abs() > 10.0 || relative_pos.1.abs() > 10.0 {
+            .complex_to_px_delta(&self.location.probe_location);
+        relative_pos = relative_pos / self.size();
+        if relative_pos.x.abs() > 10.0 || relative_pos.y.abs() > 10.0 {
             // reset probe
             self.location.probe_location = self.location.center.clone();
         }
@@ -291,19 +298,15 @@ impl View {
     /// Derives the transforms from another viewport to this one
     pub fn transforms_from(&self, other: &Self) -> Transform {
         let scale = f32::powf(2.0, -(self.zoom - other.zoom));
-        let mut this_scale = Float::with_val(get_precision(self.zoom), 2.0);
-        this_scale.pow_assign(-self.zoom);
         let self_aspect = self.aspect_scale();
-        let aspect_scale = self_aspect / other.aspect_scale();
-        let offset: [Float; 2] = [
-            (self.center.x.clone() - other.center.x.clone()) / this_scale.clone() / self_aspect.x,
-            (self.center.y.clone() - other.center.y.clone()) / this_scale / self_aspect.y,
-        ];
+        let aspect_scale = Vec2::splat(1.0) / other.aspect_scale();
+        let offset = other.complex_to_px_delta(&self.center) / other.size() * 2.0;
         Transform {
-            angle: 0.0,
+            angle: self.angle - other.angle,
             _padding: 0.0,
-            scale: [scale * aspect_scale.x, scale * aspect_scale.y],
-            offset: [offset[0].to_f32(), offset[1].to_f32()],
+            prescale: [self_aspect.x, self_aspect.y],
+            postscale: [scale * aspect_scale.x, scale * aspect_scale.y],
+            offset: (offset).into(),
         }
     }
 
@@ -342,33 +345,53 @@ impl View {
         }
     }
 
-    /// Gets the fractal coordinates of a pixel from viewport coordinates
-    pub fn get_real_coords(&self, x: f64, y: f64, scaling: f64) -> (Float, Float) {
-        let precision = get_precision(self.zoom);
-        let mut scale = Float::with_val(precision, 2.0);
+    pub fn scale(&self) -> Float {
+        let mut scale = Float::with_val(get_precision(self.zoom), 2.0);
         scale.pow_assign(-self.zoom);
-        let aspect_scale = self.aspect_scale();
+        scale
+    }
 
-        let r = ((x / self.width as f64 * scaling) * 2.0 - 1.0) * scale.clone() * aspect_scale.x
-            + Float::with_val(precision, &self.center.x);
-        let i = ((y / self.height as f64 * scaling) * 2.0 - 1.0) * scale.clone() * aspect_scale.y
-            + Float::with_val(precision, &self.center.y);
-        (r, i)
+    /// Transform a position in viewport pixel coordinates into a position
+    /// in -1..1 space (0 at center)
+    pub fn px_to_relative(&self, pos: Pos2, scaling: f32) -> Vec2 {
+        Vec2::new(pos.x, self.height as f32 / scaling - pos.y) / self.size() * scaling * 2.0
+            - Vec2::splat(1.0)
+    }
+
+    /// Gets the fractal coordinates of a pixel from viewport coordinates
+    pub fn px_to_complex(&self, pos: Pos2, scaling: f32) -> ComplexPoint {
+        let rotated_position =
+            (self.px_to_relative(pos, scaling) * self.aspect_scale()).rotated(self.angle);
+
+        let scale = self.scale();
+        let r = rotated_position.x * scale.clone() + self.center.x.clone();
+        let i = rotated_position.y * scale + self.center.y.clone();
+        ComplexPoint { x: r, y: i }
+    }
+
+    /// Translates a delta from pixel units to complex units
+    pub fn px_delta_to_complex_delta(&self, delta: Vec2, scaling: f32) -> ComplexPoint {
+        let rotated_position =
+            (delta * Vec2::new(1.0, -1.0) / self.size() * scaling * 2.0 * self.aspect_scale())
+                .rotated(self.angle);
+
+        let scale = self.scale();
+        let r = rotated_position.x * scale.clone();
+        let i = rotated_position.y * scale;
+        ComplexPoint { x: r, y: i }
     }
 
     /// Returns the offset in pixels from the center of this viewport to
     /// the given location in fractal coordinates
-    pub fn coords_to_px_offset(&self, point: &ComplexPoint) -> (f64, f64) {
-        let precision = get_precision(self.zoom);
-        let mut scale = Float::with_val(precision, 2.0);
-        scale.pow_assign(-self.zoom);
-        let aspect_scale = self.aspect_scale();
+    pub fn complex_to_px_delta(&self, point: &ComplexPoint) -> Vec2 {
+        let scale = self.scale();
+        let relative_position = Vec2::new(
+            ((point.x.clone() - self.center.x.clone()) / scale.clone()).to_f32(),
+            ((point.y.clone() - self.center.y.clone()) / scale).to_f32(),
+        )
+        .rotated(-self.angle);
 
-        let x = ((point.x.clone() - self.center.x.clone()) / scale.clone()).to_f64()
-            / aspect_scale.x as f64;
-        let y =
-            ((point.y.clone() - self.center.y.clone()) / scale).to_f64() / aspect_scale.y as f64;
-        (x * 0.5 * self.width as f64, y * 0.5 * self.height as f64)
+        relative_position / self.aspect_scale() * 0.5 * self.size()
     }
 
     pub fn algorithm(&self) -> Algorithm {
@@ -389,6 +412,10 @@ impl View {
             depth_or_array_layers: 1,
         }
     }
+
+    pub fn size(&self) -> Vec2 {
+        Vec2::new(self.width as f32, self.height as f32)
+    }
 }
 
 impl ImageDiff {
@@ -399,6 +426,23 @@ impl ImageDiff {
             recompute: true,
             recolor: true,
         }
+    }
+}
+
+impl ComplexPoint {
+    pub fn new(x: Float, y: Float) -> Self {
+        Self { x, y }
+    }
+    pub fn to_vec2(&self) -> Vec2 {
+        Vec2 {
+            x: self.x.to_f32(),
+            y: self.y.to_f32(),
+        }
+    }
+
+    pub fn rotate(&mut self, angle: f32) {
+        self.x = self.x.clone() * angle.cos() - self.y.clone() * angle.sin();
+        self.y = self.x.clone() * angle.sin() + self.y.clone() * angle.cos();
     }
 }
 

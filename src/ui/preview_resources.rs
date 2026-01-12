@@ -7,7 +7,7 @@ use eframe::egui::mutex::RwLock;
 use eframe::egui::{self};
 use eframe::egui_wgpu::{self, CallbackTrait};
 use eframe::wgpu::util::DeviceExt;
-use eframe::wgpu::{self, Device, include_wgsl};
+use eframe::wgpu::{self, Device};
 use wgpu::{Extent3d, Queue};
 
 use crate::ui::UITab;
@@ -60,7 +60,10 @@ impl SubResources {
         format: wgpu::TextureFormat,
         size: (u32, u32),
     ) -> Result<Self> {
-        let shader = device.create_shader_module(include_wgsl!("../shaders/preview.wgsl"));
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("preview"),
+            source: wgpu::ShaderSource::Wgsl(wesl::include_wesl!("preview").into()),
+        });
 
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             size: Extent3d {
@@ -183,7 +186,8 @@ impl SubResources {
             contents: bytemuck::cast_slice(&[Transform {
                 angle: 0.0,
                 _padding: 0.0,
-                scale: [1.0; 2],
+                prescale: [1.0; 2],
+                postscale: [1.0; 2],
                 offset: [0.0; 2],
             }]),
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,

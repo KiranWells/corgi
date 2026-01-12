@@ -77,6 +77,7 @@ struct SavedStyleV1 {
 struct ImageSpecV1 {
     center: ComplexPoint,
     zoom: f32,
+    angle: f32,
     fractal: FractalKind,
     max_iter: u32,
     internal_coloring: Coloring,
@@ -141,6 +142,7 @@ impl From<ImgSpec> for SavedImgSpec {
         Self::V1(ImageSpecV1 {
             center: value.location.center,
             zoom: value.location.zoom,
+            angle: value.location.angle,
             fractal: value.location.fractal_kind,
             max_iter: value.location.max_iter,
             internal_coloring: value.style.internal_coloring,
@@ -160,6 +162,7 @@ impl From<SavedImgSpec> for ImgSpec {
                     fractal_kind: spec.fractal,
                     center: spec.center.clone(),
                     zoom: spec.zoom,
+                    angle: spec.angle,
                     max_iter: spec.max_iter,
                     probe_location: spec.center,
                 },

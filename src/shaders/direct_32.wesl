@@ -9,6 +9,7 @@ import super::utils::{
     get_orbit_values,
     get_stripe_values,
     length_squared,
+    rotation_matrix,
     step_frac,
 };
 
@@ -34,6 +35,7 @@ struct Params {
     x: f32,
     y: f32,
     zoom: f32,
+    angle: f32,
     julia_x: f32,
     julia_y: f32,
 };
@@ -65,7 +67,7 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 f32(global_id.x) / f32(params.width),
                 f32(global_id.y) / f32(params.height)
             ) - 0.5
-        ) * 2.0 * pow(2.0, -params.zoom) * aspect_scale;
+        ) * 2.0 * pow(2.0, -params.zoom) * aspect_scale * rotation_matrix(params.angle);
 
     // initial iteration values
     var z_0 = vec2f(0.0);

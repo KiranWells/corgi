@@ -208,7 +208,7 @@ impl eframe::App for CorgiApp {
             let image = self.ui_state.image();
             match self
                 .debouncer
-                .poll(image.clone(), ctx.input(|is| is.pointer.primary_down()))
+                .poll(image.clone(), ctx.input(|is| is.pointer.any_down()))
             {
                 PollState::Trigger => {
                     self.cancel_worker

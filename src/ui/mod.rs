@@ -6,14 +6,15 @@ This module contains the main UI state struct and its implementation, which
 contains the code necessary to update internal state and render the ui.
  */
 
+use std::f32::consts::PI;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 use corgi::types::serde::SafeSaveLoad;
 use corgi::types::{
-    ComplexPoint, ImageGenCommand, ImgSpec, OptLevel, RendererId, Status, Style as ImgStyle, View,
-    get_precision,
+    ComplexPoint, ImageGenCommand, ImgSpec, OptLevel, RendererId, Rotate, Status,
+    Style as ImgStyle, View, get_precision,
 };
 use directories::BaseDirs;
 use eframe::egui::containers::menu::MenuButton;
@@ -53,12 +54,12 @@ enum UITab {
 struct ExploreTabState {
     rendered_view: View,
     style: ImgStyle,
-    scaling: f64,
+    scaling: f32,
 }
 #[derive(Debug)]
 struct StyleTabState {
     rendered_view: View,
-    scaling: f64,
+    scaling: f32,
 }
 #[derive(Debug)]
 struct RenderTabState {
@@ -624,12 +625,9 @@ impl CorgiUI {
                         && pointer_in_rect
                         && let Some(pos) = pointer_pos
                     {
-                        let (x, y) = view_image.view().get_real_coords(
-                            (pos.x) as f64,
-                            (size.y - pos.y) as f64,
-                            self.explore_state.scaling,
-                        );
-                        self.root_spec.location.probe_location = ComplexPoint { x, y };
+                        self.root_spec.location.probe_location = view_image
+                            .view()
+                            .px_to_complex(pos, self.explore_state.scaling);
                         self.setting_probe = false;
                     }
                 } else {
@@ -641,20 +639,21 @@ impl CorgiUI {
 
                 // render texture and camera overlay
                 let view_image = self.image();
+                let camera_view = if self.tab == UITab::Render {
+                    self.render_state.rendered_view.clone()
+                } else {
+                    self.root_spec.view()
+                };
                 let mut render_rect = rect
                     .scale_from_center2(egui::Vec2::splat(1.0) / view_image.view().aspect_scale());
-                let (x, y) = view_image
-                    .view()
-                    .coords_to_px_offset(&self.root_spec.location.center);
-                render_rect = render_rect.translate(Vec2::new(
-                    (x / self.explore_state.scaling) as f32,
-                    (-y / self.explore_state.scaling) as f32,
-                ));
+                let mut offset = view_image.view().complex_to_px_delta(&camera_view.center);
+                offset.y *= -1.0;
+                render_rect = render_rect.translate(offset * self.viewport_scaling());
                 render_rect = render_rect.scale_from_center(f32::powf(
                     2.0,
-                    -(self.root_spec.location.zoom - view_image.location.zoom),
+                    -(camera_view.zoom - view_image.location.zoom),
                 ));
-                render_rect = render_rect.scale_from_center2(self.root_spec.view().aspect_scale());
+                render_rect = render_rect.scale_from_center2(camera_view.aspect_scale());
                 let cb = PaintCallback {
                     rendered_viewport: match self.tab {
                         UITab::Render => self.render_state.rendered_view.clone(),
@@ -690,8 +689,14 @@ impl CorgiUI {
     ) {
         let response = ui.response();
         // get inputs to change the viewport
-        let (mut scroll, pixel_scale, mouse) =
-            ui.input(|i| (i.smooth_scroll_delta, i.pixels_per_point, i.pointer.clone()));
+        let (mut scroll, pixel_scale, mouse, modifiers) = ui.input(|i| {
+            (
+                i.smooth_scroll_delta,
+                i.pixels_per_point,
+                i.pointer.clone(),
+                i.modifiers,
+            )
+        });
         if !pointer_in_rect {
             scroll = Vec2::ZERO;
         }
@@ -701,21 +706,36 @@ impl CorgiUI {
         let precision = get_precision(view_image.location.zoom);
         let mut scale = Float::with_val(precision, 2.0);
         scale.pow_assign(-view_image.location.zoom);
-        let aspect_scale = view_image.view().aspect_scale();
-        let viewport_scaling = match self.tab {
-            UITab::Explore => self.explore_state.scaling,
-            UITab::Style => self.style_state.scaling,
-            UITab::Render => 1.0,
+        let viewport_scaling = self.viewport_scaling();
+        let ComplexPoint {
+            x: x_offset,
+            y: y_offset,
+        } = view_image
+            .view()
+            .px_delta_to_complex_delta(drag, viewport_scaling);
+        let mut scroll_zoom =
+            if modifiers.shift { scroll.x } else { scroll.y } * pixel_scale * 0.005;
+        let mut drag_zoom = (drag.x + drag.y) * pixel_scale * 0.01;
+        let mut drag_rotation = if let Some(pos) = mouse.latest_pos() {
+            let center = response.rect.size() / 2.0;
+            let start_point = (pos - drag).to_vec2();
+            let end_point = pos.to_vec2();
+            (end_point - center).angle() - (start_point - center).angle()
+        } else {
+            0.0
         };
-        let drag_scaling = pixel_scale as f64 * viewport_scaling * 1.715; // TODO: why this value? and does this work on other screens?
-        let x_offset =
-            -(drag.x as f64 / view_image.width as f64 * aspect_scale.x as f64 * drag_scaling)
-                * scale.clone();
-        let y_offset =
-            (drag.y as f64 / view_image.height as f64 * aspect_scale.y as f64 * drag_scaling)
-                * scale;
-        let scroll_zoom = scroll.y * pixel_scale * 0.005;
-        let drag_zoom = (drag.x + drag.y) * pixel_scale * 0.01;
+
+        // adjust behavior if modifiers are pressed
+        if modifiers.shift {
+            scroll_zoom *= 0.1;
+            drag_zoom *= 0.1;
+            drag_rotation *= 0.1;
+        }
+        if modifiers.alt {
+            scroll_zoom *= 3.0;
+            drag_zoom *= 3.0;
+            drag_rotation *= 3.0;
+        }
 
         // apply deltas to relevant view or location
         if self.tab == UITab::Render {
@@ -723,55 +743,67 @@ impl CorgiUI {
             if scroll.y != 0.0
                 && let Some(pos) = mouse.latest_pos()
             {
-                let unzoomed_pos =
-                    view_image
-                        .view()
-                        .get_real_coords(pos.x as f64, pos.y as f64, viewport_scaling);
-                let zoomed_pos =
-                    self.current_view
-                        .get_real_coords(pos.x as f64, pos.y as f64, viewport_scaling);
-                self.current_view.center.x += unzoomed_pos.0 - zoomed_pos.0;
-                self.current_view.center.y -= unzoomed_pos.1 - zoomed_pos.1;
+                let unzoomed_real = view_image.view().px_to_complex(pos, viewport_scaling);
+                let zoomed_real = self.current_view.px_to_complex(pos, viewport_scaling);
+                self.current_view.center.x -= zoomed_real.x - unzoomed_real.x;
+                self.current_view.center.y -= zoomed_real.y - unzoomed_real.y;
             }
             if mouse.primary_down() {
-                self.current_view.center.x += x_offset;
-                self.current_view.center.y += y_offset;
+                self.current_view.center.x -= x_offset;
+                self.current_view.center.y -= y_offset;
             }
             if mouse.secondary_down() {
-                // rotate
+                self.current_view.angle += drag_rotation;
+                self.current_view.angle %= PI * 2.0;
             }
             if mouse.middle_down() {
                 self.current_view.zoom += drag_zoom;
             }
-            self.root_spec.location.update_prec();
+            if modifiers.ctrl && mouse.secondary_released() {
+                let reference_angle = self.render_state.rendered_view.angle;
+                // round values
+                self.current_view.angle =
+                    ((self.current_view.angle - reference_angle) / (PI / 12.0)).round()
+                        * (PI / 12.0)
+                        + reference_angle;
+            }
         } else {
             self.root_spec.location.zoom += scroll_zoom;
             if scroll.y != 0.0
                 && let Some(pos) = mouse.latest_pos()
             {
-                let unzoomed_pos =
-                    view_image
-                        .view()
-                        .get_real_coords(pos.x as f64, pos.y as f64, viewport_scaling);
-                let new_view = self.image().view();
-                let zoomed_pos =
-                    new_view.get_real_coords(pos.x as f64, pos.y as f64, viewport_scaling);
-                self.root_spec.location.center.x += unzoomed_pos.0 - zoomed_pos.0;
-                self.root_spec.location.center.y -= unzoomed_pos.1 - zoomed_pos.1;
+                let unzoomed_real = view_image.view().px_to_complex(pos, viewport_scaling);
+                let zoomed_real = self.image().view().px_to_complex(pos, viewport_scaling);
+                self.root_spec.location.center.x -= zoomed_real.x - unzoomed_real.x;
+                self.root_spec.location.center.y -= zoomed_real.y - unzoomed_real.y;
             }
             // including "none" down to support touch
             if mouse.primary_down() || !mouse.any_down() {
-                self.root_spec.location.center.x += x_offset;
-                self.root_spec.location.center.y += y_offset;
+                self.root_spec.location.center.x -= x_offset;
+                self.root_spec.location.center.y -= y_offset;
             }
             if mouse.secondary_down() {
-                // rotate
+                self.root_spec.location.angle += drag_rotation;
+                self.root_spec.location.angle %= PI * 2.0;
             }
             if mouse.middle_down() {
                 self.root_spec.location.zoom += drag_zoom;
             }
+            if modifiers.ctrl && mouse.secondary_released() {
+                // round values
+                self.root_spec.location.angle =
+                    (self.root_spec.location.angle / (PI / 12.0)).round() * (PI / 12.0);
+            }
             self.root_spec.location.update_prec();
             self.root_spec.update_probe();
+        }
+    }
+
+    fn viewport_scaling(&self) -> f32 {
+        match self.tab {
+            UITab::Explore => self.explore_state.scaling,
+            UITab::Style => self.style_state.scaling,
+            UITab::Render => 1.0,
         }
     }
 
@@ -785,8 +817,8 @@ impl CorgiUI {
             }
             corgi::types::RendererId::Render => {
                 self.render_state.rendered_view = viewport.clone();
+                self.current_view = viewport.clone();
                 self.current_view.zoom_to_fit(&viewport);
-                self.current_view.center = viewport.center;
                 self.rendering_output = false;
             }
         }

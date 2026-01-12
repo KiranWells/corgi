@@ -12,6 +12,7 @@ import super::utils::{
     get_orbit_values,
     get_stripe_values,
     length_squared,
+    rotation_matrix,
     step_frac,
 };
 
@@ -37,6 +38,7 @@ struct Params {
     x: f32,
     y: f32,
     zoom: f32,
+    angle: f32,
     julia_x: f32,
     julia_y: f32,
 };
@@ -116,13 +118,13 @@ fn main_mandel(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let offset = (
         (
             vec2(-params.x, -params.y)
-          + vec2<f32>(
+          + (vec2<f32>(
                 f32(global_id.x) / f32(params.width),
                 f32(global_id.y) / f32(params.height)
             )
-          - 0.5
-        ) * 2.0
-    ) * aspect_scale;
+          - 0.5)
+        ) * 2.0 * aspect_scale * rotation_matrix(params.angle)
+    );
 
     // constant iteration values
     let x_0 = probed_point[1];

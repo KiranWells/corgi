@@ -154,21 +154,19 @@ fn run_compute_step(
     } = gpu_data;
     let texture_size: Extent3d = image.extents();
 
-    let (compute_pipeline, x, y, probe_len) = match image.algorithm() {
+    let (compute_pipeline, pt, probe_len) = match image.algorithm() {
         crate::types::Algorithm::Directf32 => (
             direct_f32_pipeline,
-            image.location.center.x.to_f32(),
-            image.location.center.y.to_f32(),
+            image.location.center.to_vec2(),
             image.location.max_iter as usize,
         ),
         crate::types::Algorithm::Perturbedf32 => {
-            let (x, y) = image
+            let offset = image
                 .view()
-                .coords_to_px_offset(&image.location.probe_location);
+                .complex_to_px_delta(&image.location.probe_location);
             (
                 perturbed_f32_pipeline,
-                x as f32 / image.width as f32,
-                y as f32 / image.height as f32,
+                offset / image.size(),
                 probed_data.len(),
             )
         }
@@ -199,8 +197,8 @@ fn run_compute_step(
 
         let command_buffer = encoder.finish();
         let julia_point = match &image.location.fractal_kind {
-            crate::types::FractalKind::Mandelbrot => (0.0, 0.0),
-            crate::types::FractalKind::Julia(pt) => (pt.x.to_f32(), pt.y.to_f32()),
+            crate::types::FractalKind::Mandelbrot => eframe::egui::Vec2::new(0.0, 0.0),
+            crate::types::FractalKind::Julia(pt) => pt.to_vec2(),
         };
         // Update the parameters
         let parameters = ComputeParams {
@@ -214,11 +212,12 @@ fn run_compute_step(
             },
             probe_len: probe_len as u32,
             iter_offset: i * constants.iter_batch_size,
-            x,
-            y,
+            x: pt.x,
+            y: pt.y,
             zoom: image.location.zoom,
-            julia_x: julia_point.0,
-            julia_y: julia_point.1,
+            angle: image.location.angle,
+            julia_x: julia_point.x,
+            julia_y: julia_point.y,
         };
         if parameters.chunk_max_iter == 0 {
             break;

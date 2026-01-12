@@ -45,6 +45,10 @@ fn length_squared(v: vec2f) -> f32 {
     return v.x * v.x + v.y * v.y;
 }
 
+fn rotation_matrix(angle: f32) -> mat2x2f {
+    return mat2x2(cos(angle), -sin(angle), sin(angle), cos(angle));
+}
+
 fn debug(x: u32) -> bool {
     return x < u32(f32(render_params.width) * 0.0);//render_params.debug_shutter);
 }

@@ -12,6 +12,8 @@ use std::fmt::Display;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use eframe::egui::Vec2;
+
 pub use self::coloring::*;
 pub use self::image::*;
 
@@ -144,6 +146,7 @@ pub struct ComputeParams {
     pub x: f32,
     pub y: f32,
     pub zoom: f32,
+    pub angle: f32,
     pub julia_x: f32,
     pub julia_y: f32,
 }
@@ -173,7 +176,8 @@ impl From<&ImgSpec> for RenderParams {
 pub struct Transform {
     pub angle: f32,
     pub _padding: f32,
-    pub scale: [f32; 2],
+    pub prescale: [f32; 2],
+    pub postscale: [f32; 2],
     pub offset: [f32; 2],
 }
 
@@ -182,7 +186,8 @@ impl Default for Transform {
         Self {
             angle: 0.0,
             _padding: 0.0,
-            scale: [1.0, 1.0],
+            prescale: [1.0, 1.0],
+            postscale: [1.0, 1.0],
             offset: [0.0, 0.0],
         }
     }
@@ -346,5 +351,18 @@ impl Display for ImageTimings {
             write!(f, "Color: {:?}", self.color)?;
         }
         Ok(())
+    }
+}
+
+pub trait Rotate {
+    fn rotated(&self, angle: f32) -> Self;
+}
+
+impl Rotate for Vec2 {
+    fn rotated(&self, angle: f32) -> Self {
+        Self {
+            x: self.x * angle.cos() - self.y * angle.sin(),
+            y: self.x * angle.sin() + self.y * angle.cos(),
+        }
     }
 }
