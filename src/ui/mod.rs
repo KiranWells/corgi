@@ -19,7 +19,7 @@ use corgi::types::{
 use directories::BaseDirs;
 use eframe::egui::containers::menu::MenuButton;
 use eframe::egui::{
-    Button, Color32, CornerRadius, Frame, ScrollArea, Sense, Separator, Stroke, TextStyle,
+    Button, Color32, CornerRadius, Frame, Pos2, ScrollArea, Sense, Separator, Stroke, TextStyle,
     UiBuilder, Vec2, WidgetText,
 };
 use eframe::{egui, egui_wgpu};
@@ -336,6 +336,7 @@ impl CorgiUI {
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 self.viewport(ui, ctx);
+                self.render_widgets(ui, ctx, context);
 
                 ui.horizontal_centered(|ui| {
                     ui.scope_builder(
@@ -637,23 +638,6 @@ impl CorgiUI {
                 self.current_view.width = size.x as u32;
                 self.current_view.height = size.y as u32;
 
-                // render texture and camera overlay
-                let view_image = self.image();
-                let camera_view = if self.tab == UITab::Render {
-                    self.render_state.rendered_view.clone()
-                } else {
-                    self.root_spec.view()
-                };
-                let mut render_rect = rect
-                    .scale_from_center2(egui::Vec2::splat(1.0) / view_image.view().aspect_scale());
-                let mut offset = view_image.view().complex_to_px_delta(&camera_view.center);
-                offset.y *= -1.0;
-                render_rect = render_rect.translate(offset * self.viewport_scaling());
-                render_rect = render_rect.scale_from_center(f32::powf(
-                    2.0,
-                    -(camera_view.zoom - view_image.location.zoom),
-                ));
-                render_rect = render_rect.scale_from_center2(camera_view.aspect_scale());
                 let cb = PaintCallback {
                     rendered_viewport: match self.tab {
                         UITab::Render => self.render_state.rendered_view.clone(),
@@ -668,17 +652,171 @@ impl CorgiUI {
 
                 let callback = egui_wgpu::Callback::new_paint_callback(rect, cb);
 
+                // this paint call must be before others for some reason
                 ui.painter().add(callback);
-                if self.tab != UITab::Render && self.show_camera {
-                    ui.painter().rect_stroke(
-                        render_rect.intersect(rect),
-                        0.0,
-                        Stroke::new(2.0, Color32::from_gray(255)),
-                        egui::StrokeKind::Outside,
-                    );
-                }
             },
         );
+    }
+
+    fn render_widgets(&self, ui: &mut egui::Ui, ctx: &egui::Context, context: &mut crate::Context) {
+        fn paint_crosshair(
+            painter: &egui::Painter,
+            center: egui::Pos2,
+            radius: f32,
+            stroke: Stroke,
+        ) {
+            painter.line_segment(
+                [
+                    center + Vec2::new(0.0, -radius),
+                    center + Vec2::new(0.0, radius),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    center + Vec2::new(-radius, 0.0),
+                    center + Vec2::new(radius, 0.0),
+                ],
+                stroke,
+            );
+        }
+        fn rotated_text(
+            painter: &egui::Painter,
+            ctx: &egui::Context,
+            theme: &crate::config::Theme,
+            pos: Pos2,
+            anchor: egui::Align2,
+            text: String,
+            angle: f32,
+        ) {
+            let (t, r) = ctx.fonts_mut(|f| {
+                let mut t = egui::Shape::text(
+                    f,
+                    pos,
+                    anchor,
+                    text,
+                    egui::FontId::proportional(theme.base_rem),
+                    Color32::WHITE,
+                );
+
+                let mut rect = egui::Rect::ZERO;
+                let mut pos = Pos2::ZERO;
+                if let egui::epaint::Shape::Text(ts) = &mut t {
+                    *ts = ts.clone().with_angle_and_anchor(angle, anchor);
+                    rect = ts.galley.rect.expand(theme.spacing / 2.0);
+                    pos = ts.pos;
+                };
+                let rotator = egui::emath::Rot2::from_angle(angle);
+
+                let r = egui::Shape::Path(egui::epaint::PathShape {
+                    points: vec![
+                        rect.left_top(),
+                        rect.right_top(),
+                        rect.right_bottom(),
+                        rect.left_bottom(),
+                    ]
+                    .into_iter()
+                    .map(|p| pos + rotator * p.to_vec2())
+                    .collect(),
+                    closed: true,
+                    fill: Color32::from_black_alpha(150),
+                    stroke: egui::epaint::PathStroke::NONE,
+                });
+
+                (t, r)
+            });
+            painter.add(r);
+            painter.add(t);
+        }
+        let view_image = self.image();
+        let camera_view = if self.tab == UITab::Render {
+            self.render_state.rendered_view.clone()
+        } else {
+            self.root_spec.view()
+        };
+        let rect =
+            egui::Rect::from_min_size(Pos2::ZERO, view_image.size() / self.viewport_scaling());
+        let mut render_rect =
+            rect.scale_from_center2(egui::Vec2::splat(1.0) / view_image.view().aspect_scale());
+        let mut offset = view_image.view().complex_to_px_delta(&camera_view.center);
+        offset.y *= -1.0;
+        render_rect = render_rect.translate(offset * self.viewport_scaling());
+        render_rect = render_rect.scale_from_center(f32::powf(
+            2.0,
+            -(camera_view.zoom - view_image.location.zoom),
+        ));
+        render_rect = render_rect.scale_from_center2(camera_view.aspect_scale());
+        let painter = ui.painter();
+        let simple_stroke = Stroke::new(2.0, Color32::WHITE);
+        let center = egui::Pos2::ZERO + self.current_view.size() / 2.0;
+        let current_angle = if self.tab == UITab::Render {
+            self.current_view.angle - self.render_state.rendered_view.angle
+        } else {
+            self.root_spec.location.angle
+        };
+        let (pointer, modifiers, scroll) =
+            ui.input(|i| (i.pointer.clone(), i.modifiers, i.smooth_scroll_delta));
+        let theme = context.theme();
+        if pointer.secondary_down()
+            && let Some(pos) = pointer.latest_pos()
+        {
+            // render rotation guide line
+            let current_angle = if modifiers.ctrl {
+                (current_angle / (PI / 12.0)).round() * (PI / 12.0)
+            } else {
+                current_angle
+            };
+            let radius = (pos - center).length();
+            painter.circle_stroke(center, radius, simple_stroke);
+            let guideline = Vec2::new(radius, 0.0).rotated(current_angle);
+            painter.line_segment([center, center + guideline], simple_stroke);
+            rotated_text(
+                painter,
+                ctx,
+                theme,
+                center + guideline / 2.0 + Vec2::new(0.0, -theme.spacing).rotated(current_angle),
+                egui::Align2::CENTER_BOTTOM,
+                format!("{:.2}°", current_angle.to_degrees()),
+                current_angle,
+            );
+        }
+        if pointer.middle_down() {
+            paint_crosshair(painter, center, 10.0, simple_stroke);
+        }
+        if (scroll.length() > 0.0 || self.setting_probe)
+            && let Some(pos) = pointer.latest_pos()
+        {
+            paint_crosshair(painter, pos, 10.0, simple_stroke);
+        }
+        if self.show_camera || self.tab == UITab::Render {
+            if self.tab != UITab::Render {
+                painter.rect_stroke(
+                    render_rect.intersect(rect),
+                    0.0,
+                    simple_stroke,
+                    egui::StrokeKind::Outside,
+                );
+            }
+            let current_angle = if self.tab == UITab::Render {
+                current_angle
+            } else {
+                0.0
+            };
+            let text_anchor = render_rect.center()
+                + (render_rect.center_bottom() - render_rect.center()
+                    + Vec2::new(0.0, theme.spacing))
+                .rotated(current_angle);
+
+            rotated_text(
+                painter,
+                ctx,
+                theme,
+                text_anchor,
+                egui::Align2::CENTER_TOP,
+                format!("{}x{}", camera_view.width, camera_view.height),
+                current_angle,
+            );
+        }
     }
 
     fn handle_viewport_input(
@@ -817,7 +955,10 @@ impl CorgiUI {
             }
             corgi::types::RendererId::Render => {
                 self.render_state.rendered_view = viewport.clone();
-                self.current_view = viewport.clone();
+                let mut view = viewport.clone();
+                view.width = self.current_view.width;
+                view.height = self.current_view.height;
+                self.current_view = view;
                 self.current_view.zoom_to_fit(&viewport);
                 self.rendering_output = false;
             }
