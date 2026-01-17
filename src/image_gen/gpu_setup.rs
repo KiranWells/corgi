@@ -97,7 +97,6 @@ enum BuffType {
     /// A buffer that can be written to by the host, but not read.
     HostWritable,
     /// A buffer that can be read by the host; used for the target of a copy operation.
-    #[allow(dead_code)]
     HostReadable,
     /// A uniform buffer that can be written by the host.
     Uniform,
@@ -328,13 +327,12 @@ impl GPUData {
     /// Load the data from the currently rendered image from th GPU to the CPU.
     pub fn get_texture_data(&self) -> Option<Vec<u8>> {
         let ext = self.texture.read().size();
-        let padded_width = ((ext.width * 4) as f32 / 256.0).ceil() as u32 * 256;
-        let tmp_buffer = self.shared.device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            size: padded_width as u64 * ext.height as u64,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let padded_width = ((ext.width * 4) as f32 / 256.0).ceil() as usize * 256;
+        let tmp_buffer = Buffers::create_buffer::<u8>(
+            &self.shared.device,
+            padded_width * ext.height as usize,
+            BuffType::HostReadable,
+        );
         let mut encoder = self
             .shared
             .device
@@ -345,7 +343,7 @@ impl GPUData {
                 buffer: &tmp_buffer,
                 layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
-                    bytes_per_row: Some(padded_width),
+                    bytes_per_row: Some(padded_width as u32),
                     rows_per_image: None,
                 },
             },
@@ -361,11 +359,7 @@ impl GPUData {
         match recv.recv() {
             Ok(Ok(())) => {
                 let mut out = Vec::new();
-                for chunk in tmp_buffer
-                    .slice(..)
-                    .get_mapped_range()
-                    .chunks(padded_width as usize)
-                {
+                for chunk in tmp_buffer.slice(..).get_mapped_range().chunks(padded_width) {
                     out.extend_from_slice(&chunk[..(ext.width * 4) as usize]);
                 }
                 Some(out)

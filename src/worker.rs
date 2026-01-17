@@ -1,16 +1,14 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, mpsc};
 
-use corgi::image_gen::{GPUData, SharedState, render_image, save_to_file};
+use corgi::image_gen::{Engine, SharedState};
 use corgi::types::{ImageGenCommand, ImgSpec, RenderResult, RendererId, StatusMessage};
 use eframe::egui::ahash::{HashMap, HashMapExt};
 use eframe::egui::mutex::RwLock;
 use eframe::{egui, egui_wgpu, wgpu};
 
 pub struct WorkerState {
-    renderers: HashMap<RendererId, GPUData>,
-    last_images: HashMap<RendererId, ImgSpec>,
-    probe_buffer: Vec<[f32; 2]>,
+    renderers: HashMap<RendererId, Engine>,
     command_channel: mpsc::Receiver<ImageGenCommand>,
     status_channel: mpsc::Sender<StatusMessage>,
     cancelled: Arc<AtomicBool>,
@@ -36,7 +34,7 @@ impl WorkerState {
             renderers: [
                 (
                     RendererId::Explore,
-                    GPUData::init(
+                    Engine::init(
                         preview_settings.extents(),
                         preview_settings.location.max_iter as usize,
                         shared.clone(),
@@ -44,11 +42,12 @@ impl WorkerState {
                         corgi::image_gen::Constants {
                             iter_batch_size: context.config().max_shader_batch_iters,
                         },
+                        cancelled.clone(),
                     ),
                 ),
                 (
                     RendererId::Style,
-                    GPUData::init(
+                    Engine::init(
                         preview_settings.extents(),
                         preview_settings.location.max_iter as usize,
                         shared.clone(),
@@ -56,11 +55,12 @@ impl WorkerState {
                         corgi::image_gen::Constants {
                             iter_batch_size: context.config().max_shader_batch_iters,
                         },
+                        cancelled.clone(),
                     ),
                 ),
                 (
                     RendererId::Render,
-                    GPUData::init(
+                    Engine::init(
                         output_settings.extents(),
                         output_settings.location.max_iter as usize,
                         shared.clone(),
@@ -68,13 +68,12 @@ impl WorkerState {
                         corgi::image_gen::Constants {
                             iter_batch_size: context.config().max_shader_batch_iters,
                         },
+                        cancelled.clone(),
                     ),
                 ),
             ]
             .into_iter()
             .collect(),
-            last_images: HashMap::new(),
-            probe_buffer: vec![],
             command_channel: recv,
             status_channel: send,
             cancelled,
@@ -115,44 +114,33 @@ impl WorkerState {
                 }
             }
             for (id, image) in render_commands {
-                let result = render_image(
-                    self.renderers.get_mut(&id).unwrap(),
-                    &mut self.probe_buffer,
-                    &image,
-                    self.last_images.get(&id),
-                    self.cancelled.clone(),
-                    |sm| {
-                        let _ = self.status_channel.send(sm);
+                let result = self
+                    .renderers
+                    .get_mut(&id)
+                    .unwrap()
+                    .render_image(&image, |pu| {
+                        let _ = self.status_channel.send(StatusMessage::Progress(pu));
                         self.ctx.request_repaint();
-                    },
-                );
+                    });
                 if let RenderResult::Finished(timings) = result {
                     let _ = self.status_channel.send(StatusMessage::RenderFinished(
                         id,
                         timings,
                         image.view(),
                     ));
-                    self.last_images.insert(id, *image);
                 }
                 self.ctx.request_repaint();
             }
             for (id, path) in save_commands {
-                if let Some(image_settings) = self.last_images.get(&id) {
-                    save_to_file(
-                        self.renderers.get(&id).unwrap(),
-                        image_settings,
-                        &path,
-                        |sm| {
-                            let _ = self.status_channel.send(sm);
-                            self.ctx.request_repaint();
-                        },
-                    );
-                }
+                let _ = self.renderers.get(&id).unwrap().save_to_file(&path, |pu| {
+                    let _ = self.status_channel.send(StatusMessage::Progress(pu));
+                    self.ctx.request_repaint();
+                });
             }
         }
     }
 
     pub fn texture(&self, id: RendererId) -> Arc<RwLock<wgpu::Texture>> {
-        self.renderers.get(&id).unwrap().texture.clone()
+        self.renderers.get(&id).unwrap().texture()
     }
 }

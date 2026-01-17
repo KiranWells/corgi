@@ -15,11 +15,9 @@ use std::time::Instant;
 use clap::Parser;
 use color_eyre::Result;
 use color_eyre::eyre::eyre;
-use corgi::image_gen::{
-    Constants, GPUData, SharedState, get_device_and_queue, render_image, save_to_file,
-};
+use corgi::image_gen::{Constants, Engine, SharedState, get_device_and_queue};
 use corgi::types::serde::SafeSaveLoad;
-use corgi::types::{ImgSpec, OptLevel, StatusMessage};
+use corgi::types::{ImgSpec, OptLevel, ProgressUpdate};
 use directories::ProjectDirs;
 use eframe::{egui, egui_wgpu, wgpu};
 use pollster::FutureExt;
@@ -67,7 +65,7 @@ fn main() -> Result<()> {
         }
         let mut image = ImgSpec::load(&settings_file)?;
         image.optimization_level = OptLevel::AccuracyOptimized;
-        let mut gpu_data = GPUData::init(
+        let mut engine = Engine::init(
             image.extents(),
             image.location.max_iter as usize,
             SharedState::new(device, queue),
@@ -75,27 +73,20 @@ fn main() -> Result<()> {
             Constants {
                 iter_batch_size: 100_000,
             },
+            std::sync::Arc::new(AtomicBool::new(false)),
         );
         let now = Instant::now();
-        fn status_callback(sm: StatusMessage) {
-            match sm {
-                corgi::types::StatusMessage::Progress(msg, percent) => {
-                    println!("{:>6.2}% | {}", percent * 100.0, msg);
-                    let _ = std::io::stdout().lock().flush();
-                }
-                _ => todo!(),
+        fn status_callback(pu: ProgressUpdate) {
+            if let Some(percent) = pu.progress {
+                println!("{:>6.2}% | {}", percent * 100.0, pu.message);
+            } else {
+                println!("------ | {}", pu.message);
             }
+            let _ = std::io::stdout().lock().flush();
         }
-        let _ = render_image(
-            &mut gpu_data,
-            &mut vec![],
-            &image,
-            None,
-            std::sync::Arc::new(AtomicBool::new(false)),
-            status_callback,
-        );
+        let _ = engine.render_image(&image, status_callback);
         println!("Rendering took {:?}", Instant::now().duration_since(now));
-        save_to_file(&gpu_data, &image, &path, status_callback);
+        let _ = engine.save_to_file(&path, status_callback);
         return Ok(());
     }
 

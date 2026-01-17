@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
+use eframe::egui::mutex::RwLock;
 use eframe::wgpu::{self, Extent3d};
 pub use gpu_setup::{Constants, GPUData, SharedState, get_device_and_queue};
 use image::ImageBuffer;
@@ -25,111 +26,210 @@ use probe::probe;
 
 use crate::types::serde::SafeSaveLoad;
 use crate::types::{
-    ColorParams, ComputeParams, ImageDiff, ImageTimings, ImgSpec, RenderParams, RenderResult,
-    StatusMessage,
+    ColorParams, ComputeParams, ImageDiff, ImageTimings, ImgSpec, ProgressUpdate, RenderParams,
+    RenderResult,
 };
 
 pub fn is_metadata_supported(path: &Path) -> bool {
     matches!(path.extension(), Some(x) if x == "jpg" || x == "jpeg" || x == "png" || x == "webp" || x == "avif")
 }
 
-#[must_use]
-pub fn render_image(
-    gpu_data: &mut GPUData,
-    probed_data: &mut Vec<[f32; 2]>,
-    image: &ImgSpec,
-    last_image: Option<&ImgSpec>,
+pub struct Engine {
+    // spec for cached data
+    last_image: Option<ImgSpec>,
+    // cache validity
+    // gpu data
+    gpu_data: GPUData,
+    // cache data
+    probed_data: Vec<[f32; 2]>,
+    // communication?
     cancelled: Arc<AtomicBool>,
-    mut status_callback: impl FnMut(StatusMessage),
-) -> RenderResult {
-    let diff = last_image
-        .map(|img| image.comp(img))
-        .unwrap_or(ImageDiff::full());
-    let mut timings = ImageTimings::default();
+}
 
-    // the actual image generation process
-    // - resize the GPU data
-    // - probe the point
-    // - generate the delta grid
-    // - run the compute shader
-    // - run the image render
-
-    if diff.rebuild {
-        let start = Instant::now();
-        gpu_data.resize(
-            (image.width, image.height),
-            image.location.max_iter as usize,
-            image.get_flags(),
-        );
-        timings.build = Instant::now() - start;
-    }
-    if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
-        status_callback(StatusMessage::Progress("Cancelled".into(), 1.0));
-        return RenderResult::Unfinished;
-    }
-
-    if diff.reprobe {
-        let start = Instant::now();
-        status_callback(StatusMessage::Progress("Probing point".into(), 0.0));
-        let julia_point = match &image.location.fractal_kind {
-            crate::types::FractalKind::Mandelbrot => None,
-            crate::types::FractalKind::Julia(pt) => Some(pt),
-        };
-        // probe the point
-        *probed_data = probe::<f32>(
-            &image.location.probe_location,
-            image.location.max_iter,
-            image.location.zoom,
-            julia_point,
-        );
-        status_callback(StatusMessage::Progress("Uploading probe".into(), 0.0));
-        // update the probe buffer
-        gpu_data.shared.queue.write_buffer(
-            &gpu_data.buffers.probe,
-            0,
-            bytemuck::cast_slice(&probed_data[..]),
-        );
-        gpu_data.shared.queue.submit([]);
-        let _ = gpu_data
-            .shared
-            .device
-            .poll(wgpu::PollType::wait_indefinitely());
-        timings.probe = Instant::now() - start;
-    }
-    if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
-        status_callback(StatusMessage::Progress("Cancelled".into(), 1.0));
-        return RenderResult::Unfinished;
-    }
-
-    if diff.recompute {
-        let start = Instant::now();
-        status_callback(StatusMessage::Progress(
-            format!("Computing iteration 1 of {}", image.location.max_iter),
-            0.0,
-        ));
-        if !run_compute_step(
-            probed_data,
-            image,
-            gpu_data,
+impl Engine {
+    pub fn init(
+        size: wgpu::Extent3d,
+        max_iter: usize,
+        shared: SharedState,
+        label: &str,
+        constants: Constants,
+        cancelled: Arc<AtomicBool>,
+    ) -> Self {
+        Self {
+            last_image: None,
+            gpu_data: GPUData::init(size, max_iter, shared, label, constants),
+            probed_data: vec![],
             cancelled,
-            &mut status_callback,
-        ) {
+        }
+    }
+
+    #[must_use]
+    pub fn render_image(
+        &mut self,
+        image: &ImgSpec,
+        mut status_callback: impl FnMut(ProgressUpdate),
+    ) -> RenderResult {
+        let diff = self
+            .last_image
+            .as_ref()
+            .map(|img| image.comp(img))
+            .unwrap_or(ImageDiff::full());
+        let mut timings = ImageTimings::default();
+
+        // the actual image generation process
+        // - resize the GPU data
+        // - probe the point
+        // - generate the delta grid
+        // - run the compute shader
+        // - run the image render
+
+        if diff.rebuild {
+            let start = Instant::now();
+            self.gpu_data.resize(
+                (image.width, image.height),
+                image.location.max_iter as usize,
+                image.get_flags(),
+            );
+            timings.build = Instant::now() - start;
+        }
+        if self.is_cancelled(&mut status_callback) {
             return RenderResult::Unfinished;
         }
-        timings.compute = Instant::now() - start;
+
+        if diff.reprobe {
+            let start = Instant::now();
+            status_callback(ProgressUpdate::partial("Probing point".into(), 0.0));
+            let julia_point = match &image.location.fractal_kind {
+                crate::types::FractalKind::Mandelbrot => None,
+                crate::types::FractalKind::Julia(pt) => Some(pt),
+            };
+            // probe the point
+            self.probed_data = probe::<f32>(
+                &image.location.probe_location,
+                image.location.max_iter,
+                image.location.zoom,
+                julia_point,
+            );
+            status_callback(ProgressUpdate::partial("Uploading probe".into(), 0.0));
+            // update the probe buffer
+            self.gpu_data.shared.queue.write_buffer(
+                &self.gpu_data.buffers.probe,
+                0,
+                bytemuck::cast_slice(&self.probed_data[..]),
+            );
+            self.gpu_data.shared.queue.submit([]);
+            let _ = self
+                .gpu_data
+                .shared
+                .device
+                .poll(wgpu::PollType::wait_indefinitely());
+            timings.probe = Instant::now() - start;
+        }
+        if self.is_cancelled(&mut status_callback) {
+            return RenderResult::Unfinished;
+        }
+
+        if diff.recompute {
+            let start = Instant::now();
+            status_callback(ProgressUpdate::partial(
+                format!("Computing iteration 1 of {}", image.location.max_iter),
+                0.0,
+            ));
+            if !run_compute_step(
+                &self.probed_data,
+                image,
+                &self.gpu_data,
+                self.cancelled.clone(),
+                &mut status_callback,
+            ) {
+                return RenderResult::Unfinished;
+            }
+            timings.compute = Instant::now() - start;
+        }
+
+        // This holds the lock until the render finishes.
+        // This is suboptimal, as it might freeze the render thread, but
+        // the color step should always complete with a low-enough time budget to
+        // avoid dropped frames.
+        if diff.recolor {
+            let start = Instant::now();
+            status_callback(ProgressUpdate::partial("Rendering Colors".into(), 0.0));
+            run_render_step(image, &self.gpu_data);
+            timings.color = Instant::now() - start;
+        }
+        self.last_image = Some(image.clone());
+        RenderResult::Finished(timings)
     }
 
-    // This holds the lock until the render finishes.
-    // This is suboptimal, as it might freeze the render thread, but
-    // the color step should always complete with a low-enough time budget to
-    // avoid dropped frames.
-    if diff.recolor {
-        let start = Instant::now();
-        status_callback(StatusMessage::Progress("Rendering Colors".into(), 0.0));
-        run_render_step(image, gpu_data);
-        timings.color = Instant::now() - start;
+    pub fn save_to_file(
+        &self,
+        path: &Path,
+        mut status_callback: impl FnMut(ProgressUpdate),
+    ) -> Result<(), ()> {
+        let Some(image_settings) = &self.last_image else {
+            return Err(());
+        };
+        status_callback(ProgressUpdate::partial("Fetching image data".into(), 0.0));
+        if let Some(data) = self.gpu_data.get_texture_data() {
+            status_callback(ProgressUpdate::partial("Saving image".into(), 0.0));
+            let mut img = image::DynamicImage::ImageRgba8(
+                ImageBuffer::from_raw(image_settings.width, image_settings.height, data)
+                    .expect("image data to be properly formatted"),
+            );
+            img = image::DynamicImage::ImageRgb8(img.flipv().into_rgb8());
+            if let Err(err) = img.save(path) {
+                tracing::error!("Failed to save image: {err}");
+                status_callback(ProgressUpdate::partial(
+                    format!("Failed to save image: {err}"),
+                    0.0,
+                ));
+            } else {
+                // add metadata
+                if is_metadata_supported(path) {
+                    let mut meta = Metadata::new();
+                    let serialized = image_settings.stringify();
+                    match serialized {
+                        Err(err) => {
+                            tracing::error!("Failed to save image: {err}");
+                            status_callback(ProgressUpdate::partial(
+                                format!("Failed to save image: {err}"),
+                                0.0,
+                            ));
+                        }
+                        Ok(description) => {
+                            meta.set_tag(ExifTag::ImageDescription(description));
+                            meta.set_tag(ExifTag::Software("Corgi".into()));
+                            if let Err(err) = meta.write_to_file(path) {
+                                tracing::error!("Failed to write metadata to file: {err:?}");
+                            }
+                        }
+                    }
+                }
+                status_callback(ProgressUpdate::partial("Image save complete".into(), 1.0));
+            }
+        }
+        Ok(())
     }
-    RenderResult::Finished(timings)
+
+    pub fn texture(&self) -> Arc<RwLock<wgpu::Texture>> {
+        self.gpu_data.texture.clone()
+    }
+}
+
+impl Engine {
+    // /// When the size of the image or probe buffers change or shader params change
+    // fn resize() {}
+    // /// When probe size or location changes
+    // fn reprobe() {}
+
+    fn is_cancelled(&mut self, status_callback: &mut impl FnMut(ProgressUpdate)) -> bool {
+        if self.cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+            status_callback(ProgressUpdate::partial("Cancelled".into(), 1.0));
+            true
+        } else {
+            false
+        }
+    }
 }
 
 /// Runs the compute shader on the GPU. This is the most expensive step, so the output
@@ -141,7 +241,7 @@ fn run_compute_step(
     image: &ImgSpec,
     gpu_data: &GPUData,
     cancelled: Arc<AtomicBool>,
-    status_callback: &mut impl FnMut(StatusMessage),
+    status_callback: &mut impl FnMut(ProgressUpdate),
 ) -> bool {
     let GPUData {
         shared: SharedState { device, queue, .. },
@@ -242,7 +342,7 @@ fn run_compute_step(
         }
         #[cfg(not(debug_assertions))]
         let _ = si;
-        status_callback(StatusMessage::Progress(
+        status_callback(ProgressUpdate::partial(
             format!(
                 "Computing iteration {} of {}",
                 i * constants.iter_batch_size + parameters.chunk_max_iter,
@@ -252,7 +352,7 @@ fn run_compute_step(
                 / image.location.max_iter as f64,
         ));
         if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
-            status_callback(StatusMessage::Progress("Cancelled".into(), 1.0));
+            status_callback(ProgressUpdate::partial("Cancelled".into(), 1.0));
             return false;
         }
     }
@@ -320,51 +420,4 @@ fn run_render_step(image: &ImgSpec, gpu_data: &GPUData) {
         submission_index: Some(si),
         timeout: Some(Duration::from_secs(1)),
     });
-}
-
-pub fn save_to_file(
-    gpu_data: &GPUData,
-    image_settings: &ImgSpec,
-    path: &Path,
-    mut status_callback: impl FnMut(StatusMessage),
-) {
-    status_callback(StatusMessage::Progress("Fetching image data".into(), 0.0));
-    if let Some(data) = gpu_data.get_texture_data() {
-        status_callback(StatusMessage::Progress("Saving image".into(), 0.0));
-        let mut img = image::DynamicImage::ImageRgba8(
-            ImageBuffer::from_raw(image_settings.width, image_settings.height, data)
-                .expect("image data to be properly formatted"),
-        );
-        img = image::DynamicImage::ImageRgb8(img.flipv().into_rgb8());
-        if let Err(err) = img.save(path) {
-            tracing::error!("Failed to save image: {err}");
-            status_callback(StatusMessage::Progress(
-                format!("Failed to save image: {err}"),
-                0.0,
-            ));
-        } else {
-            // add metadata
-            if is_metadata_supported(path) {
-                let mut meta = Metadata::new();
-                let serialized = image_settings.stringify();
-                match serialized {
-                    Err(err) => {
-                        tracing::error!("Failed to save image: {err}");
-                        status_callback(StatusMessage::Progress(
-                            format!("Failed to save image: {err}"),
-                            0.0,
-                        ));
-                    }
-                    Ok(description) => {
-                        meta.set_tag(ExifTag::ImageDescription(description));
-                        meta.set_tag(ExifTag::Software("Corgi".into()));
-                        if let Err(err) = meta.write_to_file(path) {
-                            tracing::error!("Failed to write metadata to file: {err:?}");
-                        }
-                    }
-                }
-            }
-            status_callback(StatusMessage::Progress("Image save complete".into(), 1.0));
-        }
-    }
 }

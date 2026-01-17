@@ -6,7 +6,9 @@ use std::time::{Duration, Instant};
 
 use clap::Parser;
 use corgi::types::serde::SafeSaveLoad;
-use corgi::types::{Debouncer, ImageGenCommand, ImageTimings, ImgSpec, StatusMessage};
+use corgi::types::{
+    Debouncer, ImageGenCommand, ImageTimings, ImgSpec, ProgressUpdate, StatusMessage,
+};
 
 use crate::config::Context;
 use crate::ui::{CorgiUI, PreviewRenderResources};
@@ -186,9 +188,9 @@ impl eframe::App for CorgiApp {
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
         for msg in self.status_channel.try_iter() {
             match msg {
-                StatusMessage::Progress(message, progress) => {
+                StatusMessage::Progress(ProgressUpdate { message, progress }) => {
                     self.ui_state.status.message = message;
-                    self.ui_state.status.progress = Some(progress);
+                    self.ui_state.status.progress = progress;
                 }
                 StatusMessage::RenderFinished(id, timings, viewport) => {
                     tracing::debug!("Image finished. {timings}");

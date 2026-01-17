@@ -40,9 +40,32 @@ pub enum RendererId {
 
 #[derive(Debug)]
 pub enum StatusMessage {
-    Progress(String, f64),
+    Progress(ProgressUpdate),
     RenderFinished(RendererId, ImageTimings, View),
 }
+
+#[derive(Debug)]
+pub struct ProgressUpdate {
+    pub message: String,
+    pub progress: Option<f64>,
+}
+
+impl ProgressUpdate {
+    pub fn msg(message: String) -> Self {
+        Self {
+            message,
+            progress: None,
+        }
+    }
+
+    pub fn partial(message: String, percent: f64) -> Self {
+        Self {
+            message,
+            progress: Some(percent),
+        }
+    }
+}
+
 /// Shared status between the main thread and the render thread
 #[derive(Default, Debug, Clone)]
 pub struct Status {
