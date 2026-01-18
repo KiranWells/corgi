@@ -1,8 +1,8 @@
 use std::mem::discriminant;
 
 use corgi::types::{
-    Coloring, Gradient, Layer, LayerKind, Light, LightingKind, MAX_GRADIENT_STOPS, Outline,
-    Overlays, next_layer_id,
+    Coloring, Gradient, Layer, LayerKind, Light, LightingKind, MAX_GRADIENT_STOPS, MAX_LIGHTS,
+    Outline, Overlays, next_layer_id,
 };
 use eframe::egui::collapsing_header::{CollapsingState, paint_default_icon};
 use eframe::egui::{self, CornerRadius, Event, RichText, Sense, Stroke};
@@ -66,13 +66,59 @@ impl EditUI for Coloring {
         );
         self.lighting_kind.render_edit_ui(ctx, tui);
         if self.lighting_kind == LightingKind::Shaded {
-            for (i, light) in self.lights.iter_mut().enumerate() {
+            if self.lights.is_empty() {
+                self.lights
+                    .push(Light::new([1.0, 1.0, 1.0], 1.0, [1.0, 1.0, 1.0]));
+            }
+            for i in 0..self.lights.len() {
+                let mut brk = false;
                 tui.vertical().add(|tui| {
-                    tui.small(format!("Light {}", i + 1));
-                    indent_with_line(tui, |tui| {
-                        light.render_edit_ui(ctx, tui);
+                    tui.style(Style {
+                        flex_direction: FlexDirection::Row,
+                        padding: Rect::zero(),
+                        justify_content: Some(AlignContent::SpaceBetween),
+                        align_content: Some(AlignContent::SpaceBetween),
+                        justify_items: Some(AlignItems::Center),
+                        align_items: Some(AlignItems::Center),
+                        size: Size {
+                            width: percent(1.0),
+                            height: auto(),
+                        },
+                        flex_grow: 1.0,
+                        ..tui.current_style().clone()
+                    })
+                    .add(|tui| {
+                        tui.small(format!("Light {}", i + 1));
+                        if tui
+                            .enabled_ui(self.lights.len() > 1)
+                            .ui_add(egui::Button::new(icons::ICON_DELETE))
+                            .on_hover_text("Delete")
+                            .clicked()
+                        {
+                            self.lights.remove(i);
+                            // Cancel rendering the rest of the list, as we just messed up the indexes.
+                            // This appears not to cause rendering issues, and simplifies the logic.
+                            brk = true;
+                        }
                     });
+                    if !brk {
+                        indent_with_line(tui, |tui| {
+                            self.lights[i].render_edit_ui(ctx, tui);
+                        });
+                    }
                 });
+                if brk {
+                    break;
+                }
+            }
+            if tui
+                .horizontal()
+                .enabled_ui(self.lights.len() < MAX_LIGHTS)
+                .ui_add(egui::Button::new(format!("{} Add Light", icons::ICON_ADD)))
+                .clicked()
+            {
+                self.lights
+                    .push(Light::new([1.0, 1.0, 1.0], 1.0, [-1.0, -1.0, 1.0]));
             }
         }
         if self.lighting_kind != LightingKind::Flat {

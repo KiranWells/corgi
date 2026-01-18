@@ -260,7 +260,7 @@ impl Default for Light {
     fn default() -> Self {
         Self {
             color: [1.0; 3],
-            strength: 1.0,
+            strength: 0.0,
             direction: [0.0, 0.0, 1.0],
             padding: 0.0,
         }
@@ -268,7 +268,7 @@ impl Default for Light {
 }
 
 impl Light {
-    fn new(color: [f32; 3], strength: f32, direction: [f32; 3]) -> Self {
+    pub fn new(color: [f32; 3], strength: f32, direction: [f32; 3]) -> Self {
         let direction_length = (direction[0] * direction[0]
             + direction[1] * direction[1]
             + direction[2] * direction[2])
@@ -292,6 +292,11 @@ impl Light {
             + direction[1] * direction[1]
             + direction[2] * direction[2])
             .sqrt();
+        // prevent instability where calling normalize
+        // repeatedly results in different values
+        if (direction_length - 1.0).abs() < 1e-4 {
+            return;
+        }
         let direction = [
             direction[0] / direction_length,
             direction[1] / direction_length,
