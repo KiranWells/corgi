@@ -16,6 +16,7 @@ use eframe::egui::Vec2;
 
 pub use self::coloring::*;
 pub use self::image::*;
+use crate::image_gen::Constants;
 
 pub const ESCAPE_RADIUS: f64 = 1e10;
 
@@ -27,6 +28,7 @@ pub fn get_precision(zoom: f32) -> u32 {
 #[derive(Debug)]
 pub enum ImageGenCommand {
     Render(RendererId, Box<ImgSpec>),
+    UpdateConstants(RendererId, Constants),
     SaveToFile(RendererId, PathBuf),
     ShutDown,
 }

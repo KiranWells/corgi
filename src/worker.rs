@@ -40,7 +40,7 @@ impl WorkerState {
                         shared.clone(),
                         "Explore",
                         corgi::image_gen::Constants {
-                            iter_batch_size: context.config().max_shader_batch_iters,
+                            iter_batch_size: context.config().ui_max_shader_batch_iters,
                         },
                         cancelled.clone(),
                     ),
@@ -53,7 +53,7 @@ impl WorkerState {
                         shared.clone(),
                         "Style",
                         corgi::image_gen::Constants {
-                            iter_batch_size: context.config().max_shader_batch_iters,
+                            iter_batch_size: context.config().ui_max_shader_batch_iters,
                         },
                         cancelled.clone(),
                     ),
@@ -97,6 +97,9 @@ impl WorkerState {
                 ImageGenCommand::SaveToFile(id, path) => {
                     save_commands.insert(id, path);
                 }
+                ImageGenCommand::UpdateConstants(id, c) => {
+                    self.renderers.get_mut(&id).unwrap().update_constants(c);
+                }
                 ImageGenCommand::ShutDown => return,
             }
             loop {
@@ -107,6 +110,9 @@ impl WorkerState {
                     }
                     Ok(ImageGenCommand::SaveToFile(id, path)) => {
                         save_commands.insert(id, path);
+                    }
+                    Ok(ImageGenCommand::UpdateConstants(id, c)) => {
+                        self.renderers.get_mut(&id).unwrap().update_constants(c);
                     }
                     Ok(ImageGenCommand::ShutDown) => return,
                     Err(mpsc::TryRecvError::Empty) => break,

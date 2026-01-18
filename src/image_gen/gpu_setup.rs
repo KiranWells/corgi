@@ -57,8 +57,6 @@ pub struct GPUData {
     pub bind_groups: BindGroups,
     /// A copy of the shared state handles
     pub shared: SharedState,
-    /// A group of constants used to parameterize calculations
-    pub constants: Constants,
 }
 
 /// A struct containing all of the buffers used by the GPU
@@ -102,6 +100,7 @@ enum BuffType {
     Uniform,
 }
 
+#[derive(Clone, Copy, Debug)]
 pub struct Constants {
     /// The number of iterations to calculate in one execution
     /// when running the compute shaders.
@@ -168,13 +167,7 @@ impl SharedState {
 
 impl GPUData {
     /// Initializes the GPU handles for use in rendering an image.
-    pub fn init(
-        size: wgpu::Extent3d,
-        max_iter: usize,
-        shared: SharedState,
-        label: &str,
-        constants: Constants,
-    ) -> Self {
+    pub fn init(size: wgpu::Extent3d, max_iter: usize, shared: SharedState, label: &str) -> Self {
         let device = &shared.device;
 
         let texture = Self::create_texture(device, size);
@@ -231,7 +224,6 @@ impl GPUData {
             texture: Arc::new(RwLock::new(texture)),
             buffers,
             bind_groups,
-            constants,
         }
     }
 

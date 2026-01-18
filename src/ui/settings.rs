@@ -7,9 +7,17 @@ impl EditUI for crate::Config {
     fn render_edit_ui(&mut self, _ctx: &eframe::egui::Context, tui: &mut egui_taffy::Tui) {
         input_with_label(
             tui,
-            "Max Steps per Shader Batch",
+            "Max Steps per Shader Batch in UI",
             Some(
-                "The number of iterations calculated in one GPU compute batch. Lower this if the UI freezes for too long during image rendering, but higher values reduce total render time.\nRequires a restart after changing.",
+                "The number of iterations calculated in one GPU compute batch when rendering updates to the UI. Lower this if the UI freezes for too long during viewport updates, but higher values reduce total render time.",
+            ),
+            DragValue::new(&mut self.ui_max_shader_batch_iters).speed(10),
+        );
+        input_with_label(
+            tui,
+            "Max Steps per Shader Batch in Render",
+            Some(
+                "The number of iterations calculated in one GPU compute batch during Rendering. Lower this if the UI freezes for too long during image rendering, but higher values reduce total render time.",
             ),
             DragValue::new(&mut self.max_shader_batch_iters).speed(10),
         );

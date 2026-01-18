@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Config {
+    pub ui_max_shader_batch_iters: u32,
     pub max_shader_batch_iters: u32,
 }
 
@@ -44,6 +45,7 @@ pub struct Context {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            ui_max_shader_batch_iters: 1000,
             max_shader_batch_iters: 5000,
         }
     }

@@ -363,6 +363,7 @@ impl CorgiUI {
                 ui.set_style(style);
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
 
+                let previous_config = context.config().clone();
                 tui(ui, ui.id().with("settings"))
                     .reserve_available_width()
                     .style(Style {
@@ -380,7 +381,32 @@ impl CorgiUI {
                         section(tui, "Theme", true, |tui| {
                             context.theme_mut().render_edit_ui(ctx, tui);
                         });
-                    })
+                    });
+                if context.config().ui_max_shader_batch_iters
+                    != previous_config.ui_max_shader_batch_iters
+                {
+                    let _ = self.command_channel.send(ImageGenCommand::UpdateConstants(
+                        RendererId::Explore,
+                        corgi::image_gen::Constants {
+                            iter_batch_size: context.config().ui_max_shader_batch_iters,
+                        },
+                    ));
+                    let _ = self.command_channel.send(ImageGenCommand::UpdateConstants(
+                        RendererId::Style,
+                        corgi::image_gen::Constants {
+                            iter_batch_size: context.config().ui_max_shader_batch_iters,
+                        },
+                    ));
+                }
+                if context.config().max_shader_batch_iters != previous_config.max_shader_batch_iters
+                {
+                    let _ = self.command_channel.send(ImageGenCommand::UpdateConstants(
+                        RendererId::Render,
+                        corgi::image_gen::Constants {
+                            iter_batch_size: context.config().max_shader_batch_iters,
+                        },
+                    ));
+                }
             });
     }
 

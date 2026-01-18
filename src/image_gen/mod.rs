@@ -60,6 +60,8 @@ pub struct Engine {
     probed_data: Vec<[f32; 2]>,
     // communication?
     cancelled: Arc<AtomicBool>,
+    // engine settings
+    constants: Constants,
 }
 
 impl Engine {
@@ -73,9 +75,10 @@ impl Engine {
     ) -> Self {
         Self {
             last_image: None,
-            gpu_data: GPUData::init(size, max_iter, shared, label, constants),
+            gpu_data: GPUData::init(size, max_iter, shared, label),
             probed_data: vec![],
             cancelled,
+            constants,
         }
     }
 
@@ -154,6 +157,7 @@ impl Engine {
                 &self.gpu_data,
                 self.cancelled.clone(),
                 status_callback,
+                self.constants,
             ) {
                 return Err(RenderingError::Cancelled);
             }
@@ -215,6 +219,10 @@ impl Engine {
     pub fn texture(&self) -> Arc<RwLock<wgpu::Texture>> {
         self.gpu_data.texture.clone()
     }
+
+    pub fn update_constants(&mut self, c: Constants) {
+        self.constants = c;
+    }
 }
 
 impl Engine {
@@ -243,6 +251,7 @@ fn run_compute_step(
     gpu_data: &GPUData,
     cancelled: Arc<AtomicBool>,
     status_callback: &mut impl FnMut(ProgressUpdate),
+    constants: Constants,
 ) -> bool {
     let GPUData {
         shared: SharedState { device, queue, .. },
@@ -250,7 +259,6 @@ fn run_compute_step(
         direct_f32_pipeline,
         perturbed_f32_pipeline,
         buffers,
-        constants,
         ..
     } = gpu_data;
     let texture_size: Extent3d = image.extents();
