@@ -35,10 +35,10 @@ impl WorkerState {
                 (
                     RendererId::Explore,
                     Engine::init(
-                        preview_settings.extents(),
-                        preview_settings.location.max_iter as usize,
                         shared.clone(),
                         "Explore",
+                        preview_settings.extents(),
+                        preview_settings.location.max_iter as usize,
                         corgi::image_gen::Constants {
                             iter_batch_size: context.config().ui_max_shader_batch_iters,
                         },
@@ -48,10 +48,10 @@ impl WorkerState {
                 (
                     RendererId::Style,
                     Engine::init(
-                        preview_settings.extents(),
-                        preview_settings.location.max_iter as usize,
                         shared.clone(),
                         "Style",
+                        preview_settings.extents(),
+                        preview_settings.location.max_iter as usize,
                         corgi::image_gen::Constants {
                             iter_batch_size: context.config().ui_max_shader_batch_iters,
                         },
@@ -61,10 +61,10 @@ impl WorkerState {
                 (
                     RendererId::Render,
                     Engine::init(
-                        output_settings.extents(),
-                        output_settings.location.max_iter as usize,
                         shared.clone(),
                         "Render",
+                        output_settings.extents(),
+                        output_settings.location.max_iter as usize,
                         corgi::image_gen::Constants {
                             iter_batch_size: context.config().max_shader_batch_iters,
                         },
@@ -153,11 +153,11 @@ impl WorkerState {
             for (id, path) in save_commands {
                 if let Err(err) = self.renderers.get(&id).unwrap().save_to_file(
                     &path,
+                    corgi::types::serde::is_metadata_supported(&path),
                     &mut |pu| {
                         let _ = self.status_channel.send(StatusMessage::Progress(pu));
                         self.ctx.request_repaint();
                     },
-                    corgi::types::serde::is_metadata_supported(&path),
                 ) {
                     let _ = self.status_channel.send(StatusMessage::Error(err.into()));
                 } else {

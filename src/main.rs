@@ -65,10 +65,10 @@ fn main() -> Result<()> {
         let mut image = ImgSpec::load(&settings_file)?;
         image.optimization_level = OptLevel::AccuracyOptimized;
         let mut engine = Engine::init(
-            image.extents(),
-            image.location.max_iter as usize,
             SharedState::new(device, queue),
             "cli renderer",
+            image.extents(),
+            image.location.max_iter as usize,
             Constants {
                 iter_batch_size: 10_000,
             },
@@ -99,8 +99,8 @@ fn main() -> Result<()> {
         print!("\n------- | Rendering timings: {}", timings);
         engine.save_to_file(
             &path,
-            &mut status_callback,
             corgi::types::serde::is_metadata_supported(&path),
+            &mut status_callback,
         )?;
         println!();
         return Ok(());

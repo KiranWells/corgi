@@ -66,10 +66,10 @@ pub struct Engine {
 
 impl Engine {
     pub fn init(
-        size: wgpu::Extent3d,
-        max_iter: usize,
         shared: SharedState,
         label: &str,
+        size: wgpu::Extent3d,
+        max_iter: usize,
         constants: Constants,
         cancelled: Arc<AtomicBool>,
     ) -> Self {
@@ -152,12 +152,12 @@ impl Engine {
             let start = Instant::now();
             status_callback(ProgressUpdate::partial("Computing iterations", 0.0));
             if !run_compute_step(
+                &self.gpu_data,
                 &self.probed_data,
                 image,
-                &self.gpu_data,
+                self.constants,
                 self.cancelled.clone(),
                 status_callback,
-                self.constants,
             ) {
                 return Err(RenderingError::Cancelled);
             }
@@ -171,7 +171,7 @@ impl Engine {
         if diff.recolor {
             let start = Instant::now();
             status_callback(ProgressUpdate::msg("Rendering Colors"));
-            run_render_step(image, &self.gpu_data);
+            run_render_step(&self.gpu_data, image);
             timings.color = Instant::now() - start;
         }
         self.last_image = Some(image.clone());
@@ -181,8 +181,8 @@ impl Engine {
     pub fn save_to_file(
         &self,
         path: &Path,
-        status_callback: &mut impl FnMut(ProgressUpdate),
         add_metadata: bool,
+        status_callback: &mut impl FnMut(ProgressUpdate),
     ) -> Result<(), SaveError> {
         let Some(image_settings) = &self.last_image else {
             return Err(SaveError::NoImage);
@@ -246,12 +246,12 @@ impl Engine {
 /// location, max iteration, or image viewport has changed.
 #[must_use]
 fn run_compute_step(
+    gpu_data: &GPUData,
     probed_data: &[[f32; 2]],
     image: &ImgSpec,
-    gpu_data: &GPUData,
+    constants: Constants,
     cancelled: Arc<AtomicBool>,
     status_callback: &mut impl FnMut(ProgressUpdate),
-    constants: Constants,
 ) -> bool {
     let GPUData {
         shared: SharedState { device, queue, .. },
@@ -366,7 +366,7 @@ fn run_compute_step(
 }
 
 /// Runs the render shader on the GPU
-fn run_render_step(image: &ImgSpec, gpu_data: &GPUData) {
+fn run_render_step(gpu_data: &GPUData, image: &ImgSpec) {
     let GPUData {
         shared: SharedState { device, queue, .. },
         bind_groups,
