@@ -10,7 +10,6 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
-use std::time::Instant;
 
 use clap::Parser;
 use color_eyre::Result;
@@ -75,7 +74,6 @@ fn main() -> Result<()> {
             },
             std::sync::Arc::new(AtomicBool::new(false)),
         );
-        let now = Instant::now();
         fn status_callback(pu: ProgressUpdate) {
             if let Some(percent) = pu.progress {
                 println!("{:>6.2}% | {}", percent * 100.0, pu.message);
@@ -84,9 +82,13 @@ fn main() -> Result<()> {
             }
             let _ = std::io::stdout().lock().flush();
         }
-        let _ = engine.render_image(&image, status_callback);
-        println!("Rendering took {:?}", Instant::now().duration_since(now));
-        let _ = engine.save_to_file(&path, status_callback);
+        let timings = engine.render_image(&image, status_callback)?;
+        println!("Rendering timings: {}", timings);
+        engine.save_to_file(
+            &path,
+            status_callback,
+            corgi::types::serde::is_metadata_supported(&path),
+        )?;
         return Ok(());
     }
 

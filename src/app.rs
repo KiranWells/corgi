@@ -200,6 +200,11 @@ impl eframe::App for CorgiApp {
                     self.debouncer.update_timings(&timings);
                     self.ui_state.update_rendered_view(id, viewport);
                 }
+                StatusMessage::Error(report) => {
+                    tracing::warn!("Error in worker: {report}");
+                    self.ui_state.status.message = report.to_string();
+                    self.ui_state.status.progress = None;
+                }
             }
         }
         self.ui_state.generate_ui(ctx, &mut self.context, || {

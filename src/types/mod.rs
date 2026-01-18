@@ -42,6 +42,7 @@ pub enum RendererId {
 pub enum StatusMessage {
     Progress(ProgressUpdate),
     RenderFinished(RendererId, ImageTimings, View),
+    Error(color_eyre::Report),
 }
 
 #[derive(Debug)]
@@ -308,11 +309,6 @@ impl Debouncer {
     }
 }
 
-#[derive(Debug)]
-pub enum RenderResult {
-    Unfinished,
-    Finished(ImageTimings),
-}
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ImageTimings {
     pub probe: Duration,

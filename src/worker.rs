@@ -2,7 +2,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, mpsc};
 
 use corgi::image_gen::{Engine, SharedState};
-use corgi::types::{ImageGenCommand, ImgSpec, RenderResult, RendererId, StatusMessage};
+use corgi::types::{ImageGenCommand, ImgSpec, RendererId, StatusMessage};
 use eframe::egui::ahash::{HashMap, HashMapExt};
 use eframe::egui::mutex::RwLock;
 use eframe::{egui, egui_wgpu, wgpu};
@@ -122,20 +122,39 @@ impl WorkerState {
                         let _ = self.status_channel.send(StatusMessage::Progress(pu));
                         self.ctx.request_repaint();
                     });
-                if let RenderResult::Finished(timings) = result {
-                    let _ = self.status_channel.send(StatusMessage::RenderFinished(
-                        id,
-                        timings,
-                        image.view(),
-                    ));
+                match result {
+                    Ok(timings) => {
+                        let _ = self.status_channel.send(StatusMessage::RenderFinished(
+                            id,
+                            timings,
+                            image.view(),
+                        ));
+                    }
+                    Err(corgi::image_gen::RenderingError::Cancelled) => {
+                        let _ = self.status_channel.send(StatusMessage::Progress(
+                            corgi::types::ProgressUpdate {
+                                message: "Generation Cancelled".into(),
+                                progress: None,
+                            },
+                        ));
+                    }
+                    Err(err) => {
+                        let _ = self.status_channel.send(StatusMessage::Error(err.into()));
+                    }
                 }
                 self.ctx.request_repaint();
             }
             for (id, path) in save_commands {
-                let _ = self.renderers.get(&id).unwrap().save_to_file(&path, |pu| {
-                    let _ = self.status_channel.send(StatusMessage::Progress(pu));
-                    self.ctx.request_repaint();
-                });
+                if let Err(err) = self.renderers.get(&id).unwrap().save_to_file(
+                    &path,
+                    |pu| {
+                        let _ = self.status_channel.send(StatusMessage::Progress(pu));
+                        self.ctx.request_repaint();
+                    },
+                    corgi::types::serde::is_metadata_supported(&path),
+                ) {
+                    let _ = self.status_channel.send(StatusMessage::Error(err.into()));
+                }
             }
         }
     }

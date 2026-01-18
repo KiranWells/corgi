@@ -24,14 +24,30 @@ use little_exif::exif_tag::ExifTag;
 use little_exif::metadata::Metadata;
 use probe::probe;
 
-use crate::types::serde::SafeSaveLoad;
+use crate::types::serde::{SafeSaveLoad, is_metadata_supported};
 use crate::types::{
     ColorParams, ComputeParams, ImageDiff, ImageTimings, ImgSpec, ProgressUpdate, RenderParams,
-    RenderResult,
 };
 
-pub fn is_metadata_supported(path: &Path) -> bool {
-    matches!(path.extension(), Some(x) if x == "jpg" || x == "jpeg" || x == "png" || x == "webp" || x == "avif")
+#[derive(thiserror::Error, Debug)]
+#[non_exhaustive]
+pub enum RenderingError {
+    #[error("Rendering was cancelled")]
+    Cancelled,
+}
+#[derive(thiserror::Error, Debug)]
+#[non_exhaustive]
+pub enum SaveError {
+    #[error("There is no rendered image")]
+    NoImage,
+    #[error("Failed to save the image data to a file")]
+    Save(#[from] image::ImageError),
+    #[error("Failed to serialize image spec")]
+    Serialization(#[from] crate::types::serde::SaveLoadError),
+    #[error("Metadata not supported for image format: {0:?}")]
+    MetadataNotSupported(Option<std::ffi::OsString>),
+    #[error("Failed to save metadata to image")]
+    MetadataSave(#[from] std::io::Error),
 }
 
 pub struct Engine {
@@ -63,12 +79,11 @@ impl Engine {
         }
     }
 
-    #[must_use]
     pub fn render_image(
         &mut self,
         image: &ImgSpec,
         mut status_callback: impl FnMut(ProgressUpdate),
-    ) -> RenderResult {
+    ) -> Result<ImageTimings, RenderingError> {
         let diff = self
             .last_image
             .as_ref()
@@ -93,7 +108,7 @@ impl Engine {
             timings.build = Instant::now() - start;
         }
         if self.is_cancelled(&mut status_callback) {
-            return RenderResult::Unfinished;
+            return Err(RenderingError::Cancelled);
         }
 
         if diff.reprobe {
@@ -126,7 +141,7 @@ impl Engine {
             timings.probe = Instant::now() - start;
         }
         if self.is_cancelled(&mut status_callback) {
-            return RenderResult::Unfinished;
+            return Err(RenderingError::Cancelled);
         }
 
         if diff.recompute {
@@ -142,7 +157,7 @@ impl Engine {
                 self.cancelled.clone(),
                 &mut status_callback,
             ) {
-                return RenderResult::Unfinished;
+                return Err(RenderingError::Cancelled);
             }
             timings.compute = Instant::now() - start;
         }
@@ -158,16 +173,17 @@ impl Engine {
             timings.color = Instant::now() - start;
         }
         self.last_image = Some(image.clone());
-        RenderResult::Finished(timings)
+        Ok(timings)
     }
 
     pub fn save_to_file(
         &self,
         path: &Path,
         mut status_callback: impl FnMut(ProgressUpdate),
-    ) -> Result<(), ()> {
+        add_metadata: bool,
+    ) -> Result<(), SaveError> {
         let Some(image_settings) = &self.last_image else {
-            return Err(());
+            return Err(SaveError::NoImage);
         };
         status_callback(ProgressUpdate::partial("Fetching image data".into(), 0.0));
         if let Some(data) = self.gpu_data.get_texture_data() {
@@ -177,35 +193,21 @@ impl Engine {
                     .expect("image data to be properly formatted"),
             );
             img = image::DynamicImage::ImageRgb8(img.flipv().into_rgb8());
-            if let Err(err) = img.save(path) {
-                tracing::error!("Failed to save image: {err}");
-                status_callback(ProgressUpdate::partial(
-                    format!("Failed to save image: {err}"),
-                    0.0,
-                ));
-            } else {
-                // add metadata
-                if is_metadata_supported(path) {
-                    let mut meta = Metadata::new();
-                    let serialized = image_settings.stringify();
-                    match serialized {
-                        Err(err) => {
-                            tracing::error!("Failed to save image: {err}");
-                            status_callback(ProgressUpdate::partial(
-                                format!("Failed to save image: {err}"),
-                                0.0,
-                            ));
-                        }
-                        Ok(description) => {
-                            meta.set_tag(ExifTag::ImageDescription(description));
-                            meta.set_tag(ExifTag::Software("Corgi".into()));
-                            if let Err(err) = meta.write_to_file(path) {
-                                tracing::error!("Failed to write metadata to file: {err:?}");
-                            }
-                        }
-                    }
+            img.save(path)?;
+
+            // add metadata
+            if add_metadata {
+                if !is_metadata_supported(path) {
+                    return Err(SaveError::MetadataNotSupported(
+                        path.extension().map(|os| os.to_os_string()),
+                    ));
                 }
-                status_callback(ProgressUpdate::partial("Image save complete".into(), 1.0));
+                let mut meta = Metadata::new();
+                let description = image_settings.stringify()?;
+
+                meta.set_tag(ExifTag::ImageDescription(description));
+                meta.set_tag(ExifTag::Software("Corgi".into()));
+                meta.write_to_file(path)?;
             }
         }
         Ok(())
