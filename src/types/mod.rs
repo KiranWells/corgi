@@ -47,19 +47,19 @@ pub enum StatusMessage {
 
 #[derive(Debug)]
 pub struct ProgressUpdate {
-    pub message: String,
+    pub message: &'static str,
     pub progress: Option<f64>,
 }
 
 impl ProgressUpdate {
-    pub fn msg(message: String) -> Self {
+    pub fn msg(message: &'static str) -> Self {
         Self {
             message,
             progress: None,
         }
     }
 
-    pub fn partial(message: String, percent: f64) -> Self {
+    pub fn partial(message: &'static str, percent: f64) -> Self {
         Self {
             message,
             progress: Some(percent),

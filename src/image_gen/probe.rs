@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use rug::Float;
 
-use crate::types::{ComplexPoint, ESCAPE_RADIUS, get_precision};
+use crate::types::{ComplexPoint, ESCAPE_RADIUS, ProgressUpdate, get_precision};
 
 /// # FromFloat
 /// A trait to convert a `rug::Float` to another type.
@@ -31,6 +31,7 @@ pub fn probe<T>(
     max_iter: u32,
     zoom: f32,
     julia_point: Option<&ComplexPoint>,
+    status_callback: &mut impl FnMut(ProgressUpdate),
 ) -> Vec<[T; 2]>
 where
     T: FromFloat + Debug,
@@ -57,7 +58,13 @@ where
     let mut z_squared_imag = z_imag.clone() * z_imag.clone();
 
     probed_point.push([T::from_float(&z_real), T::from_float(&z_imag)]);
-    for _step in 0..max_iter - 1 {
+    for step in 0..max_iter - 1 {
+        if step % 10_000 == 0 {
+            status_callback(ProgressUpdate::partial(
+                "Probing point",
+                step as f64 / max_iter as f64,
+            ));
+        }
         // iterate values, according to z = z^2 + c
         //
         // uses an optimized computation method from wikipedia for z:
@@ -82,6 +89,7 @@ where
             break;
         }
     }
+    status_callback(ProgressUpdate::partial("Probing point", 1.0));
 
     probed_point
 }

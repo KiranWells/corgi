@@ -82,7 +82,7 @@ impl Engine {
     pub fn render_image(
         &mut self,
         image: &ImgSpec,
-        mut status_callback: impl FnMut(ProgressUpdate),
+        status_callback: &mut impl FnMut(ProgressUpdate),
     ) -> Result<ImageTimings, RenderingError> {
         let diff = self
             .last_image
@@ -100,6 +100,7 @@ impl Engine {
 
         if diff.rebuild {
             let start = Instant::now();
+            status_callback(ProgressUpdate::msg("Rebuilding GPU Buffers"));
             self.gpu_data.resize(
                 (image.width, image.height),
                 image.location.max_iter as usize,
@@ -107,13 +108,12 @@ impl Engine {
             );
             timings.build = Instant::now() - start;
         }
-        if self.is_cancelled(&mut status_callback) {
+        if self.is_cancelled(status_callback) {
             return Err(RenderingError::Cancelled);
         }
 
         if diff.reprobe {
             let start = Instant::now();
-            status_callback(ProgressUpdate::partial("Probing point".into(), 0.0));
             let julia_point = match &image.location.fractal_kind {
                 crate::types::FractalKind::Mandelbrot => None,
                 crate::types::FractalKind::Julia(pt) => Some(pt),
@@ -124,8 +124,9 @@ impl Engine {
                 image.location.max_iter,
                 image.location.zoom,
                 julia_point,
+                status_callback,
             );
-            status_callback(ProgressUpdate::partial("Uploading probe".into(), 0.0));
+            status_callback(ProgressUpdate::msg("Uploading probe"));
             // update the probe buffer
             self.gpu_data.shared.queue.write_buffer(
                 &self.gpu_data.buffers.probe,
@@ -140,22 +141,19 @@ impl Engine {
                 .poll(wgpu::PollType::wait_indefinitely());
             timings.probe = Instant::now() - start;
         }
-        if self.is_cancelled(&mut status_callback) {
+        if self.is_cancelled(status_callback) {
             return Err(RenderingError::Cancelled);
         }
 
         if diff.recompute {
             let start = Instant::now();
-            status_callback(ProgressUpdate::partial(
-                format!("Computing iteration 1 of {}", image.location.max_iter),
-                0.0,
-            ));
+            status_callback(ProgressUpdate::partial("Computing iterations", 0.0));
             if !run_compute_step(
                 &self.probed_data,
                 image,
                 &self.gpu_data,
                 self.cancelled.clone(),
-                &mut status_callback,
+                status_callback,
             ) {
                 return Err(RenderingError::Cancelled);
             }
@@ -168,7 +166,7 @@ impl Engine {
         // avoid dropped frames.
         if diff.recolor {
             let start = Instant::now();
-            status_callback(ProgressUpdate::partial("Rendering Colors".into(), 0.0));
+            status_callback(ProgressUpdate::msg("Rendering Colors"));
             run_render_step(image, &self.gpu_data);
             timings.color = Instant::now() - start;
         }
@@ -179,15 +177,15 @@ impl Engine {
     pub fn save_to_file(
         &self,
         path: &Path,
-        mut status_callback: impl FnMut(ProgressUpdate),
+        status_callback: &mut impl FnMut(ProgressUpdate),
         add_metadata: bool,
     ) -> Result<(), SaveError> {
         let Some(image_settings) = &self.last_image else {
             return Err(SaveError::NoImage);
         };
-        status_callback(ProgressUpdate::partial("Fetching image data".into(), 0.0));
+        status_callback(ProgressUpdate::msg("Fetching image data"));
         if let Some(data) = self.gpu_data.get_texture_data() {
-            status_callback(ProgressUpdate::partial("Saving image".into(), 0.0));
+            status_callback(ProgressUpdate::msg("Saving image"));
             let mut img = image::DynamicImage::ImageRgba8(
                 ImageBuffer::from_raw(image_settings.width, image_settings.height, data)
                     .expect("image data to be properly formatted"),
@@ -197,6 +195,7 @@ impl Engine {
 
             // add metadata
             if add_metadata {
+                status_callback(ProgressUpdate::msg("Updating metadata"));
                 if !is_metadata_supported(path) {
                     return Err(SaveError::MetadataNotSupported(
                         path.extension().map(|os| os.to_os_string()),
@@ -226,7 +225,7 @@ impl Engine {
 
     fn is_cancelled(&mut self, status_callback: &mut impl FnMut(ProgressUpdate)) -> bool {
         if self.cancelled.load(std::sync::atomic::Ordering::Relaxed) {
-            status_callback(ProgressUpdate::partial("Cancelled".into(), 1.0));
+            status_callback(ProgressUpdate::partial("Cancelled", 1.0));
             true
         } else {
             false
@@ -332,6 +331,7 @@ fn run_compute_step(
 
         // submit the compute shader command buffer
         let si = queue.submit(Some(command_buffer));
+        std::thread::yield_now();
         // This slows down render times, so we avoid it in release
         #[cfg(debug_assertions)]
         {
@@ -345,16 +345,12 @@ fn run_compute_step(
         #[cfg(not(debug_assertions))]
         let _ = si;
         status_callback(ProgressUpdate::partial(
-            format!(
-                "Computing iteration {} of {}",
-                i * constants.iter_batch_size + parameters.chunk_max_iter,
-                image.location.max_iter
-            ),
+            "Computing iterations",
             (i * constants.iter_batch_size + parameters.chunk_max_iter) as f64
                 / image.location.max_iter as f64,
         ));
         if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
-            status_callback(ProgressUpdate::partial("Cancelled".into(), 1.0));
+            status_callback(ProgressUpdate::partial("Cancelled", 1.0));
             return false;
         }
     }

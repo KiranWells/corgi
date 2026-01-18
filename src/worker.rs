@@ -118,7 +118,7 @@ impl WorkerState {
                     .renderers
                     .get_mut(&id)
                     .unwrap()
-                    .render_image(&image, |pu| {
+                    .render_image(&image, &mut |pu| {
                         let _ = self.status_channel.send(StatusMessage::Progress(pu));
                         self.ctx.request_repaint();
                     });
@@ -133,7 +133,7 @@ impl WorkerState {
                     Err(corgi::image_gen::RenderingError::Cancelled) => {
                         let _ = self.status_channel.send(StatusMessage::Progress(
                             corgi::types::ProgressUpdate {
-                                message: "Generation Cancelled".into(),
+                                message: "Generation Cancelled",
                                 progress: None,
                             },
                         ));
@@ -147,13 +147,17 @@ impl WorkerState {
             for (id, path) in save_commands {
                 if let Err(err) = self.renderers.get(&id).unwrap().save_to_file(
                     &path,
-                    |pu| {
+                    &mut |pu| {
                         let _ = self.status_channel.send(StatusMessage::Progress(pu));
                         self.ctx.request_repaint();
                     },
                     corgi::types::serde::is_metadata_supported(&path),
                 ) {
                     let _ = self.status_channel.send(StatusMessage::Error(err.into()));
+                } else {
+                    let _ = self.status_channel.send(StatusMessage::Progress(
+                        corgi::types::ProgressUpdate::msg("Image Save Complete"),
+                    ));
                 }
             }
         }

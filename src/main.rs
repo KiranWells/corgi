@@ -70,25 +70,39 @@ fn main() -> Result<()> {
             SharedState::new(device, queue),
             "cli renderer",
             Constants {
-                iter_batch_size: 100_000,
+                iter_batch_size: 10_000,
             },
             std::sync::Arc::new(AtomicBool::new(false)),
         );
-        fn status_callback(pu: ProgressUpdate) {
+        let mut current_step = "";
+        let mut status_callback = |pu: ProgressUpdate| {
             if let Some(percent) = pu.progress {
-                println!("{:>6.2}% | {}", percent * 100.0, pu.message);
+                if current_step == pu.message {
+                    print!("\r");
+                } else {
+                    if !current_step.is_empty() {
+                        println!();
+                    }
+                    current_step = pu.message;
+                }
+                print!("{:>6.2}% | {}", percent * 100.0, pu.message);
             } else {
-                println!("------ | {}", pu.message);
+                if !current_step.is_empty() {
+                    println!();
+                }
+                print!("------- | {}", pu.message);
+                current_step = pu.message;
             }
             let _ = std::io::stdout().lock().flush();
-        }
-        let timings = engine.render_image(&image, status_callback)?;
-        println!("Rendering timings: {}", timings);
+        };
+        let timings = engine.render_image(&image, &mut status_callback)?;
+        print!("\n------- | Rendering timings: {}", timings);
         engine.save_to_file(
             &path,
-            status_callback,
+            &mut status_callback,
             corgi::types::serde::is_metadata_supported(&path),
         )?;
+        println!();
         return Ok(());
     }
 

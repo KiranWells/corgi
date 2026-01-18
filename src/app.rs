@@ -189,7 +189,7 @@ impl eframe::App for CorgiApp {
         for msg in self.status_channel.try_iter() {
             match msg {
                 StatusMessage::Progress(ProgressUpdate { message, progress }) => {
-                    self.ui_state.status.message = message;
+                    self.ui_state.status.message = message.into();
                     self.ui_state.status.progress = progress;
                 }
                 StatusMessage::RenderFinished(id, timings, viewport) => {
