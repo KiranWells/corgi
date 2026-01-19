@@ -24,30 +24,37 @@ path = "src/lib.rs"
 [[bin]]
 name = "corgi"
 path = "src/main.rs"
+required-features = ["binary-deps"]
 
 [dependencies]
 bytemuck = { version = "1.23", features = ["derive"] }
-clap = { version = "4.5.43", features = ["derive"] }
-color-eyre = "0.6"
-directories = "6.0.0"
-ecolor = { version = "0.33.0", features = ["serde"] }
-eframe = { version = "0.33.0", default-features = false, features = ["default_fonts","wayland","wgpu","x11"] }
-egui_material_icons = "0.5.0"
-egui_taffy = "0.10.0"
+ecolor = { version = "0.33.0", features = ["serde", "bytemuck"] }
+emath = "0.33.3"
 image = "0.25"
 little_exif = "0.6.18"
+parking_lot = "0.12.5"
 pollster = "0.4.0"
-rfd = { version = "0.15.4", features = ["xdg-portal"] }
 rug = "1.27"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
-taffy = "0.7.7"
 thiserror = "2.0.17"
 toml = { version = "0.9.8", features = ["serde"] }
 tracing = "0.1"
-tracing-subscriber = "0.3"
 wesl = "0.3.2"
 wgpu = "27"
+# binary deps
+clap = { version = "4.5.43", features = ["derive"], optional = true }
+color-eyre = { version = "0.6", optional = true }
+directories = { version = "6.0.0", optional = true }
+eframe = { version = "0.33.0", default-features = false, features = ["default_fonts","wayland","wgpu","x11"] , optional=true}
+egui_material_icons = { version = "0.5.0", optional = true }
+egui_taffy = { version = "0.10.0", optional = true }
+rfd = { version = "0.15.4", features = ["xdg-portal"], optional = true }
+taffy = { version = "0.7.7", optional = true }
+tracing-subscriber = { version = "0.3", optional = true }
+
+[features]
+binary-deps = ["clap", "color-eyre", "directories", "eframe", "egui_material_icons", "egui_taffy", "rfd", "taffy", "tracing-subscriber"]
 
 [build-dependencies]
 wesl = "0.3.2"

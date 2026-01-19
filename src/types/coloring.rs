@@ -1,12 +1,6 @@
 use std::sync::atomic::AtomicU64;
 
-use eframe::egui;
-use egui_material_icons::icons;
 use serde::{Deserialize, Serialize};
-
-pub const MAX_GRADIENT_STOPS: usize = 50;
-pub const MAX_LAYERS: usize = 8;
-pub const MAX_LIGHTS: usize = 3;
 
 /// The coloring parameters for the image. These are interpreted
 /// slightly differently for internal and external coloring, as
@@ -83,7 +77,7 @@ pub struct Overlays {
     Clone, Copy, Debug, PartialEq, Deserialize, Serialize, bytemuck::Pod, bytemuck::Zeroable,
 )]
 pub struct Outline {
-    pub color: egui::Rgba,
+    pub color: ecolor::Rgba,
     pub parameter: u32,
 }
 
@@ -107,7 +101,10 @@ impl LayerKind {
             LayerKind::Stripe => "Stripe Average",
         }
     }
+
+    #[cfg(feature = "binary-deps")]
     pub fn icon_text(self) -> String {
+        use egui_material_icons::icons;
         match self {
             LayerKind::Step => format!("{} Step Count", icons::ICON_STAIRS_2),
             LayerKind::SmoothStep => format!("{} Smooth Step Count", icons::ICON_ELEVATION),

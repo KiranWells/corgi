@@ -10,24 +10,25 @@ images back to the main thread.
 
 mod gpu_setup;
 mod probe;
+pub mod shader_types;
 
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
-use eframe::egui::mutex::RwLock;
-use eframe::wgpu::{self, Extent3d};
 pub use gpu_setup::{Constants, GPUData, SharedState, get_device_and_queue};
 use image::ImageBuffer;
 use little_exif::exif_tag::ExifTag;
 use little_exif::metadata::Metadata;
+use parking_lot::RwLock;
 use probe::probe;
+use shader_types::{ColorParams, ComputeParams};
+use wgpu::{self, Extent3d};
 
+use crate::image_gen::shader_types::RenderParams;
 use crate::types::serde::{SafeSaveLoad, is_metadata_supported};
-use crate::types::{
-    ColorParams, ComputeParams, ImageDiff, ImageTimings, ImgSpec, ProgressUpdate, RenderParams,
-};
+use crate::types::{ImageDiff, ImgSpec};
 
 #[derive(thiserror::Error, Debug)]
 #[non_exhaustive]
@@ -72,6 +73,91 @@ struct CacheValidity {
     gpu_probe: bool,
     compute: bool,
     color: bool,
+}
+
+#[derive(Debug)]
+pub struct ProgressUpdate {
+    pub message: &'static str,
+    pub progress: Option<f64>,
+}
+
+impl ProgressUpdate {
+    pub fn msg(message: &'static str) -> Self {
+        Self {
+            message,
+            progress: None,
+        }
+    }
+
+    pub fn partial(message: &'static str, percent: f64) -> Self {
+        Self {
+            message,
+            progress: Some(percent),
+        }
+    }
+}
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ImageTimings {
+    pub probe: Duration,
+    pub compute: Duration,
+    pub color: Duration,
+    pub build: Duration,
+}
+
+impl ImageTimings {
+    pub fn estimate_time(&self, diff: ImageDiff) -> Duration {
+        let mut estimated_time = Duration::ZERO;
+        if diff.reprobe {
+            estimated_time += self.probe;
+        }
+        if diff.recompute {
+            estimated_time += self.compute;
+        }
+        if diff.recolor {
+            estimated_time += self.color;
+        }
+        if diff.rebuild {
+            estimated_time += self.build;
+        }
+        estimated_time
+    }
+    pub fn merge(&mut self, new_timings: &Self) {
+        if !new_timings.probe.is_zero() {
+            self.probe = (self.probe + new_timings.probe) / 2;
+        }
+        if !new_timings.compute.is_zero() {
+            self.compute = (self.compute + new_timings.compute) / 2;
+        }
+        if !new_timings.color.is_zero() {
+            self.color = (self.color + new_timings.color) / 2;
+        }
+        if !new_timings.build.is_zero() {
+            self.build = (self.build + new_timings.build) / 2;
+        }
+    }
+}
+
+impl std::fmt::Display for ImageTimings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Total: {:?} ",
+            self.build + self.probe + self.compute + self.color
+        )?;
+        if !self.build.is_zero() {
+            write!(f, "Build: {:?} ", self.build)?;
+        }
+        if !self.probe.is_zero() {
+            write!(f, "Probe: {:?} ", self.probe)?;
+        }
+        if !self.compute.is_zero() {
+            write!(f, "Compute: {:?} ", self.compute)?;
+        }
+        if !self.color.is_zero() {
+            write!(f, "Color: {:?}", self.color)?;
+        }
+        Ok(())
+    }
 }
 
 impl CacheValidity {
@@ -398,7 +484,7 @@ fn run_compute_step(
 
         let command_buffer = encoder.finish();
         let julia_point = match &image.location.fractal_kind {
-            crate::types::FractalKind::Mandelbrot => eframe::egui::Vec2::new(0.0, 0.0),
+            crate::types::FractalKind::Mandelbrot => emath::Vec2::new(0.0, 0.0),
             crate::types::FractalKind::Julia(pt) => pt.to_vec2(),
         };
         // Update the parameters

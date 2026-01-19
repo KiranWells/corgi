@@ -1,8 +1,8 @@
 use std::mem::discriminant;
 
+use corgi::image_gen::shader_types::{MAX_GRADIENT_STOPS, MAX_LIGHTS};
 use corgi::types::{
-    Coloring, Gradient, Layer, LayerKind, Light, LightingKind, MAX_GRADIENT_STOPS, MAX_LIGHTS,
-    Outline, Overlays, next_layer_id,
+    Coloring, Gradient, Layer, LayerKind, Light, LightingKind, Outline, Overlays, next_layer_id,
 };
 use eframe::egui::collapsing_header::{CollapsingState, paint_default_icon};
 use eframe::egui::{self, CornerRadius, Event, RichText, Sense, Stroke};

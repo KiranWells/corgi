@@ -1,10 +1,11 @@
-use eframe::egui::{Pos2, Vec2};
-use eframe::wgpu::Extent3d;
+use emath::{Pos2, Vec2};
 use rug::Float;
 use rug::ops::{CompleteRound, PowAssign};
 use serde::{Deserialize, Serialize};
+use wgpu::Extent3d;
 
-use super::{Coloring, Transform, get_precision};
+use super::Coloring;
+use crate::image_gen::shader_types::Transform;
 use crate::types::{LayerKind, Rotate};
 
 /// A representation of the current fractal being rendered, including
@@ -475,4 +476,9 @@ impl From<FloatParser> for Float {
             .map(|val| val.complete(value.precision))
             .unwrap_or(Float::new(53))
     }
+}
+
+/// Get the precision for a given zoom level
+pub fn get_precision(zoom: f32) -> u32 {
+    ((zoom * 1.25) as u32).max(53)
 }

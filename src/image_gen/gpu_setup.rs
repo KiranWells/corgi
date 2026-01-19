@@ -10,15 +10,15 @@ the same GPU.
 
 use std::sync::{Arc, mpsc};
 
-use color_eyre::eyre::Result;
-use eframe::egui::mutex::RwLock;
-use eframe::wgpu::{
-    self, BindGroup, BindGroupLayoutEntry, Buffer, ComputePipeline, Device, PipelineLayout, Queue,
-    Texture, TextureView,
+use parking_lot::RwLock;
+use wgpu::{
+    self, BindGroup, BindGroupLayoutEntry, Buffer, ComputePipeline, Device, ExperimentalFeatures,
+    PipelineLayout, Queue, ShaderModule, Texture, TextureView,
 };
-use wgpu::{ExperimentalFeatures, ShaderModule};
 
-use crate::types::{ColorParams, ComputeParams, MAX_GRADIENT_STOPS, RenderParams};
+use crate::image_gen::shader_types::{
+    ColorParams, ComputeParams, MAX_GRADIENT_STOPS, RenderParams,
+};
 
 /// Contains GPU state that can be shared between all image generation
 /// contexts.
@@ -110,8 +110,16 @@ pub struct Constants {
     pub iter_batch_size: u32,
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum RequestError {
+    #[error("Failed to select GPU adapter")]
+    Adapter(#[from] wgpu::RequestAdapterError),
+    #[error("Failed to select GPU device")]
+    Device(#[from] wgpu::RequestDeviceError),
+}
+
 /// Selects a device and queue suitable for non-UI rendering.
-pub async fn get_device_and_queue() -> Result<(Device, Queue)> {
+pub async fn get_device_and_queue() -> Result<(Device, Queue), RequestError> {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends: wgpu::Backends::PRIMARY,
         ..Default::default()

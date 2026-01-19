@@ -5,14 +5,14 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
+use corgi::image_gen::{ImageTimings, ProgressUpdate};
 use corgi::types::serde::SafeSaveLoad;
-use corgi::types::{
-    Debouncer, ImageGenCommand, ImageTimings, ImgSpec, ProgressUpdate, StatusMessage,
-};
+use corgi::types::{ImgSpec, View};
 
 use crate::config::Context;
+use crate::ui::debouncer::Debouncer;
 use crate::ui::{CorgiUI, PreviewRenderResources};
-use crate::worker::WorkerState;
+use crate::worker::{ImageGenCommand, RendererId, WorkerState};
 
 /// Command line options for the application
 #[derive(Parser, Debug)]
@@ -63,6 +63,21 @@ enum PollState {
     Trigger,
     Repoll,
     Inactive,
+}
+
+#[derive(Debug)]
+pub enum StatusMessage {
+    Progress(ProgressUpdate),
+    RenderFinished(RendererId, ImageTimings, View),
+    Error(color_eyre::Report),
+}
+
+/// Shared status between the main thread and the render thread
+#[derive(Default, Debug, Clone)]
+pub struct Status {
+    pub message: String,
+    pub progress: Option<f64>,
+    pub rendered_image: Option<ImgSpec>,
 }
 
 impl ImgDebouncer {
@@ -155,9 +170,9 @@ impl CorgiApp {
         let resources = PreviewRenderResources::init(
             &wgpu.device,
             wgpu.target_format,
-            worker_state.texture(corgi::types::RendererId::Explore),
-            worker_state.texture(corgi::types::RendererId::Style),
-            worker_state.texture(corgi::types::RendererId::Render),
+            worker_state.texture(RendererId::Explore),
+            worker_state.texture(RendererId::Style),
+            worker_state.texture(RendererId::Render),
             (extents.width, extents.height),
             (output_image.width, output_image.height),
         )?;

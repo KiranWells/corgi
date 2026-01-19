@@ -13,8 +13,7 @@ use std::sync::mpsc;
 
 use corgi::types::serde::SafeSaveLoad;
 use corgi::types::{
-    ComplexPoint, ImageGenCommand, ImgSpec, OptLevel, RendererId, Rotate, Status,
-    Style as ImgStyle, View, get_precision,
+    ComplexPoint, ImgSpec, OptLevel, Rotate, Style as ImgStyle, View, get_precision,
 };
 use directories::BaseDirs;
 use eframe::egui::containers::menu::MenuButton;
@@ -32,7 +31,11 @@ use taffy::Overflow;
 use taffy::prelude::*;
 use utils::{TuiExt, collapsible, input_with_label, point_edit, section, selection_with_label};
 
+use crate::app::Status;
+use crate::worker::{ImageGenCommand, RendererId};
+
 mod coloring;
+pub mod debouncer;
 mod preview_resources;
 mod settings;
 mod utils;
@@ -973,13 +976,13 @@ impl CorgiUI {
 
     pub fn update_rendered_view(&mut self, id: RendererId, viewport: View) {
         match id {
-            corgi::types::RendererId::Explore => {
+            RendererId::Explore => {
                 self.explore_state.rendered_view = viewport;
             }
-            corgi::types::RendererId::Style => {
+            RendererId::Style => {
                 self.style_state.rendered_view = viewport;
             }
-            corgi::types::RendererId::Render => {
+            RendererId::Render => {
                 self.render_state.rendered_view = viewport.clone();
                 let mut view = viewport.clone();
                 view.width = self.current_view.width;

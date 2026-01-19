@@ -1,11 +1,14 @@
+use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, mpsc};
 
-use corgi::image_gen::{Engine, SharedState};
-use corgi::types::{ImageGenCommand, ImgSpec, RendererId, StatusMessage};
+use corgi::image_gen::{Constants, Engine, ProgressUpdate, SharedState};
+use corgi::types::ImgSpec;
 use eframe::egui::ahash::{HashMap, HashMapExt};
-use eframe::egui::mutex::RwLock;
 use eframe::{egui, egui_wgpu, wgpu};
+use parking_lot::RwLock;
+
+use crate::app::StatusMessage;
 
 pub struct WorkerState {
     renderers: HashMap<RendererId, Engine>,
@@ -13,6 +16,21 @@ pub struct WorkerState {
     status_channel: mpsc::Sender<StatusMessage>,
     cancelled: Arc<AtomicBool>,
     ctx: egui::Context,
+}
+
+#[derive(Debug)]
+pub enum ImageGenCommand {
+    Render(RendererId, Box<ImgSpec>),
+    UpdateConstants(RendererId, Constants),
+    SaveToFile(RendererId, PathBuf),
+    ShutDown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RendererId {
+    Explore,
+    Style,
+    Render,
 }
 
 impl WorkerState {
@@ -164,12 +182,12 @@ impl WorkerState {
                         ));
                     }
                     Err(corgi::image_gen::RenderingError::Cancelled) => {
-                        let _ = self.status_channel.send(StatusMessage::Progress(
-                            corgi::types::ProgressUpdate {
+                        let _ = self
+                            .status_channel
+                            .send(StatusMessage::Progress(ProgressUpdate {
                                 message: "Generation Cancelled",
                                 progress: None,
-                            },
-                        ));
+                            }));
                     }
                     Err(err) => {
                         let _ = self.status_channel.send(StatusMessage::Error(err.into()));
@@ -188,9 +206,11 @@ impl WorkerState {
                 ) {
                     let _ = self.status_channel.send(StatusMessage::Error(err.into()));
                 } else {
-                    let _ = self.status_channel.send(StatusMessage::Progress(
-                        corgi::types::ProgressUpdate::msg("Image Save Complete"),
-                    ));
+                    let _ = self
+                        .status_channel
+                        .send(StatusMessage::Progress(ProgressUpdate::msg(
+                            "Image Save Complete",
+                        )));
                 }
             }
         }

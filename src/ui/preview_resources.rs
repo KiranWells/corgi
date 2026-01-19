@@ -2,12 +2,13 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use color_eyre::Result;
-use corgi::types::{Transform, View};
-use eframe::egui::mutex::RwLock;
+use corgi::image_gen::shader_types::Transform;
+use corgi::types::View;
 use eframe::egui::{self};
 use eframe::egui_wgpu::{self, CallbackTrait};
 use eframe::wgpu::util::DeviceExt;
 use eframe::wgpu::{self, Device};
+use parking_lot::RwLock;
 use wgpu::{Extent3d, Queue};
 
 use crate::ui::UITab;
