@@ -120,6 +120,33 @@ impl WorkerState {
                 }
             }
             for (id, image) in render_commands {
+                // if possible, copy cached probes from other renderers instead of
+                // recalculating it
+                if self
+                    .renderers
+                    .get_mut(&id)
+                    .unwrap()
+                    .get_probe_cache(&image)
+                    .is_none()
+                {
+                    let mut cache = None;
+                    for (id_inner, renderer) in self.renderers.iter() {
+                        if id_inner == &id {
+                            continue;
+                        }
+                        if let Some(cached) = renderer.get_probe_cache(&image) {
+                            cache = Some(cached.to_vec());
+                            break;
+                        }
+                    }
+                    if let Some(cache) = cache {
+                        self.renderers
+                            .get_mut(&id)
+                            .unwrap()
+                            .pre_cache_probe(cache, &image);
+                    }
+                }
+
                 let result = self
                     .renderers
                     .get_mut(&id)

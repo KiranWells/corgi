@@ -125,13 +125,8 @@ impl Engine {
         image: &ImgSpec,
         status_callback: &mut impl FnMut(ProgressUpdate),
     ) -> Result<ImageTimings, RenderingError> {
-        let diff = self
-            .last_image
-            .as_ref()
-            .map(|img| image.comp(img))
-            .unwrap_or(ImageDiff::full());
         let mut timings = ImageTimings::default();
-        self.cache_validity.update(diff);
+        self.cache_validity.update(self.diff(image));
         self.last_image = Some(image.clone());
 
         // the actual image generation process
@@ -170,10 +165,6 @@ impl Engine {
             timings.compute = Instant::now() - start;
         }
 
-        // This holds the lock until the render finishes.
-        // This is suboptimal, as it might freeze the render thread, but
-        // the color step should always complete with a low-enough time budget to
-        // avoid dropped frames.
         if !self.cache_validity.color {
             let start = Instant::now();
             self.recolor(image, status_callback);
@@ -223,12 +214,38 @@ impl Engine {
         Ok(())
     }
 
+    pub fn pre_cache_probe(&mut self, probed_data: Vec<[f32; 2]>, image: &ImgSpec) {
+        let diff = self.diff(image);
+        self.cache_validity.update(diff);
+        self.last_image = Some(image.clone());
+        if !self.cache_validity.gpu_data {
+            self.rebuild(image, &mut |_| {});
+        }
+        if !self.cache_validity.probe {
+            tracing::debug!("Successfully pre-cached probe");
+            self.probed_data = probed_data;
+            self.cache_validity.probe = true;
+        }
+    }
+
     pub fn texture(&self) -> Arc<RwLock<wgpu::Texture>> {
         self.gpu_data.texture.clone()
     }
 
     pub fn update_constants(&mut self, c: Constants) {
         self.constants = c;
+    }
+
+    pub fn get_probe_cache(&self, image: &ImgSpec) -> Option<&[[f32; 2]]> {
+        if let Some(last) = self.last_image.as_ref()
+            && self.cache_validity.probe
+            && image.location.center == last.location.center
+            && image.location.max_iter == last.location.max_iter
+        {
+            Some(&self.probed_data)
+        } else {
+            None
+        }
     }
 }
 
@@ -307,6 +324,13 @@ impl Engine {
         } else {
             false
         }
+    }
+
+    fn diff(&self, image: &ImgSpec) -> ImageDiff {
+        self.last_image
+            .as_ref()
+            .map(|img| image.comp(img))
+            .unwrap_or(ImageDiff::full())
     }
 }
 
