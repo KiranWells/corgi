@@ -54,6 +54,7 @@ pub struct Engine {
     // spec for cached data
     last_image: Option<ImgSpec>,
     // cache validity
+    cache_validity: CacheValidity,
     // gpu data
     gpu_data: GPUData,
     // cache data
@@ -62,6 +63,42 @@ pub struct Engine {
     cancelled: Arc<AtomicBool>,
     // engine settings
     constants: Constants,
+}
+
+#[derive(Clone, Copy, Default, Debug)]
+struct CacheValidity {
+    gpu_data: bool,
+    probe: bool,
+    gpu_probe: bool,
+    compute: bool,
+    color: bool,
+}
+
+impl CacheValidity {
+    fn update(&mut self, diff: ImageDiff) {
+        let ImageDiff {
+            rebuild,
+            reprobe,
+            recompute,
+            recolor,
+        } = diff;
+        if rebuild {
+            *self = Self::default();
+        }
+        if reprobe {
+            self.probe = false;
+            self.gpu_probe = false;
+            self.compute = false;
+            self.color = false;
+        }
+        if recompute {
+            self.compute = false;
+            self.color = false;
+        }
+        if recolor {
+            self.color = false;
+        }
+    }
 }
 
 impl Engine {
@@ -75,6 +112,7 @@ impl Engine {
     ) -> Self {
         Self {
             last_image: None,
+            cache_validity: CacheValidity::default(),
             gpu_data: GPUData::init(size, max_iter, shared, label),
             probed_data: vec![],
             cancelled,
@@ -93,6 +131,8 @@ impl Engine {
             .map(|img| image.comp(img))
             .unwrap_or(ImageDiff::full());
         let mut timings = ImageTimings::default();
+        self.cache_validity.update(diff);
+        self.last_image = Some(image.clone());
 
         // the actual image generation process
         // - resize the GPU data
@@ -101,66 +141,32 @@ impl Engine {
         // - run the compute shader
         // - run the image render
 
-        if diff.rebuild {
+        if !self.cache_validity.gpu_data {
             let start = Instant::now();
-            status_callback(ProgressUpdate::msg("Rebuilding GPU Buffers"));
-            self.gpu_data.resize(
-                (image.width, image.height),
-                image.location.max_iter as usize,
-                image.get_flags(),
-            );
+            self.rebuild(image, status_callback);
             timings.build = Instant::now() - start;
         }
         if self.is_cancelled(status_callback) {
             return Err(RenderingError::Cancelled);
         }
 
-        if diff.reprobe {
+        if !self.cache_validity.probe || !self.cache_validity.gpu_probe {
             let start = Instant::now();
-            let julia_point = match &image.location.fractal_kind {
-                crate::types::FractalKind::Mandelbrot => None,
-                crate::types::FractalKind::Julia(pt) => Some(pt),
-            };
-            // probe the point
-            self.probed_data = probe::<f32>(
-                &image.location.probe_location,
-                image.location.max_iter,
-                image.location.zoom,
-                julia_point,
-                status_callback,
-            );
-            status_callback(ProgressUpdate::msg("Uploading probe"));
-            // update the probe buffer
-            self.gpu_data.shared.queue.write_buffer(
-                &self.gpu_data.buffers.probe,
-                0,
-                bytemuck::cast_slice(&self.probed_data[..]),
-            );
-            self.gpu_data.shared.queue.submit([]);
-            let _ = self
-                .gpu_data
-                .shared
-                .device
-                .poll(wgpu::PollType::wait_indefinitely());
+            if !self.cache_validity.probe {
+                self.reprobe(image, status_callback);
+            }
+            if !self.cache_validity.gpu_probe {
+                self.reupload(status_callback);
+            }
             timings.probe = Instant::now() - start;
         }
         if self.is_cancelled(status_callback) {
             return Err(RenderingError::Cancelled);
         }
 
-        if diff.recompute {
+        if !self.cache_validity.compute {
             let start = Instant::now();
-            status_callback(ProgressUpdate::partial("Computing iterations", 0.0));
-            if !run_compute_step(
-                &self.gpu_data,
-                &self.probed_data,
-                image,
-                self.constants,
-                self.cancelled.clone(),
-                status_callback,
-            ) {
-                return Err(RenderingError::Cancelled);
-            }
+            self.recompute(image, status_callback)?;
             timings.compute = Instant::now() - start;
         }
 
@@ -168,13 +174,11 @@ impl Engine {
         // This is suboptimal, as it might freeze the render thread, but
         // the color step should always complete with a low-enough time budget to
         // avoid dropped frames.
-        if diff.recolor {
+        if !self.cache_validity.color {
             let start = Instant::now();
-            status_callback(ProgressUpdate::msg("Rendering Colors"));
-            run_render_step(&self.gpu_data, image);
+            self.recolor(image, status_callback);
             timings.color = Instant::now() - start;
         }
-        self.last_image = Some(image.clone());
         Ok(timings)
     }
 
@@ -187,6 +191,9 @@ impl Engine {
         let Some(image_settings) = &self.last_image else {
             return Err(SaveError::NoImage);
         };
+        if !self.cache_validity.color {
+            return Err(SaveError::NoImage);
+        }
         status_callback(ProgressUpdate::msg("Fetching image data"));
         if let Some(data) = self.gpu_data.get_texture_data() {
             status_callback(ProgressUpdate::msg("Saving image"));
@@ -226,10 +233,72 @@ impl Engine {
 }
 
 impl Engine {
-    // /// When the size of the image or probe buffers change or shader params change
-    // fn resize() {}
-    // /// When probe size or location changes
-    // fn reprobe() {}
+    fn rebuild(&mut self, image: &ImgSpec, status_callback: &mut impl FnMut(ProgressUpdate)) {
+        status_callback(ProgressUpdate::msg("Rebuilding GPU Buffers"));
+        self.gpu_data.resize(
+            (image.width, image.height),
+            image.location.max_iter as usize,
+            image.get_flags(),
+        );
+        self.cache_validity.gpu_data = true;
+    }
+
+    fn reprobe(&mut self, image: &ImgSpec, status_callback: &mut impl FnMut(ProgressUpdate)) {
+        let julia_point = match &image.location.fractal_kind {
+            crate::types::FractalKind::Mandelbrot => None,
+            crate::types::FractalKind::Julia(pt) => Some(pt),
+        };
+        // probe the point
+        self.probed_data = probe::<f32>(
+            &image.location.probe_location,
+            image.location.max_iter,
+            image.location.zoom,
+            julia_point,
+            status_callback,
+        );
+        self.cache_validity.probe = true;
+    }
+
+    fn reupload(&mut self, status_callback: &mut impl FnMut(ProgressUpdate)) {
+        status_callback(ProgressUpdate::msg("Uploading probe"));
+        // update the probe buffer
+        self.gpu_data.shared.queue.write_buffer(
+            &self.gpu_data.buffers.probe,
+            0,
+            bytemuck::cast_slice(&self.probed_data[..]),
+        );
+        self.gpu_data.shared.queue.submit([]);
+        let _ = self
+            .gpu_data
+            .shared
+            .device
+            .poll(wgpu::PollType::wait_indefinitely());
+        self.cache_validity.gpu_probe = true;
+    }
+
+    fn recompute(
+        &mut self,
+        image: &ImgSpec,
+        status_callback: &mut impl FnMut(ProgressUpdate),
+    ) -> Result<(), RenderingError> {
+        status_callback(ProgressUpdate::partial("Computing iterations", 0.0));
+        run_compute_step(
+            &self.gpu_data,
+            &self.probed_data,
+            image,
+            self.constants,
+            self.cancelled.clone(),
+            status_callback,
+        )?;
+        self.cache_validity.compute = true;
+        Ok(())
+    }
+
+    fn recolor(&mut self, image: &ImgSpec, status_callback: &mut impl FnMut(ProgressUpdate)) {
+        status_callback(ProgressUpdate::msg("Rendering Colors"));
+        run_render_step(&self.gpu_data, image);
+        self.cache_validity.color = true;
+    }
 
     fn is_cancelled(&mut self, status_callback: &mut impl FnMut(ProgressUpdate)) -> bool {
         if self.cancelled.load(std::sync::atomic::Ordering::Relaxed) {
@@ -244,7 +313,6 @@ impl Engine {
 /// Runs the compute shader on the GPU. This is the most expensive step, so the output
 /// should be cached as much as possible. This step only needs to be run if the probe
 /// location, max iteration, or image viewport has changed.
-#[must_use]
 fn run_compute_step(
     gpu_data: &GPUData,
     probed_data: &[[f32; 2]],
@@ -252,7 +320,7 @@ fn run_compute_step(
     constants: Constants,
     cancelled: Arc<AtomicBool>,
     status_callback: &mut impl FnMut(ProgressUpdate),
-) -> bool {
+) -> Result<(), RenderingError> {
     let GPUData {
         shared: SharedState { device, queue, .. },
         bind_groups,
@@ -359,10 +427,10 @@ fn run_compute_step(
         ));
         if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
             status_callback(ProgressUpdate::partial("Cancelled", 1.0));
-            return false;
+            return Err(RenderingError::Cancelled);
         }
     }
-    true
+    Ok(())
 }
 
 /// Runs the render shader on the GPU
