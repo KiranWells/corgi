@@ -993,4 +993,12 @@ impl CorgiUI {
             }
         }
     }
+
+    pub fn renderer(&self) -> RendererId {
+        match self.tab {
+            UITab::Explore => RendererId::Explore,
+            UITab::Style => RendererId::Style,
+            UITab::Render => RendererId::Render,
+        }
+    }
 }

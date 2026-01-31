@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, mpsc};
@@ -46,7 +47,7 @@ pub struct CorgiApp {
     last_save_time: Instant,
     command_channel: mpsc::Sender<ImageGenCommand>,
     status_channel: mpsc::Receiver<StatusMessage>,
-    debouncer: ImgDebouncer,
+    debouncers: HashMap<RendererId, ImgDebouncer>,
     cancel_worker: std::sync::Arc<AtomicBool>,
     worker_handle: Option<std::thread::JoinHandle<()>>,
 }
@@ -113,7 +114,9 @@ impl ImgDebouncer {
                 self.last_rendered = image.clone();
                 PollState::Trigger
             } else {
-                self.debouncer.trigger();
+                if image != self.previous_frame {
+                    self.debouncer.trigger();
+                }
                 PollState::Repoll
             }
         } else {
@@ -186,10 +189,7 @@ impl CorgiApp {
         Ok(Box::new(CorgiApp {
             command_channel: ui_send,
             status_channel: ui_recv,
-            debouncer: ImgDebouncer::new(
-                std::time::Duration::from_millis(300),
-                ui_state.image().clone(),
-            ),
+            debouncers: HashMap::new(),
             ui_state,
             context,
             last_save_time: Instant::now(),
@@ -212,7 +212,13 @@ impl eframe::App for CorgiApp {
                     self.ui_state.status.message = "Finished rendering".into();
                     self.ui_state.status.progress = None;
                     self.ui_state.swap = true;
-                    self.debouncer.update_timings(&timings);
+                    self.debouncers
+                        .entry(id)
+                        .or_insert(ImgDebouncer::new(
+                            Duration::from_millis(300),
+                            self.ui_state.image().clone(),
+                        ))
+                        .update_timings(&timings);
                     self.ui_state.update_rendered_view(id, viewport);
                 }
                 StatusMessage::Error(report) => {
@@ -229,10 +235,18 @@ impl eframe::App for CorgiApp {
         if self.ui_state.has_active_viewport() {
             let image = self.ui_state.image();
             match self
-                .debouncer
-                .poll(image.clone(), ctx.input(|is| is.pointer.any_down()))
-            {
+                .debouncers
+                .get_mut(&self.ui_state.renderer())
+                .map_or(PollState::Trigger, |d| {
+                    d.poll(image.clone(), ctx.input(|is| is.pointer.any_down()))
+                }) {
                 PollState::Trigger => {
+                    if !self.debouncers.contains_key(&self.ui_state.renderer()) {
+                        self.debouncers.insert(
+                            self.ui_state.renderer(),
+                            ImgDebouncer::new(Duration::from_millis(300), image.clone()),
+                        );
+                    }
                     self.cancel_worker
                         .store(true, std::sync::atomic::Ordering::Relaxed);
 
