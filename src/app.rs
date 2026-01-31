@@ -1,3 +1,8 @@
+/*! # App Logic
+
+This module contains the logic for managing the application state
+and execution. It controls both the rendering worker and the UI.
+*/
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -6,9 +11,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
-use corgi::image_gen::{ImageTimings, ProgressUpdate};
-use corgi::types::serde::SafeSaveLoad;
-use corgi::types::{ImgSpec, View};
+use corgi_lib::image_gen::{ImageTimings, ProgressUpdate};
+use corgi_lib::types::serde::SafeSaveLoad;
+use corgi_lib::types::{ImgSpec, View};
 
 use crate::config::Context;
 use crate::ui::debouncer::Debouncer;
@@ -52,6 +57,11 @@ pub struct CorgiApp {
     worker_handle: Option<std::thread::JoinHandle<()>>,
 }
 
+/// Manages the decision of when to send updated image specs
+/// to the worker thread for rendering. This is used to
+/// make the viewport feel more responsive by delaying
+/// compute-heavy interactions until the user has finished
+/// interacting.
 #[derive(Debug)]
 struct ImgDebouncer {
     debouncer: Debouncer,
@@ -60,9 +70,16 @@ struct ImgDebouncer {
     timings: ImageTimings,
 }
 
+#[derive(Debug)]
 enum PollState {
+    /// Indicates the action should be taken.
     Trigger,
+    /// Indicates the action is still being buffered and the
+    /// debouncer should be polled again.
     Repoll,
+    /// Indicates there is no action to take and the
+    /// debouncer does not need to be polled until the
+    /// inputs change again.
     Inactive,
 }
 
@@ -78,7 +95,6 @@ pub enum StatusMessage {
 pub struct Status {
     pub message: String,
     pub progress: Option<f64>,
-    pub rendered_image: Option<ImgSpec>,
 }
 
 impl ImgDebouncer {
@@ -90,16 +106,21 @@ impl ImgDebouncer {
             timings: ImageTimings::default(),
         }
     }
+
+    /// Check if rendering should start based on the latest image and
+    /// user interaction.
     pub fn poll(&mut self, image: ImgSpec, mouse_down: bool) -> PollState {
         //  sanity check on image size
         if image.width < 10 || image.height < 10 || image.width * image.height > 20_000_000 {
             return PollState::Inactive;
         }
-        // send the new image to the render thread, but only if
+        // send the new image to the render thread if
         // - the image is different
         // - the image has not changed for a full frame
+        // - an appropriate timeout has elapsed relative to the time
+        //     it would take to render
         let poll_state = if self.last_rendered != image {
-            let diff = image.comp(&self.last_rendered);
+            let diff = image.compare(&self.last_rendered);
             let calc_time = self.timings.estimate_time(diff);
             let do_send = match calc_time {
                 x if x < Duration::from_millis(30) => true,
@@ -147,17 +168,16 @@ impl CorgiApp {
         let mut initial_image = ImgSpec::default();
         let output_image = ImgSpec::default();
         let ctx = cc.egui_ctx.clone();
-        eframe::egui::Visuals::default();
+
         ctx.set_style(context.theme().style());
-
-        if let Some(image_file) = &cli_options.settings_file {
-            initial_image = ImgSpec::load(image_file)?
-        }
-
         egui_material_icons::initialize(&cc.egui_ctx);
         ctx.options_mut(|options| {
             options.max_passes = std::num::NonZeroUsize::new(1).unwrap();
         });
+
+        if let Some(image_file) = &cli_options.settings_file {
+            initial_image = ImgSpec::load(image_file)?
+        }
 
         let mut worker_state = WorkerState::new(
             wgpu,
@@ -266,6 +286,7 @@ impl eframe::App for CorgiApp {
             self.last_save_time = Instant::now();
         }
     }
+
     fn on_exit(&mut self) {
         self.context.save();
         let _ = self.command_channel.send(ImageGenCommand::ShutDown);

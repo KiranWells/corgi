@@ -13,7 +13,9 @@ use emath::Vec2;
 pub use self::coloring::*;
 pub use self::image::*;
 
+/// A utility trait for adjusting the angle of a vector
 pub trait Rotate {
+    /// Returns a copy of this rotated by `angle` radians
     fn rotated(&self, angle: f32) -> Self;
 }
 

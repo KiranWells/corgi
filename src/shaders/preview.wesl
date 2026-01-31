@@ -1,3 +1,7 @@
+// Vertex and fragment shaders for showing the rendered texture.
+// These perform the necessary transformations to show the rendered
+// image at the correct location relative to the current viewport
+// location in fractal space.
 import super::utils::rotation_matrix;
 
 struct Uniforms {
@@ -13,14 +17,6 @@ struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) tex_coords: vec2<f32>,
 }
-
-// let SQUARE_VERTICES: array<vec2<f32>, 4> = array<vec2<f32>, 4>(
-//   vec2<f32>(0., 0.),
-//   vec2<f32>(0., 1.),
-//   vec2<f32>(1., 0.),
-//   vec2<f32>(1., 1.),
-// );
-
 
 @vertex
 fn vs_main(

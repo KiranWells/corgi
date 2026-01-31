@@ -1,3 +1,4 @@
+// Perturbed version of the fractal compute step.
 import super::utils::{
     ESCAPE_RADIUS,
     DERIVATIVE_ENABLED,

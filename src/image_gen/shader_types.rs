@@ -1,9 +1,19 @@
+/*!
+# Shader Types
+
+This module contains the types that are passed to the GPU and
+conversion logic from internal types.
+ */
 use crate::types::{Coloring, ImgSpec, Light, Outline, Overlays};
 
+// These constants need to match the values defined in the
+// compute shaders.
 pub const MAX_GRADIENT_STOPS: usize = 50;
 pub const MAX_LAYERS: usize = 8;
 pub const MAX_LIGHTS: usize = 3;
 
+/// The GPU-safe version of coloring data. This is sent as a uniform
+/// to the compute shader.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ColorParams {

@@ -1,8 +1,7 @@
-use std::mem::{Discriminant, discriminant};
+use std::mem::discriminant;
 
-use corgi::types::{ComplexPoint, FractalKind, Gradient, LayerKind, LightingKind};
+use corgi_lib::types::{ComplexPoint, FractalKind, Gradient, LayerKind, LightingKind};
 use eframe::egui::{self, Color32, RichText, Sense, TextStyle, WidgetText};
-use egui_material_icons::icons;
 use egui_taffy::{Tui, TuiBuilderLogic, TuiWidget};
 use rug::Float;
 use taffy::Overflow;
@@ -10,9 +9,13 @@ use taffy::prelude::*;
 
 use super::coloring::{OrbitType, StripeType};
 
+/// Utility trait for setting some common Taffy styles
 pub trait TuiExt {
+    /// Sets style to a horizontal flex with alignments
     fn horizontal(&mut self) -> egui_taffy::TuiBuilder<'_>;
+    /// Sets style to a vertical flex with alignments
     fn vertical(&mut self) -> egui_taffy::TuiBuilder<'_>;
+    /// Sets the current element with flex grow
     fn grow(&mut self) -> egui_taffy::TuiBuilder<'_>;
 }
 
@@ -57,6 +60,7 @@ impl TuiExt for Tui {
     }
 }
 
+/// Utility trait for getting UI labels for enum variants
 pub trait ToLabel {
     fn label(&self) -> &'static str;
 }
@@ -70,14 +74,14 @@ impl ToLabel for FractalKind {
     }
 }
 
-impl ToLabel for Discriminant<Gradient> {
+impl ToLabel for Gradient {
     fn label(&self) -> &'static str {
         let flat = discriminant(&Gradient::Flat(Default::default()));
         let procedural = discriminant(&Gradient::Procedural(Default::default()));
         let manual = discriminant(&Gradient::Manual(Default::default()));
         let hue = discriminant(&Gradient::Hsv(0.0, 0.0));
         let oklch = discriminant(&Gradient::Oklch(0.0, 0.0));
-        match *self {
+        match discriminant(self) {
             x if x == flat => "Flat",
             x if x == procedural => "Procedural",
             x if x == manual => "Manual",
@@ -134,27 +138,17 @@ impl ToLabel for LayerKind {
     }
 }
 
+/// Utility trait for getting help text from enum types
 pub trait ToHelpText {
     fn help_text(&self) -> &'static str;
 }
 
-impl ToHelpText for Discriminant<Gradient> {
+impl<T> ToHelpText for T
+where
+    T: documented::DocumentedVariants,
+{
     fn help_text(&self) -> &'static str {
-        let flat = discriminant(&Gradient::Flat(Default::default()));
-        let procedural = discriminant(&Gradient::Procedural(Default::default()));
-        let manual = discriminant(&Gradient::Manual(Default::default()));
-        let hue = discriminant(&Gradient::Hsv(0.0, 0.0));
-        let oklch = discriminant(&Gradient::Oklch(0.0, 0.0));
-        match *self {
-            x if x == flat => "A single color",
-            x if x == procedural => {
-                "Generates a gradient using a procedural equation based on Inigo Quilez's simple color palettes. The result is seamless if the third parameter's values are whole numbers."
-            }
-            x if x == manual => "A repeating linear gradient with manual colors and gradient stops",
-            x if x == hue => "A gradient with rotating hue using the HSV color space",
-            x if x == oklch => "A gradient with rotating hue using the OKLCH color space",
-            _ => unreachable!(),
-        }
+        self.get_variant_docs()
     }
 }
 
@@ -181,50 +175,7 @@ impl ToHelpText for StripeType {
     }
 }
 
-impl ToHelpText for LightingKind {
-    fn help_text(&self) -> &'static str {
-        match self {
-            LightingKind::Flat => "Full brightnes over the entire image",
-            LightingKind::Gradient => {
-                "Layers are added, then used directly as the brightness value."
-            }
-            LightingKind::RepeatingGradient => {
-                "Layers are added, then adjusted to repeat from 0.0 to 1.0 brightness (using cosine)."
-            }
-            LightingKind::Shaded => "Mimics a 3D shape with lighting by 3 lights.",
-        }
-    }
-}
-
-impl ToHelpText for FractalKind {
-    fn help_text(&self) -> &'static str {
-        match self {
-            FractalKind::Mandelbrot => "",
-            FractalKind::Julia(_) => "",
-        }
-    }
-}
-
-impl ToHelpText for LayerKind {
-    fn help_text(&self) -> &'static str {
-        match self {
-            LayerKind::Step => {
-                "Uses the number of iterations required for the point to escape. Has hard lines between colors."
-            }
-            LayerKind::SmoothStep => {
-                "A version of step without hard lines. Logarithmic instead of linear."
-            }
-            LayerKind::Distance => {
-                "Distance estimation to the edge of the set. Scales depending on the zoom level."
-            }
-            LayerKind::OrbitTrap => {
-                "Draws copies of a given shape in repeated patterns around critical points in the set."
-            }
-            LayerKind::Stripe => "Draws effects radiating from the edges of the fractal.",
-        }
-    }
-}
-
+/// Adds a CollapsingHeader in a Tui context
 pub fn collapsible(tui: &mut egui_taffy::Tui, summary: &str, add_contents: impl FnOnce(&mut Tui)) {
     tui.ui_add_manual(
         |ui| {
@@ -259,6 +210,7 @@ pub fn collapsible(tui: &mut egui_taffy::Tui, summary: &str, add_contents: impl 
     );
 }
 
+/// Adds a large header with drawn decoration
 pub fn fancy_header(ui: &mut egui::Ui, text: impl Into<WidgetText>) -> egui::Response {
     let item_spacing = ui.spacing().item_spacing;
     let text = text.into();
@@ -298,10 +250,12 @@ pub fn fancy_header(ui: &mut egui::Ui, text: impl Into<WidgetText>) -> egui::Res
     .response
 }
 
+/// Adds a fancy header in Tui context
 pub fn fancy_header_tui(tui: &mut Tui, text: impl Into<WidgetText>) {
     tui.ui_add_manual(|ui| fancy_header(ui, text), |res, _ui| res);
 }
 
+/// Adds a custom collapsible element representing a UI section
 pub fn section(tui: &mut Tui, title: &str, expand: bool, add_contents: impl FnOnce(&mut Tui)) {
     tui.ui_add_manual(
         |ui| {
@@ -378,6 +332,7 @@ pub fn section(tui: &mut Tui, title: &str, expand: bool, add_contents: impl FnOn
     );
 }
 
+/// Creates a labeled input from the given widget
 pub fn input_with_label(
     tui: &mut egui_taffy::Tui,
     label: &str,
@@ -388,6 +343,8 @@ pub fn input_with_label(
         tui.ui_add(widget);
     });
 }
+
+/// Adds a selectable ComboBox in a Tui context
 pub fn selection<T: PartialEq + ToLabel + ToHelpText>(
     tui: &mut egui_taffy::Tui,
     label: &str,
@@ -422,6 +379,7 @@ pub fn selection<T: PartialEq + ToLabel + ToHelpText>(
     );
 }
 
+/// Adds a selection with a label in a Tui context
 pub fn selection_with_label<T: PartialEq + ToLabel + ToHelpText>(
     tui: &mut egui_taffy::Tui,
     label: &str,
@@ -440,6 +398,7 @@ pub fn selection_with_label<T: PartialEq + ToLabel + ToHelpText>(
     });
 }
 
+/// Adds the given UI and a label in a Tui context
 pub fn ui_with_label(
     tui: &mut egui_taffy::Tui,
     label: &str,
@@ -474,6 +433,7 @@ struct FloatPointEditState {
     y_text: String,
 }
 
+/// Adds an edit UI for an arbitrary precision [`ComplexPoint`]
 pub fn point_edit(
     tui: &mut Tui,
     point_name: &str,
@@ -562,6 +522,7 @@ pub fn point_edit(
     });
 }
 
+/// Adds an intented UI with a line decoration in the indent
 pub fn indent_with_line(tui: &mut Tui, add_contents: impl FnOnce(&mut Tui)) {
     tui.horizontal().add(|tui| {
         {
@@ -602,12 +563,15 @@ pub fn indent_with_line(tui: &mut Tui, add_contents: impl FnOnce(&mut Tui)) {
     });
 }
 
+/// Adds a color editing UI in a Tui context for `[f32; 3]`
 pub fn color_edit(tui: &mut egui_taffy::Tui, color: &mut [f32; 3]) {
     tui.ui_add_manual(
         |ui| egui::widgets::color_picker::color_edit_button_rgb(ui, color),
         |res, _ui| res,
     );
 }
+
+/// Adds a color editing UI in a Tui context for a [`Color32`]
 pub fn color32_edit(tui: &mut egui_taffy::Tui, color: &mut Color32) {
     tui.ui_add_manual(
         |ui| {
@@ -621,6 +585,7 @@ pub fn color32_edit(tui: &mut egui_taffy::Tui, color: &mut Color32) {
     );
 }
 
+/// Adds a color editing UI in a Tui context for a potentially non-color value
 pub fn pseudo_color_edit(tui: &mut egui_taffy::Tui, color: &mut [f32; 3]) {
     tui.horizontal().add(|tui| {
         tui.ui_add(
@@ -642,46 +607,4 @@ pub fn pseudo_color_edit(tui: &mut egui_taffy::Tui, color: &mut [f32; 3]) {
             color_edit(tui, color);
         }
     });
-}
-
-#[expect(dead_code)]
-pub fn text_edit_with_label(
-    tui: &mut Tui,
-    label: &str,
-    help_text: Option<&str>,
-    text: &mut String,
-) -> egui::Response {
-    let text_width = eframe::egui::WidgetText::from(label)
-        .into_galley(
-            tui.egui_ui(),
-            None,
-            tui.egui_ui().available_width(),
-            eframe::egui::TextStyle::Body,
-        )
-        .size()
-        .x;
-    tui.ui_add_manual(
-        |ui| {
-            ui.spacing_mut().item_spacing.x *= 2.0;
-            ui.horizontal(|ui| {
-                let available = ui.available_width();
-                let desired_width = available - text_width - ui.spacing().item_spacing.x;
-                let mut response = ui.label(label);
-                if let Some(help_text) = help_text {
-                    response = response
-                        .union(ui.label(icons::ICON_QUESTION_MARK))
-                        .on_hover_text(help_text)
-                }
-                response.union(
-                    ui.add(
-                        egui::TextEdit::singleline(text)
-                            .horizontal_align(eframe::egui::Align::Max)
-                            .desired_width(desired_width.floor()),
-                    ),
-                )
-            })
-            .response
-        },
-        |res, _| res,
-    )
 }

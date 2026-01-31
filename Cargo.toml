@@ -18,7 +18,7 @@ linux_mime_types = ["application/x-corgi-settings","image/png","image/jpeg","ima
 linux_exec_args = "%f"
 
 [lib]
-name = "corgi"
+name = "corgi_lib"
 path = "src/lib.rs"
 
 [[bin]]
@@ -52,6 +52,7 @@ egui_taffy = { version = "0.10.0", optional = true }
 rfd = { version = "0.15.4", features = ["xdg-portal"], optional = true }
 taffy = { version = "0.7.7", optional = true }
 tracing-subscriber = { version = "0.3", optional = true }
+documented = "0.9.2"
 
 [features]
 binary-deps = ["clap", "color-eyre", "directories", "eframe", "egui_material_icons", "egui_taffy", "rfd", "taffy", "tracing-subscriber"]

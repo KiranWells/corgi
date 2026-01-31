@@ -3,9 +3,8 @@
 
 This module contains all logic for creating images of the mandelbrot set to display on screen.
 
-The [`render_thread`] function is the main entry point for the image generation process.
-It is responsible for receiving messages from the main thread, and sending the resulting
-images back to the main thread.
+The [`Engine`] struct manages rendering from [`ImgSpec`]s, with
+the main entry point of [`Engine::render_image`]
  */
 
 mod gpu_setup;
@@ -36,6 +35,7 @@ pub enum RenderingError {
     #[error("Rendering was cancelled")]
     Cancelled,
 }
+
 #[derive(thiserror::Error, Debug)]
 #[non_exhaustive]
 pub enum SaveError {
@@ -51,21 +51,25 @@ pub enum SaveError {
     MetadataSave(#[from] std::io::Error),
 }
 
+/// Manages rendering fractal images.
+///
+/// Handles caching, status updates, and cancellation.
 pub struct Engine {
-    // spec for cached data
+    /// The [`ImgSpec`] used for the last rendering operation, even if it didn't complete.
     last_image: Option<ImgSpec>,
-    // cache validity
+    /// Describes how many cached stages of the image rendering operation are still valid.
     cache_validity: CacheValidity,
-    // gpu data
+    /// GPU data structures used for rendering.
     gpu_data: GPUData,
-    // cache data
+    /// The entire set of the "probe" point's iterations.
     probed_data: Vec<[f32; 2]>,
-    // communication?
+    /// Whether the current operation has been cancelled.
     cancelled: Arc<AtomicBool>,
-    // engine settings
+    /// Parameters for configuring internal rendering behavior.
     constants: Constants,
 }
 
+/// Tracking struct for cache validation.
 #[derive(Clone, Copy, Default, Debug)]
 struct CacheValidity {
     gpu_data: bool,
@@ -75,13 +79,44 @@ struct CacheValidity {
     color: bool,
 }
 
+impl CacheValidity {
+    /// Reset the cache validity based on the steps that need to be
+    /// re-run to calculate a new image.
+    fn update(&mut self, diff: ImageDiff) {
+        let ImageDiff {
+            rebuild,
+            reprobe,
+            recompute,
+            recolor,
+        } = diff;
+        if rebuild {
+            *self = Self::default();
+        }
+        if reprobe {
+            self.probe = false;
+            self.gpu_probe = false;
+            self.compute = false;
+            self.color = false;
+        }
+        if recompute {
+            self.compute = false;
+            self.color = false;
+        }
+        if recolor {
+            self.color = false;
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct ProgressUpdate {
     pub message: &'static str,
+    /// A percentage of completion in \[0,1]
     pub progress: Option<f64>,
 }
 
 impl ProgressUpdate {
+    /// Creates a progress update without a percentage
     pub fn msg(message: &'static str) -> Self {
         Self {
             message,
@@ -89,6 +124,7 @@ impl ProgressUpdate {
         }
     }
 
+    /// Creates a progress update with a given percentage in \[0,1]
     pub fn partial(message: &'static str, percent: f64) -> Self {
         Self {
             message,
@@ -96,6 +132,8 @@ impl ProgressUpdate {
         }
     }
 }
+
+/// Tracking struct for execution times for each rendering step
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ImageTimings {
     pub probe: Duration,
@@ -105,6 +143,8 @@ pub struct ImageTimings {
 }
 
 impl ImageTimings {
+    /// Estimate how long rendering an image will take based on the
+    /// steps that need to be run and the tracked timings.
     pub fn estimate_time(&self, diff: ImageDiff) -> Duration {
         let mut estimated_time = Duration::ZERO;
         if diff.reprobe {
@@ -121,6 +161,10 @@ impl ImageTimings {
         }
         estimated_time
     }
+
+    /// Update the tracked timings with new data.
+    ///
+    /// Currently uses a basic moving average.
     pub fn merge(&mut self, new_timings: &Self) {
         if !new_timings.probe.is_zero() {
             self.probe = (self.probe + new_timings.probe) / 2;
@@ -160,33 +204,6 @@ impl std::fmt::Display for ImageTimings {
     }
 }
 
-impl CacheValidity {
-    fn update(&mut self, diff: ImageDiff) {
-        let ImageDiff {
-            rebuild,
-            reprobe,
-            recompute,
-            recolor,
-        } = diff;
-        if rebuild {
-            *self = Self::default();
-        }
-        if reprobe {
-            self.probe = false;
-            self.gpu_probe = false;
-            self.compute = false;
-            self.color = false;
-        }
-        if recompute {
-            self.compute = false;
-            self.color = false;
-        }
-        if recolor {
-            self.color = false;
-        }
-    }
-}
-
 impl Engine {
     pub fn init(
         shared: SharedState,
@@ -206,6 +223,8 @@ impl Engine {
         }
     }
 
+    /// Renders the given image, only running steps where the cached data is not
+    /// valid.
     pub fn render_image(
         &mut self,
         image: &ImgSpec,
@@ -259,6 +278,9 @@ impl Engine {
         Ok(timings)
     }
 
+    /// Save the current rendered image to a file. Returns [`SaveError::NoImage`]
+    /// if the current rendered image is not valid, such as if the most recent render was cancelled
+    /// or because [`Self::render_image`] has not been called yet.
     pub fn save_to_file(
         &self,
         path: &Path,
@@ -300,6 +322,11 @@ impl Engine {
         Ok(())
     }
 
+    /// Update the cached probe data within this engine. Assumes the probe corresponds
+    /// to the given image spec.
+    ///
+    /// This is only valuable if the next call to [`Self::render_image`] uses
+    /// a very similar image spec, and this Engine's cached probe will not be valid.
     pub fn pre_cache_probe(&mut self, probed_data: Vec<[f32; 2]>, image: &ImgSpec) {
         let diff = self.diff(image);
         self.cache_validity.update(diff);
@@ -314,6 +341,7 @@ impl Engine {
         }
     }
 
+    /// Returns a handle to the texture this engine renders to
     pub fn texture(&self) -> Arc<RwLock<wgpu::Texture>> {
         self.gpu_data.texture.clone()
     }
@@ -322,6 +350,8 @@ impl Engine {
         self.constants = c;
     }
 
+    /// Returns a reference to the internal probe cache, if it is valid for the given
+    /// image spec.
     pub fn get_probe_cache(&self, image: &ImgSpec) -> Option<&[[f32; 2]]> {
         if let Some(last) = self.last_image.as_ref()
             && self.cache_validity.probe
@@ -351,7 +381,6 @@ impl Engine {
             crate::types::FractalKind::Mandelbrot => None,
             crate::types::FractalKind::Julia(pt) => Some(pt),
         };
-        // probe the point
         self.probed_data = probe::<f32>(
             &image.location.probe_location,
             image.location.max_iter,
@@ -364,12 +393,13 @@ impl Engine {
 
     fn reupload(&mut self, status_callback: &mut impl FnMut(ProgressUpdate)) {
         status_callback(ProgressUpdate::msg("Uploading probe"));
-        // update the probe buffer
         self.gpu_data.shared.queue.write_buffer(
             &self.gpu_data.buffers.probe,
             0,
             bytemuck::cast_slice(&self.probed_data[..]),
         );
+        // We wait for this operation to complete to get accurate timings;
+        // this upload is usually a negligible cost.
         self.gpu_data.shared.queue.submit([]);
         let _ = self
             .gpu_data
@@ -415,7 +445,7 @@ impl Engine {
     fn diff(&self, image: &ImgSpec) -> ImageDiff {
         self.last_image
             .as_ref()
-            .map(|img| image.comp(img))
+            .map(|img| image.compare(img))
             .unwrap_or(ImageDiff::full())
     }
 }

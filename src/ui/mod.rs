@@ -11,8 +11,8 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
-use corgi::types::serde::SafeSaveLoad;
-use corgi::types::{
+use corgi_lib::types::serde::SafeSaveLoad;
+use corgi_lib::types::{
     ComplexPoint, ImgSpec, OptLevel, Rotate, Style as ImgStyle, View, get_precision,
 };
 use directories::BaseDirs;
@@ -42,7 +42,9 @@ mod utils;
 
 pub use preview_resources::PreviewRenderResources;
 
+/// Utility trait for rendering UI
 pub trait EditUI {
+    /// Renders the UI to edit `self`, mutating it in response
     fn render_edit_ui(&mut self, ctx: &egui::Context, tui: &mut egui_taffy::Tui);
 }
 
@@ -77,12 +79,15 @@ pub struct CorgiUI {
     explore_state: ExploreTabState,
     style_state: StyleTabState,
     render_state: RenderTabState,
+    /// The current target image to render
     root_spec: ImgSpec,
     current_view: View,
     setting_probe: bool,
     show_camera: bool,
     show_settings: bool,
     rendering_output: bool,
+    /// Whether the viewport should load the current image from
+    /// the rendering thread into the UI view.
     pub swap: bool,
     pub status: Status,
     command_channel: mpsc::Sender<ImageGenCommand>,
@@ -390,13 +395,13 @@ impl CorgiUI {
                 {
                     let _ = self.command_channel.send(ImageGenCommand::UpdateConstants(
                         RendererId::Explore,
-                        corgi::image_gen::Constants {
+                        corgi_lib::image_gen::Constants {
                             iter_batch_size: context.config().ui_max_shader_batch_iters,
                         },
                     ));
                     let _ = self.command_channel.send(ImageGenCommand::UpdateConstants(
                         RendererId::Style,
-                        corgi::image_gen::Constants {
+                        corgi_lib::image_gen::Constants {
                             iter_batch_size: context.config().ui_max_shader_batch_iters,
                         },
                     ));
@@ -405,7 +410,7 @@ impl CorgiUI {
                 {
                     let _ = self.command_channel.send(ImageGenCommand::UpdateConstants(
                         RendererId::Render,
-                        corgi::image_gen::Constants {
+                        corgi_lib::image_gen::Constants {
                             iter_batch_size: context.config().max_shader_batch_iters,
                         },
                     ));
@@ -413,7 +418,7 @@ impl CorgiUI {
             });
     }
 
-    // Build the menu button
+    /// Build the menu button
     pub fn menu(&mut self, context: &mut crate::Context, ui: &mut egui::Ui) {
         let spacing = ui.spacing().button_padding.y;
         MenuButton::from_button(Button::new(icons::ICON_MENU)).ui(ui, |ui| {
@@ -507,6 +512,8 @@ impl CorgiUI {
     pub fn has_active_viewport(&self) -> bool {
         self.tab != UITab::Render
     }
+
+    /// Sends a render command for the current tab to the worker thread
     pub fn send_render(&self) -> color_eyre::Result<()> {
         Ok(self.command_channel.send(ImageGenCommand::Render(
             match self.tab {
@@ -541,13 +548,13 @@ impl CorgiUI {
                 Some("Which fractal algorithm to use. Switching from Mandelbrot to Julia will set the Julia parameter to the current view center."),
                 &mut self.root_spec.location.fractal_kind,
                 vec![
-                    corgi::types::FractalKind::Mandelbrot,
-                    corgi::types::FractalKind::Julia(img.location.center.clone()),
+                    corgi_lib::types::FractalKind::Mandelbrot,
+                    corgi_lib::types::FractalKind::Julia(img.location.center.clone()),
                 ],
             );
             match &mut self.root_spec.location.fractal_kind {
-                corgi::types::FractalKind::Mandelbrot => {}
-                corgi::types::FractalKind::Julia(pt) => {
+                corgi_lib::types::FractalKind::Mandelbrot => {}
+                corgi_lib::types::FractalKind::Julia(pt) => {
                     point_edit(tui, "Julia parameter", Some("The C value used in the Julia equation. picking values from interesting locations in the Mandelbrot set tend to be interesting in the Julia Set."), get_precision(img.location.zoom), pt);
                 }
             }
@@ -626,6 +633,7 @@ impl CorgiUI {
         });
     }
 
+    /// Render the image preview viewport
     fn viewport(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let mut new_max_rect = ui.max_rect();
         new_max_rect.set_height(new_max_rect.height() - 20.0);
@@ -687,6 +695,7 @@ impl CorgiUI {
         );
     }
 
+    /// Draw tool widgets onto the preview viewport
     fn render_widgets(&self, ui: &mut egui::Ui, ctx: &egui::Context, context: &mut crate::Context) {
         fn paint_crosshair(
             painter: &egui::Painter,

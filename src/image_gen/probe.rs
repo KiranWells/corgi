@@ -1,3 +1,8 @@
+/*!
+# Probe Calculation
+
+This module contains logic for managing probes into fractal space.
+ */
 use std::fmt::Debug;
 
 use rug::Float;
@@ -6,6 +11,7 @@ use crate::image_gen::ProgressUpdate;
 use crate::types::{ComplexPoint, get_precision};
 
 pub const ESCAPE_RADIUS: f64 = 1e10;
+
 /// # FromFloat
 /// A trait to convert a `rug::Float` to another type.
 /// This allows being generic over the float type used.

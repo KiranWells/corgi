@@ -1,15 +1,20 @@
+/*!
+# Style/Coloring Types
+*/
 use std::sync::atomic::AtomicU64;
 
+use documented::{DocumentedFieldsOpt, DocumentedVariants};
 use serde::{Deserialize, Serialize};
 
 /// The coloring parameters for the image. These are interpreted
 /// slightly differently for internal and external coloring, as
 /// some coloring algorithms are incompatible between the two.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, DocumentedFieldsOpt)]
 #[serde(default)]
 pub struct Coloring {
     pub saturation: f32,
     pub brightness: f32,
+    /// How often the colors in the gradient repeat. This acts like a global 'strength' value.
     pub color_frequency: f32,
     pub color_offset: f32,
     pub gradient: Gradient,
@@ -21,11 +26,15 @@ pub struct Coloring {
 }
 
 #[repr(u32)]
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, DocumentedVariants)]
 pub enum LightingKind {
+    /// Full brightness over the entire image
     Flat,
+    /// Layers are added, then used directly as the brightness value.
     Gradient,
+    /// Layers are added, then adjusted to repeat from 0.0 to 1.0 brightness (using cosine).
     RepeatingGradient,
+    /// Mimics a 3D shape with lighting.
     Shaded,
 }
 
@@ -37,15 +46,20 @@ pub struct Light {
     pub color: [f32; 3],
     pub strength: f32,
     pub direction: [f32; 3],
+    /// Included for compatibility with GPU binary format
     padding: f32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, DocumentedFieldsOpt)]
 pub struct Layer {
+    /// A unique ID used to ensure consistent UI state tracking. This should always be initialized with [`next_layer_id`]
     #[serde(skip)]
     pub id: u64,
+    /// The type of the layer
     pub kind: LayerKind,
+    /// How strongly this layer influences the end value
     pub strength: f32,
+    /// An extra parameter value for the layer. The purpose varies for each type.
     pub param: f32,
 }
 
@@ -82,26 +96,21 @@ pub struct Outline {
 }
 
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, DocumentedVariants)]
 pub enum LayerKind {
+    /// Uses the number of iterations required for the point to escape. Has hard lines between colors.
     Step = 1,
+    /// A version of step without hard lines. Logarithmic instead of linear.
     SmoothStep,
+    /// Distance estimation to the edge of the set. Scales depending on the zoom level.
     Distance,
+    /// Distance estimation to the edge of the set. Scales depending on the zoom level.
     OrbitTrap,
+    /// Draws effects radiating from the edges of the fractal.
     Stripe,
 }
 
 impl LayerKind {
-    pub fn text(self) -> &'static str {
-        match self {
-            LayerKind::Step => "Step Count",
-            LayerKind::SmoothStep => "Smooth Step Count",
-            LayerKind::Distance => "Distance Estimate",
-            LayerKind::OrbitTrap => "Orbit Trap",
-            LayerKind::Stripe => "Stripe Average",
-        }
-    }
-
     #[cfg(feature = "binary-deps")]
     pub fn icon_text(self) -> String {
         use egui_material_icons::icons;
@@ -115,12 +124,17 @@ impl LayerKind {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, DocumentedVariants)]
 pub enum Gradient {
+    /// A single color
     Flat([f32; 3]),
+    /// Generates a gradient using a procedural equation based on Inigo Quilez's simple color palettes. The result is seamless if the third parameter's values are whole numbers.
     Procedural([[f32; 3]; 4]),
+    /// A repeating linear gradient with manual colors and gradient stops
     Manual(Vec<[f32; 4]>),
+    /// A gradient with rotating hue using the HSV color space
     Hsv(f32, f32),
+    /// A gradient with rotating hue using the OKLCH color space
     Oklch(f32, f32),
 }
 impl Gradient {

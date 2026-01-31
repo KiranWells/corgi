@@ -235,7 +235,8 @@ impl GPUData {
         }
     }
 
-    /// Resizes the image to the new viewport and recreates necessary handles.
+    /// Resizes the image to the new viewport and recreates necessary handles (including
+    /// recompiling the compute shaders attached to those handles).
     /// Any objects which created a texture view of the image will need to recreate it.
     pub fn resize(&mut self, (width, height): (u32, u32), max_iter: usize, flags: u32) {
         // recreate the texture with the new size

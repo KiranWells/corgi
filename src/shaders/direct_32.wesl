@@ -1,3 +1,6 @@
+// This is a non-perturbed version of the fractal compute step.
+// It is used for increased performance at low zoom values, and
+// as a sanity check to ensure the perturbed algorithm is correct. 
 import super::utils::{
     ESCAPE_RADIUS,
     DERIVATIVE_ENABLED,

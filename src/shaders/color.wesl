@@ -1,3 +1,5 @@
+// This compute shader takes the raw fractal data and
+// converts it into colors in the final image texture.
 import super::utils::{
     debug,
     INTERPOLATION_LINEAR,
@@ -5,7 +7,6 @@ import super::utils::{
     isinf,
     isnan,
     lerp,
-    MAX_GRADIENT_STOPS,
     mix_advanced,
     PBRNeutralToneMapping,
     TAU,
@@ -30,6 +31,10 @@ import super::utils::color_spaces::{
 // texture
 @group(1) @binding(0) var final_texture: texture_storage_2d<rgba8unorm, write>;
 
+const MAX_GRADIENT_STOPS = 50u;
+const MAX_LAYERS = 8u;
+const MAX_LIGHTS = 3u;
+
 struct Overlays {
     iteration_outline_color: vec4<f32>,
     set_outline_color: vec4<f32>,
@@ -52,13 +57,15 @@ struct ColorParams {
     gradient_size: u32,
     lighting_kind: u32,
     // padding: u32,
+    // Note: these types need to be adjusted when MAX_LAYERS changes;
+    //   an array is not used for alignment reasons.
     color_layer_types: vec2u,
     light_layer_types: vec2u,
-    color_strengths: array<vec4f, 2>,
-    color_params: array<vec4f, 2>,
-    light_strengths: array<vec4f, 2>,
-    light_params: array<vec4f, 2>,
-    lights: array<Light, 3>,
+    color_strengths: array<vec4f, MAX_LAYERS / 4>,
+    color_params: array<vec4f, MAX_LAYERS / 4>,
+    light_strengths: array<vec4f, MAX_LAYERS / 4>,
+    light_params: array<vec4f, MAX_LAYERS / 4>,
+    lights: array<Light, MAX_LIGHTS>,
     overlays: Overlays,
 }
 
@@ -89,6 +96,9 @@ const LIGHTING_GRADIENT = 1u;
 const LIGHTING_REPEATING_GRADIENT = 2u;
 const LIGHTING_SHADED = 3u;
 
+// This function is similar, but not exactly identical to the color layer
+// calculation logic. The differences are designed to make the color
+// and lighting parameters more intuitive.
 fn calculate_lighting_layers(x: u32, y: u32, color_params: ColorParams) -> f32 {
     let pixel_index = x + y * render_params.width;
     var step = step_buffer[pixel_index];
@@ -156,8 +166,7 @@ fn calculate_lighting_layers(x: u32, y: u32, color_params: ColorParams) -> f32 {
 
 @compute @workgroup_size(16, 16, 1)
 fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
-
-    if global_id.x >= render_params.width {
+    if global_id.x >= render_params.width || global_id.y >= render_params.height {
         return;
     }
 

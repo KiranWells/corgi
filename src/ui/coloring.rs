@@ -1,9 +1,10 @@
 use std::mem::discriminant;
 
-use corgi::image_gen::shader_types::{MAX_GRADIENT_STOPS, MAX_LIGHTS};
-use corgi::types::{
+use corgi_lib::image_gen::shader_types::{MAX_GRADIENT_STOPS, MAX_LIGHTS};
+use corgi_lib::types::{
     Coloring, Gradient, Layer, LayerKind, Light, LightingKind, Outline, Overlays, next_layer_id,
 };
+use documented::DocumentedFieldsOpt;
 use eframe::egui::collapsing_header::{CollapsingState, paint_default_icon};
 use eframe::egui::{self, CornerRadius, Event, RichText, Sense, Stroke};
 use egui_material_icons::icons;
@@ -15,6 +16,15 @@ use super::utils::{
 };
 use super::{EditUI, input_with_label};
 use crate::ui::utils::{color_edit, pseudo_color_edit, selection};
+
+/// Wrapper type for gradient stops
+struct StopKind(u8);
+/// Wrapper type for Orbit types
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct OrbitType(pub u8);
+/// Wrapper type for Stripe types
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct StripeType(pub u8);
 
 impl EditUI for Coloring {
     fn render_edit_ui(&mut self, ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
@@ -43,9 +53,7 @@ impl EditUI for Coloring {
             input_with_label(
                 tui,
                 "Gradient repeat frequency",
-                Some(
-                    "How often the colors in the gradient repeat. This acts like a global 'strength' value.",
-                ),
+                Self::get_field_docs("color_frequency").ok(),
                 egui::DragValue::new(&mut self.color_frequency).speed(0.003),
             );
             input_with_label(
@@ -132,24 +140,28 @@ impl EditUI for Coloring {
     }
 }
 
-struct StopKind(u8);
-
 impl EditUI for Gradient {
     fn render_edit_ui(&mut self, ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
-        let flat = discriminant(&Gradient::Flat(Default::default()));
-        let procedural = discriminant(&Gradient::Procedural(Default::default()));
-        let manual = discriminant(&Gradient::Manual(Default::default()));
-        let hue = discriminant(&Gradient::Hsv(0.0, 0.0));
-        let oklch = discriminant(&Gradient::Oklch(0.0, 0.0));
-        let mut tmp = discriminant(self);
+        let flat = Gradient::Flat(Default::default());
+        let procedural = Gradient::Procedural(Default::default());
+        let manual = Gradient::Manual(Default::default());
+        let hue = Gradient::Hsv(0.0, 0.0);
+        let oklch = Gradient::Oklch(0.0, 0.0);
+        let mut tmp = self.clone();
         selection_with_label(
             tui,
             "Coloring mode",
             None,
             &mut tmp,
-            vec![flat, manual, procedural, hue, oklch],
+            vec![
+                flat.clone(),
+                manual.clone(),
+                procedural.clone(),
+                hue.clone(),
+                oklch.clone(),
+            ],
         );
-        if tmp != discriminant(self) {
+        if discriminant(&tmp) != discriminant(self) {
             *self = match tmp {
                 x if x == flat => Gradient::Flat([1.0; 3]),
                 x if x == procedural => {
@@ -354,20 +366,14 @@ impl EditUI for StopKind {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub struct OrbitType(pub u8);
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub struct StripeType(pub u8);
-
 impl EditUI for Layer {
     fn render_edit_ui(&mut self, _ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
-        let strength_help_text = "How strongly this layer influences the end value";
         match self.kind {
             LayerKind::Step => {
                 input_with_label(
                     tui,
                     "Strength",
-                    Some(strength_help_text),
+                    Self::get_field_docs("strength").ok(),
                     egui::DragValue::new(&mut self.strength).speed(0.01),
                 );
             }
@@ -375,7 +381,7 @@ impl EditUI for Layer {
                 input_with_label(
                     tui,
                     "Strength",
-                    Some(strength_help_text),
+                    Self::get_field_docs("strength").ok(),
                     egui::DragValue::new(&mut self.strength).speed(0.01),
                 );
             }
@@ -383,7 +389,7 @@ impl EditUI for Layer {
                 input_with_label(
                     tui,
                     "Strength",
-                    Some(strength_help_text),
+                    Self::get_field_docs("strength").ok(),
                     egui::DragValue::new(&mut self.strength).speed(0.01),
                 );
                 input_with_label(
@@ -409,7 +415,7 @@ impl EditUI for Layer {
                 input_with_label(
                     tui,
                     "Strength",
-                    Some(strength_help_text),
+                    Self::get_field_docs("strength").ok(),
                     egui::DragValue::new(&mut self.strength).speed(0.01),
                 );
                 input_with_label(
@@ -443,7 +449,7 @@ impl EditUI for Layer {
                 input_with_label(
                     tui,
                     "Strength",
-                    Some(strength_help_text),
+                    Self::get_field_docs("strength").ok(),
                     egui::DragValue::new(&mut self.strength).speed(0.01),
                 );
                 input_with_label(
@@ -708,7 +714,7 @@ impl EditUI for Vec<Layer> {
                                 selection(
                                     tui,
                                     &format!("Layer Type {}", layer.id),
-                                    Some("The type of the layer"),
+                                    Layer::get_field_docs("kind").ok(),
                                     &mut layer.kind,
                                     vec![
                                         LayerKind::Step,

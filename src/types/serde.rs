@@ -1,22 +1,9 @@
-//! Translation types used for reliable serialization and deserialization
-//! for different image formats.
+/*
+Translation types used for reliable serialization and deserialization
+for different image formats. These types are only used for converting between
+data on disk and internal data types.
+*/
 
-// required output formats:
-//     - fractal configuration
-//         - location (center + zoom)
-//         - algorithm + parameters
-//         - limits (max_iter)
-//     - style
-//         - internal coloring
-//         - external coloring
-//     - full spec
-//         - fractal config + style
-//         - width, height, sampling
-// Excluded:
-// - debug parameters (except in debug mode)
-// - optimization level - this should always be "correct" for rendered images
-
-#![allow(dead_code)]
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
@@ -45,32 +32,8 @@ pub enum SaveLoadError {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-enum SavedLocation {
-    V1(SavedLocationV1),
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-enum SavedStyle {
-    V1(SavedStyleV1),
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 enum SavedImgSpec {
     V1(ImageSpecV1),
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-struct SavedLocationV1 {
-    center: ComplexPoint,
-    zoom: f32,
-    fractal: FractalKind,
-    max_iter: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-struct SavedStyleV1 {
-    internal_coloring: Coloring,
-    external_coloring: Coloring,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -85,56 +48,6 @@ struct ImageSpecV1 {
     width: u32,
     height: u32,
     samples: u8,
-}
-
-impl From<ImgSpec> for SavedLocation {
-    fn from(val: ImgSpec) -> Self {
-        val.location.into()
-    }
-}
-
-impl From<Location> for SavedLocation {
-    fn from(val: Location) -> Self {
-        Self::V1(SavedLocationV1 {
-            center: val.center.clone(),
-            zoom: val.zoom,
-            fractal: val.fractal_kind.clone(),
-            max_iter: val.max_iter,
-        })
-    }
-}
-
-impl SavedLocation {
-    pub fn apply(self, other: &mut ImgSpec) {
-        #[expect(clippy::infallible_destructuring_match)]
-        let latest = match self {
-            SavedLocation::V1(v1) => v1,
-        };
-        other.location.center = latest.center;
-        other.location.zoom = latest.zoom;
-        other.location.fractal_kind = latest.fractal;
-        other.location.max_iter = latest.max_iter;
-    }
-}
-
-impl SavedStyle {
-    pub fn apply(self, other: &mut ImgSpec) {
-        #[expect(clippy::infallible_destructuring_match)]
-        let latest = match self {
-            SavedStyle::V1(v1) => v1,
-        };
-        other.style.internal_coloring = latest.internal_coloring;
-        other.style.external_coloring = latest.external_coloring;
-    }
-}
-
-impl From<ImgSpec> for SavedStyle {
-    fn from(value: ImgSpec) -> Self {
-        Self::V1(SavedStyleV1 {
-            internal_coloring: value.style.internal_coloring.clone(),
-            external_coloring: value.style.external_coloring.clone(),
-        })
-    }
 }
 
 impl From<ImgSpec> for SavedImgSpec {
@@ -183,6 +96,8 @@ pub fn is_metadata_supported(path: &Path) -> bool {
     matches!(path.extension(), Some(x) if x == "jpg" || x == "jpeg" || x == "png" || x == "webp" || x == "avif")
 }
 
+/// A trait for loading the associated type from disk and gracefully
+/// handling the associated errors.
 pub trait SafeSaveLoad: Sized + Clone {
     type Proxy: Into<Self> + From<Self> + Serialize;
     fn save(&self, path: &Path) -> Result<(), SaveLoadError> {
@@ -279,12 +194,4 @@ impl SafeSaveLoad for ImgSpec {
         update_ids(&mut image.style.external_coloring.light_layers);
         Ok(image)
     }
-}
-
-impl SafeSaveLoad for SavedLocation {
-    type Proxy = SavedLocation;
-}
-
-impl SafeSaveLoad for SavedStyle {
-    type Proxy = SavedStyle;
 }

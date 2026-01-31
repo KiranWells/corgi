@@ -1,15 +1,19 @@
+/*!
+# Worker Thread
+*/
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, mpsc};
 
-use corgi::image_gen::{Constants, Engine, ProgressUpdate, SharedState};
-use corgi::types::ImgSpec;
+use corgi_lib::image_gen::{Constants, Engine, ProgressUpdate, SharedState};
+use corgi_lib::types::ImgSpec;
 use eframe::egui::ahash::{HashMap, HashMapExt};
 use eframe::{egui, egui_wgpu, wgpu};
 use parking_lot::RwLock;
 
 use crate::app::StatusMessage;
 
+/// Associated state for the worker thread
 pub struct WorkerState {
     renderers: HashMap<RendererId, Engine>,
     command_channel: mpsc::Receiver<ImageGenCommand>,
@@ -18,11 +22,16 @@ pub struct WorkerState {
     ctx: egui::Context,
 }
 
+/// Message type for incoming commands to the worker thread
 #[derive(Debug)]
 pub enum ImageGenCommand {
+    /// Render the given image spec in the given renderer
     Render(RendererId, Box<ImgSpec>),
+    /// Update the constant settings passed to the given renderer
     UpdateConstants(RendererId, Constants),
+    /// Save the image from the given renderer to the given path
     SaveToFile(RendererId, PathBuf),
+    /// End the worker thread
     ShutDown,
 }
 
@@ -57,7 +66,7 @@ impl WorkerState {
                         "Explore",
                         preview_settings.extents(),
                         preview_settings.location.max_iter as usize,
-                        corgi::image_gen::Constants {
+                        corgi_lib::image_gen::Constants {
                             iter_batch_size: context.config().ui_max_shader_batch_iters,
                         },
                         cancelled.clone(),
@@ -70,7 +79,7 @@ impl WorkerState {
                         "Style",
                         preview_settings.extents(),
                         preview_settings.location.max_iter as usize,
-                        corgi::image_gen::Constants {
+                        corgi_lib::image_gen::Constants {
                             iter_batch_size: context.config().ui_max_shader_batch_iters,
                         },
                         cancelled.clone(),
@@ -83,7 +92,7 @@ impl WorkerState {
                         "Render",
                         output_settings.extents(),
                         output_settings.location.max_iter as usize,
-                        corgi::image_gen::Constants {
+                        corgi_lib::image_gen::Constants {
                             iter_batch_size: context.config().max_shader_batch_iters,
                         },
                         cancelled.clone(),
@@ -181,7 +190,7 @@ impl WorkerState {
                             image.view(),
                         ));
                     }
-                    Err(corgi::image_gen::RenderingError::Cancelled) => {
+                    Err(corgi_lib::image_gen::RenderingError::Cancelled) => {
                         let _ = self
                             .status_channel
                             .send(StatusMessage::Progress(ProgressUpdate {
@@ -198,7 +207,7 @@ impl WorkerState {
             for (id, path) in save_commands {
                 if let Err(err) = self.renderers.get(&id).unwrap().save_to_file(
                     &path,
-                    corgi::types::serde::is_metadata_supported(&path),
+                    corgi_lib::types::serde::is_metadata_supported(&path),
                     &mut |pu| {
                         let _ = self.status_channel.send(StatusMessage::Progress(pu));
                         self.ctx.request_repaint();

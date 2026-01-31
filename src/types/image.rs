@@ -56,6 +56,9 @@ pub struct View {
     pub height: u32,
 }
 
+/// A representation of the steps that will need re-execution,
+/// assuming the results of the source image are cached and
+/// the destination image is being rendered.
 #[derive(Clone, Copy, Debug)]
 pub struct ImageDiff {
     pub reprobe: bool,
@@ -80,16 +83,23 @@ pub enum Algorithm {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum OptLevel {
+    /// Optimizes for preventing cache invalidation, assuming all features are needed
     #[default]
     CacheOptimized,
+    /// Optimizes for the most accurate image while still being fast, ignoring potential future needs
     AccuracyOptimized,
+    /// Optimizes for the fastest render possible, even at the cost of minor inaccuracy
     PerformanceOptimized,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
+#[derive(
+    Debug, Default, Clone, PartialEq, Deserialize, Serialize, documented::DocumentedVariants,
+)]
 pub enum FractalKind {
+    /// The Mandelbrot set
     #[default]
     Mandelbrot,
+    /// The Julia Sets
     Julia(ComplexPoint),
 }
 
@@ -145,9 +155,14 @@ impl Default for ComplexPoint {
 
 impl ImgSpec {
     pub fn algorithm(&self) -> Algorithm {
-        self.view().algorithm()
+        match self.location.zoom {
+            // TODO: This is a poor estimate for Julia sets
+            x if x < 13.0 => Algorithm::Directf32,
+            _ => Algorithm::Perturbedf32,
+        }
     }
 
+    /// Returns a View corresponding to this image
     pub fn view(&self) -> View {
         View {
             center: self.location.center.clone(),
@@ -158,10 +173,6 @@ impl ImgSpec {
         }
     }
 
-    pub fn size(&self) -> Vec2 {
-        Vec2::new(self.width as f32, self.height as f32)
-    }
-
     pub fn set_view(&mut self, view: View) {
         self.location.center = view.center;
         self.location.zoom = view.zoom;
@@ -170,12 +181,17 @@ impl ImgSpec {
         self.height = view.height;
     }
 
+    pub fn size(&self) -> Vec2 {
+        Vec2::new(self.width as f32, self.height as f32)
+    }
+
     pub fn scale(&mut self, scale: f32) {
         self.width = (self.width as f32 * scale) as u32;
         self.height = (self.height as f32 * scale) as u32;
     }
 
-    pub fn comp(&self, other: &Self) -> ImageDiff {
+    /// Compare this to another image, returning the diff between them.
+    pub fn compare(&self, other: &Self) -> ImageDiff {
         // determine if we need to reallocate buffers or recompile shaders
         // (due to changing compile-time parameters)
         let rebuild = self.width != other.width
@@ -206,6 +222,7 @@ impl ImgSpec {
         }
     }
 
+    /// Adjust the location of the probe if it is no longer a good reference point
     pub fn update_probe(&mut self) {
         let mut relative_pos = self
             .view()
@@ -217,6 +234,8 @@ impl ImgSpec {
         }
     }
 
+    /// Returns the set of bit flags to send to the shader based on the
+    /// features necessary to render this image and the optimization level.
     pub fn get_flags(&self) -> u32 {
         const STRIPES_ENABLED: u32 = 0x1;
         const TOTAL_ANGLE_ENABLED: u32 = 0x2;
@@ -264,7 +283,7 @@ impl ImgSpec {
         }
     }
 
-    pub fn contains_kind(&self, kind: LayerKind) -> bool {
+    fn contains_kind(&self, kind: LayerKind) -> bool {
         self.style.external_coloring.contains_kind(kind)
             || self.style.internal_coloring.contains_kind(kind)
     }
@@ -288,6 +307,7 @@ impl Style {
 }
 
 impl Location {
+    /// Updates the precision used for this location based on the zoom level
     pub fn update_prec(&mut self) {
         let prec = get_precision(self.zoom);
         self.center.x = Float::with_val(prec, self.center.x.clone());
@@ -311,10 +331,16 @@ impl View {
         }
     }
 
+    /// Adjusts the zoom on this View to ensure the other View is
+    /// visible with a small border. Assumes the other view has
+    /// the same center.
     pub fn zoom_to_fit(&mut self, other: &Self) {
         self.zoom = other.zoom - self.zoom_offset_from(other) - 0.1;
     }
 
+    /// Return the zoom difference between this and other, taking
+    /// aspect ratio into account. Assumes the other view has
+    /// the same center.
     pub fn zoom_offset_from(&self, other: &Self) -> f32 {
         let aspect = self.aspect_ratio() as f32;
         let other_aspect = other.aspect_ratio() as f32;
@@ -395,17 +421,6 @@ impl View {
         relative_position / self.aspect_scale() * 0.5 * self.size()
     }
 
-    pub fn algorithm(&self) -> Algorithm {
-        match self.zoom {
-            x if x < 13.0 => Algorithm::Directf32,
-            _ => Algorithm::Perturbedf32,
-        }
-    }
-
-    pub fn buffer_size(&self) -> usize {
-        (self.width as f64) as usize * (self.height as f64) as usize
-    }
-
     pub fn extents(&self) -> Extent3d {
         Extent3d {
             width: (self.width as f64) as u32,
@@ -434,6 +449,7 @@ impl ComplexPoint {
     pub fn new(x: Float, y: Float) -> Self {
         Self { x, y }
     }
+
     pub fn to_vec2(&self) -> Vec2 {
         Vec2 {
             x: self.x.to_f32(),

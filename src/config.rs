@@ -1,16 +1,37 @@
+/*! # App Configuration
+
+This module contains various configuration types for persisting
+application state on disk.
+*/
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 
+use color_eyre::Result;
 use directories::{ProjectDirs, UserDirs};
 use eframe::egui::style::WidgetVisuals;
 use eframe::egui::{Color32, CornerRadius, FontId, Stroke, Style, TextStyle, vec2};
 use serde::{Deserialize, Serialize};
 
+/// Application settings
+///
+/// Contains values that are user-configurable in the
+/// main settings menu, except for the theme.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Config {
     pub ui_max_shader_batch_iters: u32,
     pub max_shader_batch_iters: u32,
+}
+
+/// Cached values
+///
+/// Contains values that are not directly configurable
+/// in the settings menu, but are necessary to persist
+/// between executions.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Cache {
+    pub previous_paths: PreviousPaths,
+    pub default_image_type: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -19,12 +40,10 @@ pub struct PreviousPaths {
     pub image: PathBuf,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Cache {
-    pub previous_paths: PreviousPaths,
-    pub default_image_type: String,
-}
-
+/// Application UI Theme
+///
+/// Contains the colors, spacing, and font size
+/// for the UI.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Theme {
     pub bg_color: Color32,
@@ -34,6 +53,11 @@ pub struct Theme {
     pub base_rem: f32,
 }
 
+/// Persistent application context.
+///
+/// Manages any application state that persists
+/// between executions, saving it on disk if
+/// it has changed.
 #[derive(Debug)]
 pub struct Context {
     config: Config,
@@ -81,14 +105,6 @@ impl Default for Theme {
 }
 
 impl Context {
-    pub fn new(config: Config, cache: Cache, theme: Theme) -> Self {
-        Self {
-            config,
-            cache,
-            theme,
-            dirty: false,
-        }
-    }
     pub fn config(&self) -> &Config {
         &self.config
     }
@@ -98,17 +114,46 @@ impl Context {
     pub fn theme(&self) -> &Theme {
         &self.theme
     }
+
+    /// Get the config for mutation.
+    ///
+    /// Marks the context as dirty (meaning it must be saved on disk).
     pub fn config_mut(&mut self) -> &mut Config {
         self.dirty = true;
         &mut self.config
     }
+    /// Get the cache for mutation.
+    ///
+    /// Marks the context as dirty (meaning it must be saved on disk).
     pub fn cache_mut(&mut self) -> &mut Cache {
         self.dirty = true;
         &mut self.cache
     }
+    /// Get the theme for mutation.
+    ///
+    /// Marks the context as dirty (meaning it must be saved on disk).
     pub fn theme_mut(&mut self) -> &mut Theme {
         self.dirty = true;
         &mut self.theme
+    }
+
+    /// Load configuration from the disk, using the app's associated
+    /// configuration and cache directories.
+    pub fn load() -> Result<Context> {
+        let proj_dirs = ProjectDirs::from("com", "kiranwells", "corgi").ok_or(
+            color_eyre::eyre::eyre!("Failed to find configuration directory"),
+        )?;
+
+        let config: Config = load_from_toml(&proj_dirs.config_dir().join("config.toml"));
+        let theme: Theme = load_from_toml(&proj_dirs.config_dir().join("theme.toml"));
+        let cache: Cache = load_from_toml(&proj_dirs.cache_dir().join("cache.toml"));
+
+        Ok(Self {
+            config,
+            cache,
+            theme,
+            dirty: false,
+        })
     }
 
     pub fn save(&mut self) {
@@ -118,11 +163,23 @@ impl Context {
                 tracing::error!("Failed to get project dirs");
                 return;
             };
+
             save_to_toml(&self.config, &proj_dirs.config_dir().join("config.toml"));
             save_to_toml(&self.cache, &proj_dirs.cache_dir().join("cache.toml"));
             save_to_toml(&self.theme, &proj_dirs.config_dir().join("theme.toml"));
             self.dirty = false;
         }
+    }
+}
+
+fn load_from_toml<T: for<'a> Deserialize<'a> + Default>(path: &PathBuf) -> T {
+    if path.exists()
+        && let Ok(text) = std::fs::read_to_string(path)
+        && let Ok(value) = toml::from_str(&text)
+    {
+        value
+    } else {
+        T::default()
     }
 }
 
@@ -154,6 +211,7 @@ fn save_to_toml<T: Serialize + Default>(value: &T, path: &PathBuf) {
 }
 
 impl Theme {
+    /// Returns an Egui [`Style`] generated from this `Theme`.
     pub fn style(&self) -> Style {
         Style {
             text_styles: [
@@ -280,6 +338,7 @@ impl Theme {
                 panel_fill: self.crust(),
                 ..Default::default()
             },
+            // Included here for reference.
             // debug: eframe::egui::style::DebugOptions {
             //     debug_on_hover: true,
             //     ..Default::default()
@@ -289,6 +348,7 @@ impl Theme {
         }
     }
 
+    // convenience functions for color and spacing variations
     fn text(&self) -> Color32 {
         self.fg_color
     }
@@ -348,15 +408,30 @@ impl ColorExt for Color32 {
     }
 }
 
+/// A collection of convenience functions for color values
+/// that Egui does not provide.
 trait ColorExt {
+    /// Returns the lightness from HSL format in the range \[0-1].
     fn lightness(&self) -> f32;
-    fn lighten(&self, val: f32) -> Self;
+
+    /// Returns a color that is `inc` brighter than this one.
+    ///
+    /// `inc` should be in the range \[-1-1]
+    fn lighten(&self, inc: f32) -> Self;
+
+    /// Returns a color that is `inc` darker than this one.
+    ///
+    /// `inc` should be in the range \[-1-1]
     fn darken(&self, val: f32) -> Self
     where
         Self: Sized,
     {
         self.lighten(-val)
     }
+
+    /// Shifts the lightness of this color toward the nearest extreme, unless there
+    /// is not enough remaining lightness. In that case, shift the lightness in the
+    /// opposite direction.
     fn extreme(&self, val: f32) -> Self
     where
         Self: Sized,

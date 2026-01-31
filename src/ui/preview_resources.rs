@@ -2,8 +2,8 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use color_eyre::Result;
-use corgi::image_gen::shader_types::Transform;
-use corgi::types::View;
+use corgi_lib::image_gen::shader_types::Transform;
+use corgi_lib::types::View;
 use eframe::egui::{self};
 use eframe::egui_wgpu::{self, CallbackTrait};
 use eframe::wgpu::util::DeviceExt;
@@ -24,6 +24,8 @@ struct SubResources {
     size: (u32, u32),
 }
 
+/// Resources necessary for rendering the preview image
+/// for each tab.
 pub struct PreviewRenderResources {
     preview: SubResources,
     output: SubResources,
@@ -228,6 +230,7 @@ impl SubResources {
         Ok(())
     }
 
+    /// Copies the source texture onto the preview texture
     pub fn swap(
         &self,
         device: &Device,
@@ -266,6 +269,7 @@ impl SubResources {
     }
 }
 
+/// Callback data for rendering the preview
 pub struct PaintCallback {
     pub rendered_viewport: View,
     pub view: View,
