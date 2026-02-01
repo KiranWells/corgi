@@ -310,8 +310,10 @@ impl Location {
     /// Updates the precision used for this location based on the zoom level
     pub fn update_prec(&mut self) {
         let prec = get_precision(self.zoom);
-        self.center.x = Float::with_val(prec, self.center.x.clone());
-        self.center.y = Float::with_val(prec, self.center.y.clone());
+        if prec > self.center.x.prec() {
+            self.center.x = Float::with_val(prec, self.center.x.clone());
+            self.center.y = Float::with_val(prec, self.center.y.clone());
+        }
     }
 }
 
