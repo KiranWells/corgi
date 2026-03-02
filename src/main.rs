@@ -13,7 +13,9 @@ use std::sync::atomic::AtomicBool;
 use clap::Parser;
 use color_eyre::Result;
 use color_eyre::eyre::eyre;
-use corgi_lib::image_gen::{Constants, Engine, ProgressUpdate, SharedState, get_device_and_queue};
+use corgi_lib::image_gen::{
+    CompressionParams, Constants, Engine, ProgressUpdate, SharedState, get_device_and_queue,
+};
 use corgi_lib::types::serde::SafeSaveLoad;
 use corgi_lib::types::{ImgSpec, OptLevel};
 use eframe::{egui, egui_wgpu, wgpu};
@@ -39,7 +41,14 @@ fn main() -> Result<()> {
     color_eyre::install()?;
 
     if let Some(path) = cli_options.output_file {
-        headless_render(cli_options.settings_file.as_ref(), &path)?;
+        headless_render(
+            cli_options.settings_file.as_ref(),
+            &path,
+            CompressionParams::new(
+                cli_options.compression_speed,
+                cli_options.compression_quality,
+            )?,
+        )?;
         return Ok(());
     }
 
@@ -70,7 +79,11 @@ fn main() -> Result<()> {
 /// Render a given image without starting the UI, and with non-interactive settings.
 ///
 /// Prints status to the console.
-fn headless_render(settings_file: Option<&PathBuf>, path: &Path) -> Result<()> {
+fn headless_render(
+    settings_file: Option<&PathBuf>,
+    path: &Path,
+    compression_params: CompressionParams,
+) -> Result<()> {
     let (device, queue) = get_device_and_queue().block_on()?;
     let Some(settings_file) = settings_file else {
         return Err(eyre!("No settings file specified, exiting."));
@@ -115,6 +128,7 @@ fn headless_render(settings_file: Option<&PathBuf>, path: &Path) -> Result<()> {
     print!("\n------- | Rendering timings: {}", timings);
     engine.save_to_file(
         path,
+        compression_params,
         corgi_lib::types::serde::is_metadata_supported(path),
         &mut status_callback,
     )?;

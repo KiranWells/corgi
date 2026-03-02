@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, mpsc};
 
-use corgi_lib::image_gen::{Constants, Engine, ProgressUpdate, SharedState};
+use corgi_lib::image_gen::{CompressionParams, Constants, Engine, ProgressUpdate, SharedState};
 use corgi_lib::types::ImgSpec;
 use eframe::egui::ahash::{HashMap, HashMapExt};
 use eframe::{egui, egui_wgpu, wgpu};
@@ -30,7 +30,7 @@ pub enum ImageGenCommand {
     /// Update the constant settings passed to the given renderer
     UpdateConstants(RendererId, Constants),
     /// Save the image from the given renderer to the given path
-    SaveToFile(RendererId, PathBuf),
+    SaveToFile(RendererId, PathBuf, CompressionParams),
     /// End the worker thread
     ShutDown,
 }
@@ -121,8 +121,8 @@ impl WorkerState {
                 ImageGenCommand::Render(id, image) => {
                     render_commands.insert(id, image);
                 }
-                ImageGenCommand::SaveToFile(id, path) => {
-                    save_commands.insert(id, path);
+                ImageGenCommand::SaveToFile(id, path, comp_params) => {
+                    save_commands.insert(id, (path, comp_params));
                 }
                 ImageGenCommand::UpdateConstants(id, c) => {
                     self.renderers.get_mut(&id).unwrap().update_constants(c);
@@ -135,8 +135,8 @@ impl WorkerState {
                     Ok(ImageGenCommand::Render(id, image)) => {
                         render_commands.insert(id, image);
                     }
-                    Ok(ImageGenCommand::SaveToFile(id, path)) => {
-                        save_commands.insert(id, path);
+                    Ok(ImageGenCommand::SaveToFile(id, path, comp_params)) => {
+                        save_commands.insert(id, (path, comp_params));
                     }
                     Ok(ImageGenCommand::UpdateConstants(id, c)) => {
                         self.renderers.get_mut(&id).unwrap().update_constants(c);
@@ -204,9 +204,10 @@ impl WorkerState {
                 }
                 self.ctx.request_repaint();
             }
-            for (id, path) in save_commands {
+            for (id, (path, compression_params)) in save_commands {
                 if let Err(err) = self.renderers.get(&id).unwrap().save_to_file(
                     &path,
+                    compression_params,
                     corgi_lib::types::serde::is_metadata_supported(&path),
                     &mut |pu| {
                         let _ = self.status_channel.send(StatusMessage::Progress(pu));

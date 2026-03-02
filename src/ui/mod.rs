@@ -11,11 +11,13 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
+use corgi_lib::image_gen::CompressionParams;
 use corgi_lib::types::serde::SafeSaveLoad;
 use corgi_lib::types::{
     ComplexPoint, ImgSpec, OptLevel, Rotate, Style as ImgStyle, View, get_precision,
 };
 use directories::BaseDirs;
+use documented::DocumentedFields;
 use eframe::egui::containers::menu::MenuButton;
 use eframe::egui::{
     Button, Color32, CornerRadius, Frame, Pos2, ScrollArea, Sense, Separator, Stroke, TextStyle,
@@ -32,6 +34,7 @@ use taffy::prelude::*;
 use utils::{TuiExt, collapsible, input_with_label, point_edit, section, selection_with_label};
 
 use crate::app::Status;
+use crate::ui::utils::indent_with_line;
 use crate::worker::{ImageGenCommand, RendererId};
 
 mod coloring;
@@ -278,6 +281,11 @@ impl CorgiUI {
                                             self.render_state.save_path = path;
                                         }
                                     });
+                                    let mut compression_params = context.cache().compression_params;
+                                    compression_params.render_edit_ui(ctx, tui);
+                                    if context.cache().compression_params != compression_params {
+                                        context.cache_mut().compression_params = compression_params;
+                                    }
                                 });
                                 let item_spacing = tui.egui_ui().spacing().item_spacing;
                                 tui.style(taffy::Style {
@@ -332,6 +340,7 @@ impl CorgiUI {
                                             self.command_channel.send(ImageGenCommand::SaveToFile(
                                                 RendererId::Render,
                                                 path.clone(),
+                                                context.cache().compression_params,
                                             ));
                                     }
                                 });
@@ -1009,5 +1018,29 @@ impl CorgiUI {
             UITab::Style => RendererId::Style,
             UITab::Render => RendererId::Render,
         }
+    }
+}
+
+impl EditUI for CompressionParams {
+    fn render_edit_ui(&mut self, _ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
+        tui.label("Compression");
+        indent_with_line(tui, |tui| {
+            input_with_label(
+                tui,
+                "Speed",
+                Some(Self::get_field_docs("speed").unwrap()),
+                egui::DragValue::new(&mut self.speed)
+                    .speed(0.1)
+                    .range(1..=100),
+            );
+            input_with_label(
+                tui,
+                "Quality",
+                Some(Self::get_field_docs("quality").unwrap()),
+                egui::DragValue::new(&mut self.quality)
+                    .speed(0.1)
+                    .range(1..=100),
+            );
+        });
     }
 }

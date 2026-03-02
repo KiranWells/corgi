@@ -8,6 +8,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use color_eyre::Result;
+use corgi_lib::image_gen::CompressionParams;
 use directories::{ProjectDirs, UserDirs};
 use eframe::egui::style::WidgetVisuals;
 use eframe::egui::{Color32, CornerRadius, FontId, Stroke, Style, TextStyle, vec2};
@@ -32,6 +33,7 @@ pub struct Config {
 pub struct Cache {
     pub previous_paths: PreviousPaths,
     pub default_image_type: String,
+    pub compression_params: CompressionParams,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -88,6 +90,7 @@ impl Default for Cache {
                 image: home_dir,
             },
             default_image_type: "avif".into(),
+            compression_params: CompressionParams::default(),
         }
     }
 }

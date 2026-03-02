@@ -42,6 +42,16 @@ pub struct CorgiCliOptions {
     /// written into the finished file.
     #[arg(short, long, value_name = "FILE")]
     pub output_file: Option<PathBuf>,
+    /// Determines how long compression takes when saving an image. Lower values
+    /// are slower, but give better compression. Only used when an image format
+    /// supports it.
+    #[arg(short = 's', long, default_value_t = 20)]
+    pub compression_speed: u8,
+    /// Determines the visual quality of saved images. Lower values take up less
+    /// space but will have more compression artifacts. Only used when an image
+    /// format supports it.
+    #[arg(short = 'q', long, default_value_t = 80)]
+    pub compression_quality: u8,
 }
 
 /// The App State management struct

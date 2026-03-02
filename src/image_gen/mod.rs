@@ -11,17 +11,24 @@ mod gpu_setup;
 mod probe;
 pub mod shader_types;
 
+use std::fs::OpenOptions;
+use std::io::BufWriter;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
+use documented::DocumentedFields;
 pub use gpu_setup::{Constants, GPUData, SharedState, get_device_and_queue};
-use image::ImageBuffer;
+use image::codecs::avif::AvifEncoder;
+use image::codecs::gif::GifEncoder;
+use image::codecs::jpeg::JpegEncoder;
+use image::{ImageBuffer, ImageFormat};
 use little_exif::exif_tag::ExifTag;
 use little_exif::metadata::Metadata;
 use parking_lot::RwLock;
 use probe::probe;
+use serde::{Deserialize, Serialize};
 use shader_types::{ColorParams, ComputeParams};
 use wgpu::{self, Extent3d};
 
@@ -49,6 +56,15 @@ pub enum SaveError {
     MetadataNotSupported(Option<std::ffi::OsString>),
     #[error("Failed to save metadata to image")]
     MetadataSave(#[from] std::io::Error),
+}
+
+#[derive(thiserror::Error, Debug)]
+#[non_exhaustive]
+pub enum CompressionParamsError {
+    #[error("Speed must be within 1-100, inclusive")]
+    InvalidSpeed,
+    #[error("Quality must be within 1-100, inclusive")]
+    InvalidQuality,
 }
 
 /// Manages rendering fractal images.
@@ -204,6 +220,41 @@ impl std::fmt::Display for ImageTimings {
     }
 }
 
+/// Settings used for compression speed
+/// and quality, if relevant for the given
+/// image type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, DocumentedFields)]
+pub struct CompressionParams {
+    /// A value from 1-100. Lower gives higher compression but
+    /// takes more time to compress.
+    pub speed: u8,
+    /// A value from 1-100. Higher values give better image
+    /// quality but take up more space on disk. For AVIF, a
+    /// value of 100 means lossless compression.
+    pub quality: u8,
+}
+
+impl Default for CompressionParams {
+    fn default() -> Self {
+        Self {
+            speed: 20,
+            quality: 80,
+        }
+    }
+}
+
+impl CompressionParams {
+    pub fn new(speed: u8, quality: u8) -> Result<Self, CompressionParamsError> {
+        if !(1..=100).contains(&speed) {
+            Err(CompressionParamsError::InvalidSpeed)
+        } else if !(1..=100).contains(&quality) {
+            Err(CompressionParamsError::InvalidQuality)
+        } else {
+            Ok(Self { speed, quality })
+        }
+    }
+}
+
 impl Engine {
     pub fn init(
         shared: SharedState,
@@ -284,6 +335,7 @@ impl Engine {
     pub fn save_to_file(
         &self,
         path: &Path,
+        compression_params: CompressionParams,
         add_metadata: bool,
         status_callback: &mut impl FnMut(ProgressUpdate),
     ) -> Result<(), SaveError> {
@@ -301,7 +353,36 @@ impl Engine {
                     .expect("image data to be properly formatted"),
             );
             img = image::DynamicImage::ImageRgb8(img.flipv().into_rgb8());
-            img.save(path)?;
+            let lazy_writer = || -> Result<BufWriter<std::fs::File>, SaveError> {
+                Ok(BufWriter::new(
+                    OpenOptions::new()
+                        .write(true)
+                        .truncate(true)
+                        .create(true)
+                        .open(path)?,
+                ))
+            };
+            match ImageFormat::from_path(path)? {
+                // 1 <= quality <= 100
+                ImageFormat::Jpeg => img.write_with_encoder(JpegEncoder::new_with_quality(
+                    lazy_writer()?,
+                    compression_params.quality,
+                ))?,
+                // 1 <= speed <= 30
+                ImageFormat::Gif => img.write_with_encoder(GifEncoder::new_with_speed(
+                    lazy_writer()?,
+                    ((compression_params.speed as u32 * 30) / 100).max(1) as i32,
+                ))?,
+                // 1 <= speed <= 10, 1 <= quality <= 100
+                ImageFormat::Avif => {
+                    img.write_with_encoder(AvifEncoder::new_with_speed_quality(
+                        lazy_writer()?,
+                        (compression_params.speed / 10).max(1),
+                        compression_params.quality,
+                    ))?
+                }
+                _ => img.save(path)?,
+            }
 
             // add metadata
             if add_metadata {
