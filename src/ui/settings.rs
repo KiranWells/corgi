@@ -21,6 +21,15 @@ impl EditUI for crate::Config {
             ),
             DragValue::new(&mut self.max_shader_batch_iters).speed(10),
         );
+
+        input_with_label(
+            tui,
+            "Thumbnail Image Size",
+            Some("The width and height of thumbnail images used to preview locations or styles."),
+            DragValue::new(&mut self.thumbnail_size)
+                .speed(10)
+                .range(1..=1024),
+        );
     }
 }
 

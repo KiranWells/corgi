@@ -138,8 +138,8 @@ impl Default for Location {
 impl Default for Style {
     fn default() -> Self {
         Self {
-            external_coloring: Coloring::default(),
-            internal_coloring: Coloring::internal_default(),
+            external_coloring: Coloring::external_opt_default(),
+            internal_coloring: Coloring::internal_opt_default(),
         }
     }
 }
@@ -294,6 +294,13 @@ impl ImgSpec {
             height: (self.height as f64) as u32,
             depth_or_array_layers: 1,
         }
+    }
+
+    pub fn with_size(&self, arg: (u32, u32)) -> Self {
+        let mut new = self.clone();
+        new.width = arg.0;
+        new.height = arg.1;
+        new
     }
 }
 

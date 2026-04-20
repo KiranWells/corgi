@@ -4,10 +4,8 @@ pub mod config;
 pub mod ui;
 pub mod worker;
 
-use std::env;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 
 use clap::Parser;
@@ -20,8 +18,8 @@ use corgi_lib::types::serde::SafeSaveLoad;
 use corgi_lib::types::{ImgSpec, OptLevel};
 use eframe::{egui, egui_wgpu, wgpu};
 use pollster::FutureExt;
-use tracing::Level;
-use tracing_subscriber::FmtSubscriber;
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::{EnvFilter, fmt};
 
 use crate::app::{CorgiApp, CorgiCliOptions};
 use crate::config::{Config, Context, Theme};
@@ -29,15 +27,10 @@ use crate::config::{Config, Context, Theme};
 fn main() -> Result<()> {
     let cli_options = CorgiCliOptions::parse();
     // set up logging
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(
-            env::var("CORGI_LOG_LEVEL")
-                .ok()
-                .map(|s| Level::from_str(&s).expect("log level to be valid"))
-                .unwrap_or(Level::WARN),
-        )
-        .finish();
-    tracing::subscriber::set_global_default(subscriber)?;
+    tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(EnvFilter::from_env("CORGI_LOG_LEVEL"))
+        .init();
     color_eyre::install()?;
 
     if let Some(path) = cli_options.output_file {
@@ -128,6 +121,7 @@ fn headless_render(
     print!("\n------- | Rendering timings: {}", timings);
     engine.save_to_file(
         path,
+        None,
         compression_params,
         corgi_lib::types::serde::is_metadata_supported(path),
         &mut status_callback,

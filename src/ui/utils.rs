@@ -22,6 +22,7 @@ pub trait TuiExt {
 impl TuiExt for Tui {
     fn horizontal(&mut self) -> egui_taffy::TuiBuilder<'_> {
         self.style(Style {
+            display: Display::Flex,
             flex_direction: FlexDirection::Row,
             padding: Rect::zero(),
             justify_content: Some(AlignContent::SpaceEvenly),
@@ -38,6 +39,7 @@ impl TuiExt for Tui {
     }
     fn vertical(&mut self) -> egui_taffy::TuiBuilder<'_> {
         self.style(Style {
+            display: Display::Flex,
             flex_direction: FlexDirection::Column,
             padding: Rect::zero(),
             justify_content: Some(AlignContent::SpaceEvenly),
@@ -297,7 +299,6 @@ pub fn section(tui: &mut Tui, title: &str, expand: bool, add_contents: impl FnOn
             }));
             let header_res = header_res.union(res).union(pre_res);
             let clickable_res = ui.interact(header_res.rect, id, Sense::click());
-            // let header_res = ui.button(title);
             if clickable_res.clicked() {
                 state.toggle(ui);
             }
@@ -379,6 +380,36 @@ pub fn selection<T: PartialEq + ToLabel + ToHelpText>(
     );
 }
 
+/// Adds a selectable ComboBox in a Tui context
+pub fn raw_selection(
+    tui: &mut egui_taffy::Tui,
+    label: &str,
+    help_text: Option<&str>,
+    current_value: &mut String,
+    options: Vec<String>,
+) {
+    tui.ui_add_manual(
+        |ui| {
+            let res = egui::ComboBox::from_id_salt(label)
+                .selected_text(&*current_value)
+                .show_ui(ui, |ui| {
+                    for selected_value in options {
+                        ui.selectable_value(current_value, selected_value.clone(), &selected_value);
+                    }
+                })
+                .response;
+            if let Some(help_text) = help_text
+                && !help_text.is_empty()
+            {
+                res.on_hover_text(help_text)
+            } else {
+                res
+            }
+        },
+        |res, _ui| res,
+    );
+}
+
 /// Adds a selection with a label in a Tui context
 pub fn selection_with_label<T: PartialEq + ToLabel + ToHelpText>(
     tui: &mut egui_taffy::Tui,
@@ -396,6 +427,42 @@ pub fn selection_with_label<T: PartialEq + ToLabel + ToHelpText>(
             options,
         );
     });
+}
+
+/// Adds a vertical ScrollArea in a Tui context
+pub fn scroll(tui: &mut egui_taffy::Tui, add_contents: impl FnOnce(&mut Tui), name: &str) {
+    tui.ui_add_manual(
+        |ui| {
+            ui.scope(|ui| {
+                egui::ScrollArea::vertical()
+                    .max_height(1000.0)
+                    .min_scrolled_height(300.0)
+                    .show(ui, |ui| {
+                        egui_taffy::tui(ui, ui.id().with(name))
+                            .reserve_available_width()
+                            .show(|tui| {
+                                tui.style(Style {
+                                    flex_direction: FlexDirection::Column,
+                                    padding: Rect::zero(),
+                                    justify_content: Some(AlignContent::Stretch),
+                                    align_content: Some(AlignContent::Stretch),
+                                    justify_items: Some(AlignItems::Stretch),
+                                    align_items: Some(AlignItems::Stretch),
+                                    size: Size {
+                                        width: length(tui.taffy_container().parent_rect().width()),
+                                        height: auto(),
+                                    },
+                                    flex_grow: 1.0,
+                                    ..tui.current_style().clone()
+                                })
+                                .add(add_contents)
+                            })
+                    })
+            })
+            .response
+        },
+        |res, _ui| res,
+    );
 }
 
 /// Adds the given UI and a label in a Tui context

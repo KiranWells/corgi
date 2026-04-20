@@ -335,6 +335,7 @@ impl Engine {
     pub fn save_to_file(
         &self,
         path: &Path,
+        name: Option<String>,
         compression_params: CompressionParams,
         add_metadata: bool,
         status_callback: &mut impl FnMut(ProgressUpdate),
@@ -396,6 +397,10 @@ impl Engine {
                 let description = image_settings.stringify()?;
 
                 meta.set_tag(ExifTag::ImageDescription(description));
+                if let Some(name) = name {
+                    // There is no "name" field, so thumbnails use this instead
+                    meta.set_tag(ExifTag::Make(name));
+                }
                 meta.set_tag(ExifTag::Software("Corgi".into()));
                 meta.write_to_file(path)?;
             }

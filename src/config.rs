@@ -14,6 +14,8 @@ use eframe::egui::style::WidgetVisuals;
 use eframe::egui::{Color32, CornerRadius, FontId, Stroke, Style, TextStyle, vec2};
 use serde::{Deserialize, Serialize};
 
+pub const PROJECT_QUALIFIERS: [&str; 3] = ["com", "kiranwells", "corgi"];
+
 /// Application settings
 ///
 /// Contains values that are user-configurable in the
@@ -22,6 +24,7 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
     pub ui_max_shader_batch_iters: u32,
     pub max_shader_batch_iters: u32,
+    pub thumbnail_size: u32,
 }
 
 /// Cached values
@@ -73,6 +76,7 @@ impl Default for Config {
         Self {
             ui_max_shader_batch_iters: 1000,
             max_shader_batch_iters: 5000,
+            thumbnail_size: 256,
         }
     }
 }
@@ -143,9 +147,7 @@ impl Context {
     /// Load configuration from the disk, using the app's associated
     /// configuration and cache directories.
     pub fn load() -> Result<Context> {
-        let proj_dirs = ProjectDirs::from("com", "kiranwells", "corgi").ok_or(
-            color_eyre::eyre::eyre!("Failed to find configuration directory"),
-        )?;
+        let proj_dirs = corgi_project_dirs();
 
         let config: Config = load_from_toml(&proj_dirs.config_dir().join("config.toml"));
         let theme: Theme = load_from_toml(&proj_dirs.config_dir().join("theme.toml"));
@@ -341,11 +343,12 @@ impl Theme {
                 panel_fill: self.crust(),
                 ..Default::default()
             },
-            // Included here for reference.
-            // debug: eframe::egui::style::DebugOptions {
-            //     debug_on_hover: true,
-            //     ..Default::default()
-            // },
+            #[cfg(debug_assertions)]
+            debug: eframe::egui::style::DebugOptions {
+                debug_on_hover: std::env::var("CORGI_UI_DEBUG")
+                    .is_ok_and(|val| val.to_lowercase() == "true" || val == "1"),
+                ..Default::default()
+            },
             explanation_tooltips: true,
             ..Default::default()
         }
@@ -447,4 +450,13 @@ trait ColorExt {
             _ => self.darken(val),
         }
     }
+}
+
+pub fn corgi_project_dirs() -> ProjectDirs {
+    ProjectDirs::from(
+        PROJECT_QUALIFIERS[0],
+        PROJECT_QUALIFIERS[1],
+        PROJECT_QUALIFIERS[2],
+    )
+    .expect("to find configuration directory")
 }

@@ -20,30 +20,34 @@ use directories::BaseDirs;
 use documented::DocumentedFields;
 use eframe::egui::containers::menu::MenuButton;
 use eframe::egui::{
-    Button, Color32, CornerRadius, Frame, Pos2, ScrollArea, Sense, Separator, Stroke, TextStyle,
-    UiBuilder, Vec2, WidgetText,
+    Button, Color32, CornerRadius, Frame, Pos2, ScrollArea, Sense, Separator, Stroke, TextEdit,
+    TextStyle, UiBuilder, Vec2, WidgetText,
 };
 use eframe::{egui, egui_wgpu};
 use egui_material_icons::icons;
 use egui_taffy::{TuiBuilderLogic, tui};
+use preset_library::PresetLibrary;
 use preview_resources::PaintCallback;
 use rug::Float;
 use rug::ops::PowAssign;
 use taffy::Overflow;
 use taffy::prelude::*;
-use utils::{TuiExt, collapsible, input_with_label, point_edit, section, selection_with_label};
+use utils::{TuiExt, collapsible, input_with_label, point_edit, section};
 
 use crate::app::Status;
-use crate::ui::utils::indent_with_line;
+use crate::config::corgi_project_dirs;
+use crate::ui::preview_resources::ThumbPaintCallback;
+use crate::ui::utils::{indent_with_line, raw_selection, selection_with_label, ui_with_label};
 use crate::worker::{ImageGenCommand, RendererId};
 
 mod coloring;
 pub mod debouncer;
+mod preset_library;
 mod preview_resources;
 mod settings;
 mod utils;
 
-pub use preview_resources::PreviewRenderResources;
+pub use preview_resources::{PreviewRenderResources, ThumbnailRenderResources};
 
 /// Utility trait for rendering UI
 pub trait EditUI {
@@ -63,11 +67,13 @@ struct ExploreTabState {
     rendered_view: View,
     style: ImgStyle,
     scaling: f32,
+    location_presets: PresetLibrary,
 }
 #[derive(Debug)]
 struct StyleTabState {
     rendered_view: View,
     scaling: f32,
+    style_presets: PresetLibrary,
 }
 #[derive(Debug)]
 struct RenderTabState {
@@ -94,6 +100,10 @@ pub struct CorgiUI {
     pub swap: bool,
     pub status: Status,
     command_channel: mpsc::Sender<ImageGenCommand>,
+    preset_save_active: Option<UITab>,
+    preset_name: String,
+    preset_group: String,
+    new_group_active: bool,
 }
 
 impl CorgiUI {
@@ -103,16 +113,35 @@ impl CorgiUI {
         image: ImgSpec,
         command_channel: mpsc::Sender<ImageGenCommand>,
     ) -> Self {
+        let dirs = corgi_project_dirs();
+        let install_dir = std::env::var("CARGO_MANIFEST_DIR")
+            .map(PathBuf::from)
+            .unwrap_or(
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                    .unwrap_or("./".into()),
+            );
+        let base_dirs = [
+            dirs.config_dir().join("presets"),
+            install_dir.join("presets"),
+        ];
         Self {
             tab: UITab::Explore,
             explore_state: ExploreTabState {
                 rendered_view: image.view(),
                 style: ImgStyle::opt_default(),
                 scaling: 0.5,
+                location_presets: PresetLibrary::new(
+                    base_dirs.iter().map(|p| p.join("locations")).collect(),
+                ),
             },
             style_state: StyleTabState {
                 rendered_view: image.view(),
                 scaling: 1.0,
+                style_presets: PresetLibrary::new(
+                    base_dirs.iter().map(|p| p.join("styles")).collect(),
+                ),
             },
             render_state: RenderTabState {
                 rendered_view: image.view(),
@@ -127,6 +156,10 @@ impl CorgiUI {
             setting_probe: false,
             swap: false,
             show_settings: false,
+            preset_save_active: None,
+            preset_name: "New Preset".into(),
+            preset_group: "New Group".into(),
+            new_group_active: false,
             rendering_output: false,
             status: Status::default(),
             command_channel,
@@ -196,8 +229,33 @@ impl CorgiUI {
                             ..Default::default()
                         })
                         .show(|tui| match self.tab {
-                            UITab::Explore => self.explore_tab(tui),
+                            UITab::Explore => self.explore_tab(context, ctx, tui),
                             UITab::Style => {
+                                let mut activate_preset = false;
+                                self.style_state.style_presets.render_ui(
+                                    |new_spec| self.root_spec.style = new_spec.style.clone(),
+                                    &mut activate_preset,
+                                    tui,
+                                    false,
+                                );
+                                if activate_preset {
+                                    self.preset_save_active = Some(UITab::Style);
+                                    self.preset_group = self
+                                        .style_state
+                                        .style_presets
+                                        .group_names()
+                                        .first()
+                                        .unwrap_or(&self.preset_group)
+                                        .clone();
+                                    let mut img = self.image().clone();
+                                    img.location.zoom = self.root_spec.location.zoom;
+                                    img.width = context.config().thumbnail_size;
+                                    img.height = context.config().thumbnail_size;
+                                    let _ = self.command_channel.send(ImageGenCommand::Render(
+                                        RendererId::Thumbnail,
+                                        Box::new(img),
+                                    ));
+                                }
                                 section(tui, "External", true, |tui| {
                                     self.root_spec
                                         .style
@@ -341,6 +399,7 @@ impl CorgiUI {
                                                 RendererId::Render,
                                                 path.clone(),
                                                 context.cache().compression_params,
+                                                None,
                                             ));
                                     }
                                 });
@@ -348,7 +407,7 @@ impl CorgiUI {
                         });
                 });
             });
-        egui::CentralPanel::default()
+        let res = egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(ctx.style().visuals.window_fill))
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
@@ -376,6 +435,8 @@ impl CorgiUI {
         let style = ctx.style().clone();
         egui::Window::new("Settings")
             .open(&mut self.show_settings)
+            .default_pos(res.response.rect.center())
+            .pivot(egui::Align2::CENTER_BOTTOM)
             .show(ctx, |ui| {
                 ui.set_style(style);
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
@@ -425,6 +486,160 @@ impl CorgiUI {
                     ));
                 }
             });
+        let style = ctx.style().clone();
+        let mut open = self.preset_save_active.is_some();
+        egui::Window::new("Save Preset")
+            .open(&mut open)
+            .default_size(Vec2::splat(300.0))
+            .default_pos(res.response.rect.center())
+            .pivot(egui::Align2::CENTER_BOTTOM)
+            .show(ctx, |ui| {
+                ui.set_style(style);
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                let item_spacing = ui.spacing().item_spacing;
+
+                tui(ui, ui.id().with("presets"))
+                    .reserve_available_space()
+                    .style(taffy::Style {
+                        display: Display::Flex,
+                        flex_direction: FlexDirection::Column,
+                        padding: Rect::length(item_spacing.x * 2.0),
+                        align_items: Some(AlignItems::Center),
+                        size: Size {
+                            width: percent(1.0),
+                            height: auto(),
+                        },
+                        gap: length(item_spacing.y),
+                        ..Default::default()
+                    })
+                    .show(|tui| {
+                        tui.ui_add_manual(
+                            |ui| {
+                                ui.scope_builder(
+                                    UiBuilder::new().max_rect(egui::Rect::from_min_size(
+                                        ui.cursor().min,
+                                        Vec2::splat(context.config().thumbnail_size as f32),
+                                    )),
+                                    |ui| {
+                                        ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+                                            ui.available_rect_before_wrap(),
+                                            ThumbPaintCallback {
+                                                size: (
+                                                    context.config().thumbnail_size,
+                                                    context.config().thumbnail_size,
+                                                ),
+                                                swap: self.swap,
+                                            },
+                                        ));
+                                        ui.allocate_rect(
+                                            ui.available_rect_before_wrap(),
+                                            Sense::empty(),
+                                        );
+                                    },
+                                )
+                                .response
+                            },
+                            |res, _| res,
+                        );
+                        ui_with_label(
+                            tui,
+                            "Name",
+                            Some("The name to save the preset under"),
+                            |tui| {
+                                tui.grow()
+                                    .ui_add(TextEdit::singleline(&mut self.preset_name));
+                            },
+                        );
+                        let preset_library = match self.preset_save_active {
+                            Some(UITab::Explore) => &mut self.explore_state.location_presets,
+                            Some(UITab::Style) => &mut self.style_state.style_presets,
+                            _ => {
+                                tui.egui_ui().close_kind(egui::UiKind::Window);
+                                return;
+                            }
+                        };
+
+                        tui.horizontal().add(|tui| {
+                            ui_with_label(
+                                tui,
+                                "Group",
+                                Some("The group the preset will be saved in"),
+                                |tui| {
+                                    raw_selection(
+                                        tui,
+                                        "Group",
+                                        None,
+                                        &mut self.preset_group,
+                                        preset_library.group_names(),
+                                    );
+                                },
+                            );
+                            if tui.ui_add(Button::new("New Group")).clicked() {
+                                self.new_group_active = true;
+                            }
+                        });
+                        tui.horizontal().add(|tui| {
+                            if tui.grow().ui_add(Button::new("Save")).clicked() {
+                                match preset_library
+                                    .create_preset(&self.preset_name, &self.preset_group)
+                                {
+                                    Ok(path) => {
+                                        let _ =
+                                            self.command_channel.send(ImageGenCommand::SaveToFile(
+                                                RendererId::Thumbnail,
+                                                path,
+                                                CompressionParams {
+                                                    speed: 1,
+                                                    quality: 50,
+                                                },
+                                                Some(self.preset_name.clone()),
+                                            ));
+                                        tui.egui_ui().close_kind(egui::UiKind::Window);
+                                    }
+                                    Err(err) => tracing::error!("Failed to create preset: {err}"),
+                                }
+                            }
+                            if tui.grow().ui_add(Button::new("Cancel")).clicked() {
+                                tui.egui_ui().close_kind(egui::UiKind::Window);
+                            }
+                        })
+                    });
+            });
+        if !open {
+            self.preset_save_active = None;
+        }
+
+        let style = ctx.style().clone();
+        egui::Window::new("New Group")
+            .open(&mut self.new_group_active)
+            .default_pos(res.response.rect.center())
+            .pivot(egui::Align2::CENTER_TOP)
+            .show(ctx, |ui| {
+                ui.set_style(style);
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+
+                ui.text_edit_singleline(&mut self.preset_group);
+                ui.horizontal(|ui| {
+                    if ui.button("Create").clicked() {
+                        let preset_library = match self.preset_save_active {
+                            Some(UITab::Explore) => &mut self.explore_state.location_presets,
+                            Some(UITab::Style) => &mut self.style_state.style_presets,
+                            _ => {
+                                ui.close_kind(egui::UiKind::Window);
+                                return;
+                            }
+                        };
+                        if let Err(err) = preset_library.create_group(&self.preset_group) {
+                            tracing::error!("Failed to create group: {err}");
+                        }
+                        ui.close_kind(egui::UiKind::Window);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        ui.close_kind(egui::UiKind::Window);
+                    }
+                });
+            });
+        self.swap = false;
     }
 
     /// Build the menu button
@@ -535,16 +750,47 @@ impl CorgiUI {
     }
 
     /// Build the Explore tab UI
-    fn explore_tab(&mut self, tui: &mut egui_taffy::Tui) {
+    fn explore_tab(
+        &mut self,
+        context: &crate::Context,
+        _ctx: &egui::Context,
+        tui: &mut egui_taffy::Tui,
+    ) {
         let img = self.image();
         let item_spacing = tui.egui_ui().spacing().item_spacing;
+
+        let mut activate_preset = false;
+        self.explore_state.location_presets.render_ui(
+            |new_spec| self.root_spec.location = new_spec.location.clone(),
+            &mut activate_preset,
+            tui,
+            true,
+        );
+        if activate_preset {
+            self.preset_save_active = Some(UITab::Explore);
+            self.preset_group = self
+                .explore_state
+                .location_presets
+                .group_names()
+                .first()
+                .unwrap_or(&self.preset_group)
+                .clone();
+            let mut img = self.image().clone();
+            img.location.zoom = self.root_spec.location.zoom;
+            img.width = context.config().thumbnail_size;
+            img.height = context.config().thumbnail_size;
+            let _ = self.command_channel.send(ImageGenCommand::Render(
+                RendererId::Thumbnail,
+                Box::new(img),
+            ));
+        }
         tui.style(taffy::Style {
             flex_direction: taffy::FlexDirection::Column,
             size: percent(1.0),
             padding: Rect {
                 left: length(item_spacing.y * 3.0),
                 right: length(item_spacing.y * 3.0),
-                top: length(item_spacing.y * 3.0),
+                top: length(0.0),
                 bottom: length(0.0),
             },
             gap: length(tui.egui_ui().spacing().item_spacing.y * 2.0),
@@ -694,7 +940,6 @@ impl CorgiUI {
                     swap: self.swap,
                     tab: self.tab,
                 };
-                self.swap = false;
 
                 let callback = egui_wgpu::Callback::new_paint_callback(rect, cb);
 
@@ -1009,6 +1254,7 @@ impl CorgiUI {
                 self.current_view.zoom_to_fit(&viewport);
                 self.rendering_output = false;
             }
+            RendererId::Thumbnail => {}
         }
     }
 

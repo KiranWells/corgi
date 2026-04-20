@@ -34,6 +34,11 @@ pub struct PreviewRenderResources {
     output_texture: Arc<RwLock<wgpu::Texture>>,
 }
 
+pub struct ThumbnailRenderResources {
+    sub: SubResources,
+    texture: Arc<RwLock<wgpu::Texture>>,
+}
+
 impl PreviewRenderResources {
     pub fn init(
         device: &wgpu::Device,
@@ -53,6 +58,18 @@ impl PreviewRenderResources {
             style_texture,
             output_texture,
         })
+    }
+}
+
+impl ThumbnailRenderResources {
+    pub fn init(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        texture: Arc<RwLock<wgpu::Texture>>,
+        size: (u32, u32),
+    ) -> Result<Self> {
+        let sub = SubResources::init(device, format, size)?;
+        Ok(Self { sub, texture })
     }
 }
 
@@ -332,5 +349,51 @@ impl CallbackTrait for PaintCallback {
             &res.preview
         };
         res.paint(render_pass);
+    }
+}
+
+/// Callback data for rendering the preview
+pub struct ThumbPaintCallback {
+    pub size: (u32, u32),
+    pub swap: bool,
+}
+
+impl CallbackTrait for ThumbPaintCallback {
+    fn prepare(
+        &self,
+        device: &eframe::wgpu::Device,
+        queue: &eframe::wgpu::Queue,
+        _screen_descriptor: &egui_wgpu::ScreenDescriptor,
+        _egui_encoder: &mut eframe::wgpu::CommandEncoder,
+        callback_resources: &mut egui_wgpu::CallbackResources,
+    ) -> Vec<eframe::wgpu::CommandBuffer> {
+        let res = callback_resources
+            .get_mut::<ThumbnailRenderResources>()
+            .expect("to get render resources");
+        if self.swap {
+            // copy the preview texture to the used texture
+            res.sub.swap(device, queue, &res.texture.read());
+        }
+
+        if self.size != *res.sub.size() {
+            // resize the render resources, refreshing the texture reference
+            res.sub
+                .resize(device, queue, self.size, &res.texture.read())
+                .expect("to resize render resources");
+        }
+        res.sub.prepare(device, queue, Transform::default());
+        Vec::new()
+    }
+
+    fn paint(
+        &self,
+        _info: egui::PaintCallbackInfo,
+        render_pass: &mut eframe::wgpu::RenderPass<'static>,
+        callback_resources: &egui_wgpu::CallbackResources,
+    ) {
+        let res = callback_resources
+            .get::<ThumbnailRenderResources>()
+            .expect("to get render resources");
+        res.sub.paint(render_pass);
     }
 }

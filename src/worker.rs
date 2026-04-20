@@ -30,7 +30,7 @@ pub enum ImageGenCommand {
     /// Update the constant settings passed to the given renderer
     UpdateConstants(RendererId, Constants),
     /// Save the image from the given renderer to the given path
-    SaveToFile(RendererId, PathBuf, CompressionParams),
+    SaveToFile(RendererId, PathBuf, CompressionParams, Option<String>),
     /// End the worker thread
     ShutDown,
 }
@@ -40,6 +40,7 @@ pub enum RendererId {
     Explore,
     Style,
     Render,
+    Thumbnail,
 }
 
 impl WorkerState {
@@ -98,6 +99,23 @@ impl WorkerState {
                         cancelled.clone(),
                     ),
                 ),
+                (
+                    RendererId::Thumbnail,
+                    Engine::init(
+                        shared.clone(),
+                        "Thumbnail",
+                        wgpu::Extent3d {
+                            width: context.config().thumbnail_size,
+                            height: context.config().thumbnail_size,
+                            depth_or_array_layers: 1,
+                        },
+                        output_settings.location.max_iter as usize,
+                        corgi_lib::image_gen::Constants {
+                            iter_batch_size: context.config().max_shader_batch_iters,
+                        },
+                        cancelled.clone(),
+                    ),
+                ),
             ]
             .into_iter()
             .collect(),
@@ -121,8 +139,8 @@ impl WorkerState {
                 ImageGenCommand::Render(id, image) => {
                     render_commands.insert(id, image);
                 }
-                ImageGenCommand::SaveToFile(id, path, comp_params) => {
-                    save_commands.insert(id, (path, comp_params));
+                ImageGenCommand::SaveToFile(id, path, comp_params, name) => {
+                    save_commands.insert(id, (path, comp_params, name));
                 }
                 ImageGenCommand::UpdateConstants(id, c) => {
                     self.renderers.get_mut(&id).unwrap().update_constants(c);
@@ -135,8 +153,8 @@ impl WorkerState {
                     Ok(ImageGenCommand::Render(id, image)) => {
                         render_commands.insert(id, image);
                     }
-                    Ok(ImageGenCommand::SaveToFile(id, path, comp_params)) => {
-                        save_commands.insert(id, (path, comp_params));
+                    Ok(ImageGenCommand::SaveToFile(id, path, comp_params, name)) => {
+                        save_commands.insert(id, (path, comp_params, name));
                     }
                     Ok(ImageGenCommand::UpdateConstants(id, c)) => {
                         self.renderers.get_mut(&id).unwrap().update_constants(c);
@@ -204,9 +222,10 @@ impl WorkerState {
                 }
                 self.ctx.request_repaint();
             }
-            for (id, (path, compression_params)) in save_commands {
+            for (id, (path, compression_params, name)) in save_commands {
                 if let Err(err) = self.renderers.get(&id).unwrap().save_to_file(
                     &path,
+                    name,
                     compression_params,
                     corgi_lib::types::serde::is_metadata_supported(&path),
                     &mut |pu| {

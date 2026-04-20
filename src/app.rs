@@ -17,7 +17,7 @@ use corgi_lib::types::{ImgSpec, View};
 
 use crate::config::Context;
 use crate::ui::debouncer::Debouncer;
-use crate::ui::{CorgiUI, PreviewRenderResources};
+use crate::ui::{CorgiUI, PreviewRenderResources, ThumbnailRenderResources};
 use crate::worker::{ImageGenCommand, RendererId, WorkerState};
 
 /// Command line options for the application
@@ -177,13 +177,14 @@ impl CorgiApp {
         let cancelled = Arc::new(AtomicBool::new(false));
         let mut initial_image = ImgSpec::default();
         let output_image = ImgSpec::default();
-        let ctx = cc.egui_ctx.clone();
+        let ctx = &cc.egui_ctx;
 
         ctx.set_style(context.theme().style());
         egui_material_icons::initialize(&cc.egui_ctx);
         ctx.options_mut(|options| {
             options.max_passes = std::num::NonZeroUsize::new(1).unwrap();
         });
+        egui_extras::install_image_loaders(ctx);
 
         if let Some(image_file) = &cli_options.settings_file {
             initial_image = ImgSpec::load(image_file)?
@@ -196,22 +197,36 @@ impl CorgiApp {
             worker_recv,
             worker_send,
             cancelled.clone(),
-            ctx,
+            ctx.clone(),
             &context,
         );
         let extents = initial_image.extents();
-        let resources = PreviewRenderResources::init(
-            &wgpu.device,
-            wgpu.target_format,
-            worker_state.texture(RendererId::Explore),
-            worker_state.texture(RendererId::Style),
-            worker_state.texture(RendererId::Render),
-            (extents.width, extents.height),
-            (output_image.width, output_image.height),
-        )?;
         let ui_state = CorgiUI::new(&context, initial_image, ui_send.clone());
 
-        wgpu.renderer.write().callback_resources.insert(resources);
+        wgpu.renderer
+            .write()
+            .callback_resources
+            .insert(PreviewRenderResources::init(
+                &wgpu.device,
+                wgpu.target_format,
+                worker_state.texture(RendererId::Explore),
+                worker_state.texture(RendererId::Style),
+                worker_state.texture(RendererId::Render),
+                (extents.width, extents.height),
+                (output_image.width, output_image.height),
+            )?);
+        wgpu.renderer
+            .write()
+            .callback_resources
+            .insert(ThumbnailRenderResources::init(
+                &wgpu.device,
+                wgpu.target_format,
+                worker_state.texture(RendererId::Thumbnail),
+                (
+                    context.config().thumbnail_size,
+                    context.config().thumbnail_size,
+                ),
+            )?);
         let handle = thread::spawn(move || {
             worker_state.run();
         });
@@ -285,6 +300,9 @@ impl eframe::App for CorgiApp {
                     }
                 }
                 PollState::Repoll => {
+                    self.ui_state.status.message =
+                        "Waiting for input to finish; render starting soon".into();
+                    self.ui_state.status.progress = None;
                     // we need to force a re-check next frame
                     ctx.request_repaint();
                 }
