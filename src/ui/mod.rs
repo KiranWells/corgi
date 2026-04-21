@@ -30,14 +30,15 @@ use preset_library::PresetLibrary;
 use preview_resources::PaintCallback;
 use rug::Float;
 use rug::ops::PowAssign;
-use taffy::Overflow;
 use taffy::prelude::*;
-use utils::{TuiExt, collapsible, input_with_label, point_edit, section};
+use utils::{collapsible, input_with_label, point_edit, section};
 
 use crate::app::Status;
 use crate::config::corgi_project_dirs;
 use crate::ui::preview_resources::ThumbPaintCallback;
-use crate::ui::utils::{indent_with_line, raw_selection, selection_with_label, ui_with_label};
+use crate::ui::utils::{
+    StyleExt, indent_with_line, raw_selection, selection_with_label, ui_with_label,
+};
 use crate::worker::{ImageGenCommand, RendererId};
 
 mod coloring;
@@ -178,260 +179,29 @@ impl CorgiUI {
             .frame(Frame::new().fill(ctx.style().visuals.window_fill))
             .show(ctx, |ui| {
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                let y = ui.style_mut().spacing.item_spacing.y;
-                ui.style_mut().spacing.item_spacing.y = 0.0;
-                // Top bar
-                ui.horizontal(|ui| {
-                    {
-                        let style = ui.style_mut();
-                        style.spacing.item_spacing.x = 0.0;
-                        style.visuals.widgets.inactive.corner_radius = CornerRadius::same(0);
-                        style.visuals.widgets.active.corner_radius = CornerRadius::same(0);
-                        style.visuals.widgets.hovered.corner_radius = CornerRadius::same(0);
-                        style.spacing.button_padding.x *= 2.0;
-                        style.override_text_style = Some(TextStyle::Heading);
-                    }
-                    self.menu(context, ui);
-                    ui.selectable_value(
-                        &mut self.tab,
-                        UITab::Explore,
-                        format!("{} Explore", icons::ICON_EXPLORE),
-                    );
-                    ui.selectable_value(
-                        &mut self.tab,
-                        UITab::Style,
-                        format!("{} Style", icons::ICON_STYLE),
-                    );
-                    ui.selectable_value(
-                        &mut self.tab,
-                        UITab::Render,
-                        format!("{} Render", icons::ICON_IMAGE),
-                    );
-                });
-                ui.add(
-                    Separator::default()
-                        .spacing(ui.visuals().widgets.noninteractive.bg_stroke.width),
-                );
-                ui.style_mut().spacing.item_spacing.y = y;
+
+                self.menu(context, ui);
                 ScrollArea::vertical().show(ui, |ui| {
                     tui(ui, ui.id().with("side"))
                         .reserve_available_width()
-                        .style(taffy::Style {
-                            flex_direction: taffy::FlexDirection::Column,
-                            size: percent(1.0),
-                            align_items: Some(AlignItems::Stretch),
-                            justify_content: Some(AlignContent::Start),
-                            gap: length(ctx.style().spacing.item_spacing.y),
-                            overflow: taffy::Point {
-                                x: Overflow::Hidden,
-                                y: Overflow::Scroll,
-                            },
-                            ..Default::default()
-                        })
+                        .style(Style::col())
                         .show(|tui| match self.tab {
-                            UITab::Explore => self.explore_tab(context, ctx, tui),
-                            UITab::Style => {
-                                let mut activate_preset = false;
-                                self.style_state.style_presets.render_ui(
-                                    |new_spec| self.root_spec.style = new_spec.style.clone(),
-                                    &mut activate_preset,
-                                    tui,
-                                    false,
-                                );
-                                if activate_preset {
-                                    self.preset_save_active = Some(UITab::Style);
-                                    self.preset_group = self
-                                        .style_state
-                                        .style_presets
-                                        .group_names()
-                                        .first()
-                                        .unwrap_or(&self.preset_group)
-                                        .clone();
-                                    let mut img = self.image().clone();
-                                    img.location.zoom = self.root_spec.location.zoom;
-                                    img.width = context.config().thumbnail_size;
-                                    img.height = context.config().thumbnail_size;
-                                    let _ = self.command_channel.send(ImageGenCommand::Render(
-                                        RendererId::Thumbnail,
-                                        Box::new(img),
-                                    ));
-                                }
-                                section(tui, "External", true, |tui| {
-                                    self.root_spec
-                                        .style
-                                        .external_coloring
-                                        .render_edit_ui(ctx, tui);
-                                });
-                                section(tui, "Internal", false, |tui| {
-                                    self.root_spec
-                                        .style
-                                        .internal_coloring
-                                        .render_edit_ui(ctx, tui);
-                                });
-                            }
-                            UITab::Render => {
-                                section(tui, "Image Settings", true, |tui| {
-                                    input_with_label(
-                                        tui,
-                                        "Image width",
-                                        None,
-                                        egui::DragValue::new(&mut self.root_spec.width).speed(10.0),
-                                    );
-                                    input_with_label(
-                                        tui,
-                                        "Image height",
-                                        None,
-                                        egui::DragValue::new(&mut self.root_spec.height)
-                                            .speed(10.0),
-                                    );
-                                    tui.horizontal().add(|tui| {
-                                        let mut str_path = self
-                                            .render_state
-                                            .save_path
-                                            .to_str()
-                                            .unwrap_or("Invalid Path")
-                                            .to_string();
-                                        let home_opt = BaseDirs::new()
-                                            .as_ref()
-                                            .map(BaseDirs::home_dir)
-                                            .and_then(Path::to_str)
-                                            .map(ToOwned::to_owned);
-                                        if let Some(home_dir) = &home_opt
-                                            && str_path.starts_with(&(home_dir.to_owned() + "/"))
-                                        {
-                                            str_path = str_path.replacen(home_dir, "~", 1);
-                                        }
-                                        let text_size =
-                                            WidgetText::Text(icons::ICON_FOLDER_OPEN.to_owned())
-                                                .into_galley(
-                                                    tui.egui_ui(),
-                                                    None,
-                                                    tui.egui_ui().available_width(),
-                                                    TextStyle::Button,
-                                                )
-                                                .size();
-                                        let spacing = tui.egui_ui().spacing().clone();
-                                        let available_width = tui.egui_ui().available_width();
-                                        tui.grow().ui_add(
-                                            egui::TextEdit::singleline(&mut str_path)
-                                                .desired_width(
-                                                    available_width
-                                                        - text_size.x
-                                                        - spacing.button_padding.x * 2.0
-                                                        - spacing.item_spacing.x * 2.0,
-                                                ),
-                                        );
-                                        if let Some(home_dir) = &home_opt
-                                            && str_path.starts_with("~/")
-                                        {
-                                            str_path = str_path.replacen("~", home_dir, 1);
-                                        }
-                                        self.render_state.save_path = str_path.into();
-
-                                        if tui
-                                            .ui_add(Button::new(icons::ICON_FOLDER_OPEN))
-                                            .clicked()
-                                            && let Some(path) = rfd::FileDialog::new()
-                                                .set_directory(&self.render_state.save_path)
-                                                .pick_folder()
-                                        {
-                                            context.cache_mut().previous_paths.image = path.clone();
-                                            self.render_state.save_path = path;
-                                        }
-                                    });
-                                    let mut compression_params = context.cache().compression_params;
-                                    compression_params.render_edit_ui(ctx, tui);
-                                    if context.cache().compression_params != compression_params {
-                                        context.cache_mut().compression_params = compression_params;
-                                    }
-                                });
-                                let item_spacing = tui.egui_ui().spacing().item_spacing;
-                                tui.style(taffy::Style {
-                                    flex_direction: taffy::FlexDirection::Column,
-                                    size: percent(1.0),
-                                    padding: Rect {
-                                        left: length(item_spacing.y * 3.0),
-                                        right: length(item_spacing.y * 3.0),
-                                        top: length(item_spacing.y * 3.0),
-                                        bottom: length(0.0),
-                                    },
-                                    gap: length(tui.egui_ui().spacing().item_spacing.y * 2.0),
-                                    ..Default::default()
-                                })
-                                .add(|tui| {
-                                    if !self.rendering_output {
-                                        if tui.ui_add(Button::new("Render")).clicked() {
-                                            let image = self.root_spec.clone();
-                                            let _ =
-                                                self.command_channel.send(ImageGenCommand::Render(
-                                                    RendererId::Render,
-                                                    Box::new(image),
-                                                ));
-                                            self.rendering_output = true;
-                                        }
-                                    } else if tui.ui_add(Button::new("Cancel Render")).clicked() {
-                                        self.rendering_output = false;
-                                        cancel();
-                                    }
-                                    if tui.ui_add(Button::new("Save to file")).clicked()
-                                        && let Some(path) = rfd::FileDialog::new()
-                                            .set_directory(&self.render_state.save_path)
-                                            .add_filter(
-                                                "image with metadata",
-                                                &["avif", "jpg", "jpeg", "webp", "png"],
-                                            )
-                                            .add_filter(
-                                                "image without metadata",
-                                                &["gif", "qoi", "tiff", "exr"],
-                                            )
-                                            .set_file_name(format!(
-                                                "fractal.{}",
-                                                context.cache().default_image_type
-                                            ))
-                                            .save_file()
-                                    {
-                                        if let Some(ext) = path.extension().and_then(OsStr::to_str)
-                                        {
-                                            context.cache_mut().default_image_type = ext.to_owned();
-                                        }
-                                        let _ =
-                                            self.command_channel.send(ImageGenCommand::SaveToFile(
-                                                RendererId::Render,
-                                                path.clone(),
-                                                context.cache().compression_params,
-                                                None,
-                                            ));
-                                    }
-                                });
-                            }
+                            UITab::Explore => self.explore_tab(context, tui),
+                            UITab::Style => self.style_tab(ctx, context, tui),
+                            UITab::Render => self.render_tab(ctx, context, cancel, tui),
                         });
                 });
             });
+
         let res = egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(ctx.style().visuals.window_fill))
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 self.viewport(ui, ctx);
                 self.render_widgets(ui, ctx, context);
-
-                ui.horizontal_centered(|ui| {
-                    ui.scope_builder(
-                        UiBuilder::new().max_rect(
-                            ui.max_rect()
-                                .with_max_x(100.0 + ui.spacing().item_spacing.x)
-                                .with_min_x(ui.spacing().item_spacing.x),
-                        ),
-                        |ui| {
-                            ui.add_visible(
-                                self.status.progress.is_some(),
-                                egui::ProgressBar::new(self.status.progress.unwrap_or(0.0) as f32),
-                            );
-                        },
-                    );
-                    ui.separator();
-                    ui.label(&self.status.message)
-                })
+                self.footer(ui)
             });
+
         let style = ctx.style().clone();
         egui::Window::new("Settings")
             .open(&mut self.show_settings)
@@ -444,14 +214,7 @@ impl CorgiUI {
                 let previous_config = context.config().clone();
                 tui(ui, ui.id().with("settings"))
                     .reserve_available_width()
-                    .style(Style {
-                        flex_direction: FlexDirection::Column,
-                        size: Size {
-                            width: percent(1.0),
-                            height: auto(),
-                        },
-                        ..Default::default()
-                    })
+                    .style(Style::col())
                     .show(|tui| {
                         section(tui, "Configuration", true, |tui| {
                             context.config_mut().render_edit_ui(ctx, tui);
@@ -486,6 +249,7 @@ impl CorgiUI {
                     ));
                 }
             });
+
         let style = ctx.style().clone();
         let mut open = self.preset_save_active.is_some();
         egui::Window::new("Save Preset")
@@ -496,114 +260,7 @@ impl CorgiUI {
             .show(ctx, |ui| {
                 ui.set_style(style);
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                let item_spacing = ui.spacing().item_spacing;
-
-                tui(ui, ui.id().with("presets"))
-                    .reserve_available_space()
-                    .style(taffy::Style {
-                        display: Display::Flex,
-                        flex_direction: FlexDirection::Column,
-                        padding: Rect::length(item_spacing.x * 2.0),
-                        align_items: Some(AlignItems::Center),
-                        size: Size {
-                            width: percent(1.0),
-                            height: auto(),
-                        },
-                        gap: length(item_spacing.y),
-                        ..Default::default()
-                    })
-                    .show(|tui| {
-                        tui.ui_add_manual(
-                            |ui| {
-                                ui.scope_builder(
-                                    UiBuilder::new().max_rect(egui::Rect::from_min_size(
-                                        ui.cursor().min,
-                                        Vec2::splat(context.config().thumbnail_size as f32),
-                                    )),
-                                    |ui| {
-                                        ui.painter().add(egui_wgpu::Callback::new_paint_callback(
-                                            ui.available_rect_before_wrap(),
-                                            ThumbPaintCallback {
-                                                size: (
-                                                    context.config().thumbnail_size,
-                                                    context.config().thumbnail_size,
-                                                ),
-                                                swap: self.swap,
-                                            },
-                                        ));
-                                        ui.allocate_rect(
-                                            ui.available_rect_before_wrap(),
-                                            Sense::empty(),
-                                        );
-                                    },
-                                )
-                                .response
-                            },
-                            |res, _| res,
-                        );
-                        ui_with_label(
-                            tui,
-                            "Name",
-                            Some("The name to save the preset under"),
-                            |tui| {
-                                tui.grow()
-                                    .ui_add(TextEdit::singleline(&mut self.preset_name));
-                            },
-                        );
-                        let preset_library = match self.preset_save_active {
-                            Some(UITab::Explore) => &mut self.explore_state.location_presets,
-                            Some(UITab::Style) => &mut self.style_state.style_presets,
-                            _ => {
-                                tui.egui_ui().close_kind(egui::UiKind::Window);
-                                return;
-                            }
-                        };
-
-                        tui.horizontal().add(|tui| {
-                            ui_with_label(
-                                tui,
-                                "Group",
-                                Some("The group the preset will be saved in"),
-                                |tui| {
-                                    raw_selection(
-                                        tui,
-                                        "Group",
-                                        None,
-                                        &mut self.preset_group,
-                                        preset_library.group_names(),
-                                    );
-                                },
-                            );
-                            if tui.ui_add(Button::new("New Group")).clicked() {
-                                self.new_group_active = true;
-                            }
-                        });
-                        tui.horizontal().add(|tui| {
-                            if tui.grow().ui_add(Button::new("Save")).clicked() {
-                                match preset_library
-                                    .create_preset(&self.preset_name, &self.preset_group)
-                                {
-                                    Ok(path) => {
-                                        let _ =
-                                            self.command_channel.send(ImageGenCommand::SaveToFile(
-                                                RendererId::Thumbnail,
-                                                path,
-                                                CompressionParams {
-                                                    speed: 1,
-                                                    quality: 50,
-                                                },
-                                                Some(self.preset_name.clone()),
-                                            ));
-                                        tui.egui_ui().close_kind(egui::UiKind::Window);
-                                    }
-                                    Err(err) => tracing::error!("Failed to create preset: {err}"),
-                                }
-                            }
-                            if tui.grow().ui_add(Button::new("Cancel")).clicked() {
-                                tui.egui_ui().close_kind(egui::UiKind::Window);
-                            }
-                        })
-                    });
+                self.save_preset_window(context, ui);
             });
         if !open {
             self.preset_save_active = None;
@@ -639,123 +296,109 @@ impl CorgiUI {
                     }
                 });
             });
+
         self.swap = false;
     }
 
-    /// Build the menu button
-    pub fn menu(&mut self, context: &mut crate::Context, ui: &mut egui::Ui) {
-        let spacing = ui.spacing().button_padding.y;
-        MenuButton::from_button(Button::new(icons::ICON_MENU)).ui(ui, |ui| {
+    fn menu(&mut self, context: &mut crate::config::Context, ui: &mut egui::Ui) {
+        let y = ui.style_mut().spacing.item_spacing.y;
+        ui.style_mut().spacing.item_spacing.y = 0.0;
+        // Top bar
+        ui.horizontal(|ui| {
             {
                 let style = ui.style_mut();
-                style.spacing.item_spacing = Vec2::splat(spacing);
-                style.visuals.widgets.inactive.corner_radius = CornerRadius::same(spacing as u8);
-                style.visuals.widgets.active.corner_radius = CornerRadius::same(spacing as u8);
-                style.visuals.widgets.hovered.corner_radius = CornerRadius::same(spacing as u8);
-                style.spacing.button_padding = Vec2::splat(spacing);
+                style.spacing.item_spacing.x = 0.0;
+                style.visuals.widgets.inactive.corner_radius = CornerRadius::same(0);
+                style.visuals.widgets.active.corner_radius = CornerRadius::same(0);
+                style.visuals.widgets.hovered.corner_radius = CornerRadius::same(0);
+                style.spacing.button_padding.x *= 2.0;
+                style.override_text_style = Some(TextStyle::Heading);
             }
-            if ui.add(Button::new("Save Image Settings")).clicked()
-                && let Some(path) = rfd::FileDialog::new()
-                    .set_directory(context.cache().previous_paths.settings.clone())
-                    .set_file_name("saved_fractal.corg")
-                    .add_filter("corg", &["corg"])
-                    .save_file()
             {
-                if let Some(dir) = path.parent() {
-                    context.cache_mut().previous_paths.settings = dir.to_owned();
-                }
-                // write to file
-                match self.root_spec.save(&path) {
-                    Err(err) => {
-                        tracing::error!("Failed to save image settings: {err:?}");
-                        self.status.message = format!("Failed to save image settings: {err:?}")
+                let this = &mut *self;
+                let spacing = ui.spacing().button_padding.y;
+                MenuButton::from_button(Button::new(icons::ICON_MENU)).ui(ui, |ui| {
+                    {
+                        let style = ui.style_mut();
+                        style.spacing.item_spacing = Vec2::splat(spacing);
+                        style.visuals.widgets.inactive.corner_radius =
+                            CornerRadius::same(spacing as u8);
+                        style.visuals.widgets.active.corner_radius =
+                            CornerRadius::same(spacing as u8);
+                        style.visuals.widgets.hovered.corner_radius =
+                            CornerRadius::same(spacing as u8);
+                        style.spacing.button_padding = Vec2::splat(spacing);
                     }
-                    Ok(_) => self.status.message = "Saved settings".to_string(),
-                }
-            }
-            if ui.add(Button::new("Load Image Settings")).clicked()
-                && let Some(path) = rfd::FileDialog::new()
-                    .set_directory(context.cache().previous_paths.settings.clone())
-                    .add_filter(
-                        "settings file or image with metadata",
-                        &["corg", "json", "avif", "jpg", "jpeg", "webp", "png"],
-                    )
-                    .pick_file()
-            {
-                if let Some(dir) = path.parent() {
-                    context.cache_mut().previous_paths.settings = dir.to_owned();
-                }
-                match ImgSpec::load(&path) {
-                    Ok(image) => {
-                        self.root_spec = image;
+                    if ui.add(Button::new("Save Image Settings")).clicked()
+                        && let Some(path) = rfd::FileDialog::new()
+                            .set_directory(context.cache().previous_paths.settings.clone())
+                            .set_file_name("saved_fractal.corg")
+                            .add_filter("corg", &["corg"])
+                            .save_file()
+                    {
+                        if let Some(dir) = path.parent() {
+                            context.cache_mut().previous_paths.settings = dir.to_owned();
+                        }
+                        // write to file
+                        match this.root_spec.save(&path) {
+                            Err(err) => {
+                                tracing::error!("Failed to save image settings: {err:?}");
+                                this.status.message =
+                                    format!("Failed to save image settings: {err:?}")
+                            }
+                            Ok(_) => this.status.message = "Saved settings".to_string(),
+                        }
                     }
-                    Err(err) => {
-                        tracing::error!("Failed to load image settings `{path:?}`: {err}");
-                        self.status.message = format!("Failed to load image settings: {err:?}")
+                    if ui.add(Button::new("Load Image Settings")).clicked()
+                        && let Some(path) = rfd::FileDialog::new()
+                            .set_directory(context.cache().previous_paths.settings.clone())
+                            .add_filter(
+                                "settings file or image with metadata",
+                                &["corg", "json", "avif", "jpg", "jpeg", "webp", "png"],
+                            )
+                            .pick_file()
+                    {
+                        if let Some(dir) = path.parent() {
+                            context.cache_mut().previous_paths.settings = dir.to_owned();
+                        }
+                        match ImgSpec::load(&path) {
+                            Ok(image) => {
+                                this.root_spec = image;
+                            }
+                            Err(err) => {
+                                tracing::error!("Failed to load image settings `{path:?}`: {err}");
+                                this.status.message =
+                                    format!("Failed to load image settings: {err:?}")
+                            }
+                        }
                     }
-                }
-            }
-            if ui.add(Button::new("Settings")).clicked() {
-                self.show_settings = true;
-            }
+                    if ui.add(Button::new("Settings")).clicked() {
+                        this.show_settings = true;
+                    }
+                });
+            };
+            ui.selectable_value(
+                &mut self.tab,
+                UITab::Explore,
+                format!("{} Explore", icons::ICON_EXPLORE),
+            );
+            ui.selectable_value(
+                &mut self.tab,
+                UITab::Style,
+                format!("{} Style", icons::ICON_STYLE),
+            );
+            ui.selectable_value(
+                &mut self.tab,
+                UITab::Render,
+                format!("{} Render", icons::ICON_IMAGE),
+            );
         });
-    }
-
-    /// Get the image settings
-    pub fn image(&self) -> ImgSpec {
-        let mut active_image = self.root_spec.clone();
-        match self.tab {
-            UITab::Explore => {
-                active_image.style = self.explore_state.style.clone();
-                active_image.width = self.current_view.width;
-                active_image.height = self.current_view.height;
-                active_image.location.zoom -=
-                    self.current_view.zoom_offset_from(&self.root_spec.view()) + 0.1;
-                active_image.scale(self.explore_state.scaling);
-                active_image.optimization_level = OptLevel::PerformanceOptimized;
-                active_image
-            }
-            UITab::Style => {
-                active_image.width = self.current_view.width;
-                active_image.height = self.current_view.height;
-                active_image.location.zoom -=
-                    self.current_view.zoom_offset_from(&self.root_spec.view()) + 0.1;
-                active_image.scale(self.style_state.scaling);
-                active_image.optimization_level = OptLevel::CacheOptimized;
-                active_image
-            }
-            UITab::Render => {
-                active_image.set_view(self.current_view.clone());
-                active_image
-            }
-        }
-    }
-
-    /// Returns whether the current tab has a viewport that needs
-    /// automatic updates when the image settings change.
-    pub fn has_active_viewport(&self) -> bool {
-        self.tab != UITab::Render
-    }
-
-    /// Sends a render command for the current tab to the worker thread
-    pub fn send_render(&self) -> color_eyre::Result<()> {
-        Ok(self.command_channel.send(ImageGenCommand::Render(
-            match self.tab {
-                UITab::Explore => RendererId::Explore,
-                UITab::Style => RendererId::Style,
-                UITab::Render => unreachable!(),
-            },
-            Box::new(self.image()),
-        ))?)
+        ui.add(Separator::default().spacing(ui.visuals().widgets.noninteractive.bg_stroke.width));
+        ui.style_mut().spacing.item_spacing.y = y;
     }
 
     /// Build the Explore tab UI
-    fn explore_tab(
-        &mut self,
-        context: &crate::Context,
-        _ctx: &egui::Context,
-        tui: &mut egui_taffy::Tui,
-    ) {
+    fn explore_tab(&mut self, context: &crate::Context, tui: &mut egui_taffy::Tui) {
         let img = self.image();
         let item_spacing = tui.egui_ui().spacing().item_spacing;
 
@@ -784,18 +427,7 @@ impl CorgiUI {
                 Box::new(img),
             ));
         }
-        tui.style(taffy::Style {
-            flex_direction: taffy::FlexDirection::Column,
-            size: percent(1.0),
-            padding: Rect {
-                left: length(item_spacing.y * 3.0),
-                right: length(item_spacing.y * 3.0),
-                top: length(0.0),
-                bottom: length(0.0),
-            },
-            gap: length(tui.egui_ui().spacing().item_spacing.y * 2.0),
-            ..Default::default()
-        })
+        tui.style(Style::col().top(item_spacing.y * 3.0).side(item_spacing.y * 3.0).gap(item_spacing.y * 2.0))
         .add(|tui| {
             selection_with_label(
                 tui,
@@ -888,6 +520,171 @@ impl CorgiUI {
         });
     }
 
+    fn style_tab(
+        &mut self,
+        ctx: &egui::Context,
+        context: &mut crate::config::Context,
+        tui: &mut egui_taffy::Tui,
+    ) {
+        let mut activate_preset = false;
+        self.style_state.style_presets.render_ui(
+            |new_spec| self.root_spec.style = new_spec.style.clone(),
+            &mut activate_preset,
+            tui,
+            false,
+        );
+        if activate_preset {
+            self.preset_save_active = Some(UITab::Style);
+            self.preset_group = self
+                .style_state
+                .style_presets
+                .group_names()
+                .first()
+                .unwrap_or(&self.preset_group)
+                .clone();
+            let mut img = self.image().clone();
+            img.location.zoom = self.root_spec.location.zoom;
+            img.width = context.config().thumbnail_size;
+            img.height = context.config().thumbnail_size;
+            let _ = self.command_channel.send(ImageGenCommand::Render(
+                RendererId::Thumbnail,
+                Box::new(img),
+            ));
+        }
+        section(tui, "External", true, |tui| {
+            self.root_spec
+                .style
+                .external_coloring
+                .render_edit_ui(ctx, tui);
+        });
+        section(tui, "Internal", false, |tui| {
+            self.root_spec
+                .style
+                .internal_coloring
+                .render_edit_ui(ctx, tui);
+        });
+    }
+
+    fn render_tab(
+        &mut self,
+        ctx: &egui::Context,
+        context: &mut crate::config::Context,
+        cancel: impl FnOnce(),
+        tui: &mut egui_taffy::Tui,
+    ) {
+        section(tui, "Image Settings", true, |tui| {
+            input_with_label(
+                tui,
+                "Image width",
+                None,
+                egui::DragValue::new(&mut self.root_spec.width).speed(10.0),
+            );
+            input_with_label(
+                tui,
+                "Image height",
+                None,
+                egui::DragValue::new(&mut self.root_spec.height).speed(10.0),
+            );
+            tui.style(Style::row()).add(|tui| {
+                let mut str_path = self
+                    .render_state
+                    .save_path
+                    .to_str()
+                    .unwrap_or("Invalid Path")
+                    .to_string();
+                let home_opt = BaseDirs::new()
+                    .as_ref()
+                    .map(BaseDirs::home_dir)
+                    .and_then(Path::to_str)
+                    .map(ToOwned::to_owned);
+                if let Some(home_dir) = &home_opt
+                    && str_path.starts_with(&(home_dir.to_owned() + "/"))
+                {
+                    str_path = str_path.replacen(home_dir, "~", 1);
+                }
+                let text_size = WidgetText::Text(icons::ICON_FOLDER_OPEN.to_owned())
+                    .into_galley(
+                        tui.egui_ui(),
+                        None,
+                        tui.egui_ui().available_width(),
+                        TextStyle::Button,
+                    )
+                    .size();
+                let spacing = tui.egui_ui().spacing().clone();
+                let available_width = tui.egui_ui().available_width();
+                tui.style(Style::grow()).ui_add(
+                    egui::TextEdit::singleline(&mut str_path).desired_width(
+                        available_width
+                            - text_size.x
+                            - spacing.button_padding.x * 2.0
+                            - spacing.item_spacing.x * 2.0,
+                    ),
+                );
+                if let Some(home_dir) = &home_opt
+                    && str_path.starts_with("~/")
+                {
+                    str_path = str_path.replacen("~", home_dir, 1);
+                }
+                self.render_state.save_path = str_path.into();
+
+                if tui.ui_add(Button::new(icons::ICON_FOLDER_OPEN)).clicked()
+                    && let Some(path) = rfd::FileDialog::new()
+                        .set_directory(&self.render_state.save_path)
+                        .pick_folder()
+                {
+                    context.cache_mut().previous_paths.image = path.clone();
+                    self.render_state.save_path = path;
+                }
+            });
+            let mut compression_params = context.cache().compression_params;
+            compression_params.render_edit_ui(ctx, tui);
+            if context.cache().compression_params != compression_params {
+                context.cache_mut().compression_params = compression_params;
+            }
+        });
+        let item_spacing = tui.egui_ui().spacing().item_spacing;
+        tui.style(
+            Style::col()
+                .pad(item_spacing.y * 3.0)
+                .gap(item_spacing.y * 2.0),
+        )
+        .add(|tui| {
+            if !self.rendering_output {
+                if tui.ui_add(Button::new("Render")).clicked() {
+                    let image = self.root_spec.clone();
+                    let _ = self
+                        .command_channel
+                        .send(ImageGenCommand::Render(RendererId::Render, Box::new(image)));
+                    self.rendering_output = true;
+                }
+            } else if tui.ui_add(Button::new("Cancel Render")).clicked() {
+                self.rendering_output = false;
+                cancel();
+            }
+            if tui.ui_add(Button::new("Save to file")).clicked()
+                && let Some(path) = rfd::FileDialog::new()
+                    .set_directory(&self.render_state.save_path)
+                    .add_filter(
+                        "image with metadata",
+                        &["avif", "jpg", "jpeg", "webp", "png"],
+                    )
+                    .add_filter("image without metadata", &["gif", "qoi", "tiff", "exr"])
+                    .set_file_name(format!("fractal.{}", context.cache().default_image_type))
+                    .save_file()
+            {
+                if let Some(ext) = path.extension().and_then(OsStr::to_str) {
+                    context.cache_mut().default_image_type = ext.to_owned();
+                }
+                let _ = self.command_channel.send(ImageGenCommand::SaveToFile(
+                    RendererId::Render,
+                    path.clone(),
+                    context.cache().compression_params,
+                    None,
+                ));
+            }
+        });
+    }
+
     /// Render the image preview viewport
     fn viewport(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let mut new_max_rect = ui.max_rect();
@@ -949,7 +746,6 @@ impl CorgiUI {
         );
     }
 
-    /// Draw tool widgets onto the preview viewport
     fn render_widgets(&self, ui: &mut egui::Ui, ctx: &egui::Context, context: &mut crate::Context) {
         fn paint_crosshair(
             painter: &egui::Painter,
@@ -1111,6 +907,177 @@ impl CorgiUI {
         }
     }
 
+    fn footer(&mut self, ui: &mut egui::Ui) -> egui::InnerResponse<egui::Response> {
+        ui.horizontal_centered(|ui| {
+            ui.scope_builder(
+                UiBuilder::new().max_rect(
+                    ui.max_rect()
+                        .with_max_x(100.0 + ui.spacing().item_spacing.x)
+                        .with_min_x(ui.spacing().item_spacing.x),
+                ),
+                |ui| {
+                    ui.add_visible(
+                        self.status.progress.is_some(),
+                        egui::ProgressBar::new(self.status.progress.unwrap_or(0.0) as f32),
+                    );
+                },
+            );
+            ui.separator();
+            ui.label(&self.status.message)
+        })
+    }
+
+    fn save_preset_window(&mut self, context: &mut crate::config::Context, ui: &mut egui::Ui) {
+        let item_spacing = ui.spacing().item_spacing;
+
+        tui(ui, ui.id().with("presets"))
+            .reserve_available_space()
+            .style(Style::col().center().gap(item_spacing.y))
+            .show(|tui| {
+                tui.ui_add_manual(
+                    |ui| {
+                        ui.scope_builder(
+                            UiBuilder::new().max_rect(egui::Rect::from_min_size(
+                                ui.cursor().min,
+                                Vec2::splat(context.config().thumbnail_size as f32),
+                            )),
+                            |ui| {
+                                ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+                                    ui.available_rect_before_wrap(),
+                                    ThumbPaintCallback {
+                                        size: (
+                                            context.config().thumbnail_size,
+                                            context.config().thumbnail_size,
+                                        ),
+                                        swap: self.swap,
+                                    },
+                                ));
+                                ui.allocate_rect(ui.available_rect_before_wrap(), Sense::empty());
+                            },
+                        )
+                        .response
+                    },
+                    |res, _| res,
+                );
+                ui_with_label(
+                    tui,
+                    "Name",
+                    Some("The name to save the preset under"),
+                    |tui| {
+                        tui.style(Style::grow())
+                            .ui_add(TextEdit::singleline(&mut self.preset_name));
+                    },
+                );
+                let preset_library = match self.preset_save_active {
+                    Some(UITab::Explore) => &mut self.explore_state.location_presets,
+                    Some(UITab::Style) => &mut self.style_state.style_presets,
+                    _ => {
+                        tui.egui_ui().close_kind(egui::UiKind::Window);
+                        return;
+                    }
+                };
+
+                tui.style(Style::row()).add(|tui| {
+                    ui_with_label(
+                        tui,
+                        "Group",
+                        Some("The group the preset will be saved in"),
+                        |tui| {
+                            raw_selection(
+                                tui,
+                                "Group",
+                                None,
+                                &mut self.preset_group,
+                                preset_library.group_names(),
+                            );
+                        },
+                    );
+                    if tui.ui_add(Button::new("New Group")).clicked() {
+                        self.new_group_active = true;
+                    }
+                });
+                tui.style(Style::row()).add(|tui| {
+                    if tui
+                        .style(Style::grow())
+                        .ui_add(Button::new("Save"))
+                        .clicked()
+                    {
+                        match preset_library.create_preset(&self.preset_name, &self.preset_group) {
+                            Ok(path) => {
+                                let _ = self.command_channel.send(ImageGenCommand::SaveToFile(
+                                    RendererId::Thumbnail,
+                                    path,
+                                    CompressionParams {
+                                        speed: 1,
+                                        quality: 50,
+                                    },
+                                    Some(self.preset_name.clone()),
+                                ));
+                                tui.egui_ui().close_kind(egui::UiKind::Window);
+                            }
+                            Err(err) => tracing::error!("Failed to create preset: {err}"),
+                        }
+                    }
+                    if tui
+                        .style(Style::grow())
+                        .ui_add(Button::new("Cancel"))
+                        .clicked()
+                    {
+                        tui.egui_ui().close_kind(egui::UiKind::Window);
+                    }
+                })
+            });
+    }
+
+    /// Get the image settings
+    pub fn image(&self) -> ImgSpec {
+        let mut active_image = self.root_spec.clone();
+        match self.tab {
+            UITab::Explore => {
+                active_image.style = self.explore_state.style.clone();
+                active_image.width = self.current_view.width;
+                active_image.height = self.current_view.height;
+                active_image.location.zoom -=
+                    self.current_view.zoom_offset_from(&self.root_spec.view()) + 0.1;
+                active_image.scale(self.explore_state.scaling);
+                active_image.optimization_level = OptLevel::PerformanceOptimized;
+                active_image
+            }
+            UITab::Style => {
+                active_image.width = self.current_view.width;
+                active_image.height = self.current_view.height;
+                active_image.location.zoom -=
+                    self.current_view.zoom_offset_from(&self.root_spec.view()) + 0.1;
+                active_image.scale(self.style_state.scaling);
+                active_image.optimization_level = OptLevel::CacheOptimized;
+                active_image
+            }
+            UITab::Render => {
+                active_image.set_view(self.current_view.clone());
+                active_image
+            }
+        }
+    }
+
+    /// Returns whether the current tab has a viewport that needs
+    /// automatic updates when the image settings change.
+    pub fn has_active_viewport(&self) -> bool {
+        self.tab != UITab::Render
+    }
+
+    /// Sends a render command for the current tab to the worker thread
+    pub fn send_render(&self) -> color_eyre::Result<()> {
+        Ok(self.command_channel.send(ImageGenCommand::Render(
+            match self.tab {
+                UITab::Explore => RendererId::Explore,
+                UITab::Style => RendererId::Style,
+                UITab::Render => unreachable!(),
+            },
+            Box::new(self.image()),
+        ))?)
+    }
+
+    /// Draw tool widgets onto the preview viewport
     fn handle_viewport_input(
         &mut self,
         ui: &mut egui::Ui,

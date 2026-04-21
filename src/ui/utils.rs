@@ -1,64 +1,114 @@
 use std::mem::discriminant;
 
 use corgi_lib::types::{ComplexPoint, FractalKind, Gradient, LayerKind, LightingKind};
-use eframe::egui::{self, Color32, RichText, Sense, TextStyle, WidgetText};
+use eframe::egui::{self, Color32, RichText, Sense, WidgetText};
 use egui_taffy::{Tui, TuiBuilderLogic, TuiWidget};
 use rug::Float;
-use taffy::Overflow;
 use taffy::prelude::*;
 
 use super::coloring::{OrbitType, StripeType};
 
-/// Utility trait for setting some common Taffy styles
-pub trait TuiExt {
-    /// Sets style to a horizontal flex with alignments
-    fn horizontal(&mut self) -> egui_taffy::TuiBuilder<'_>;
-    /// Sets style to a vertical flex with alignments
-    fn vertical(&mut self) -> egui_taffy::TuiBuilder<'_>;
-    /// Sets the current element with flex grow
-    fn grow(&mut self) -> egui_taffy::TuiBuilder<'_>;
+pub trait StyleExt {
+    fn row() -> Self;
+    fn col() -> Self;
+    fn grow() -> Self;
+    fn pad(self, padding: f32) -> Self;
+    fn top(self, padding: f32) -> Self;
+    fn side(self, padding: f32) -> Self;
+    fn pad2(self, top_bottom: f32, left_right: f32) -> Self;
+    fn gap(self, gap: f32) -> Self;
+    fn center(self) -> Self;
 }
 
-impl TuiExt for Tui {
-    fn horizontal(&mut self) -> egui_taffy::TuiBuilder<'_> {
-        self.style(Style {
+impl StyleExt for Style {
+    fn row() -> Self {
+        Self {
             display: Display::Flex,
             flex_direction: FlexDirection::Row,
-            padding: Rect::zero(),
-            justify_content: Some(AlignContent::SpaceEvenly),
-            align_content: Some(AlignContent::Stretch),
-            justify_items: Some(AlignItems::Stretch),
-            align_items: Some(AlignItems::Center),
             size: Size {
                 width: percent(1.0),
                 height: auto(),
             },
-            flex_grow: 1.0,
-            ..self.current_style().clone()
-        })
+            justify_content: Some(AlignContent::SpaceBetween),
+            align_items: Some(AlignItems::Center),
+            ..Default::default()
+        }
     }
-    fn vertical(&mut self) -> egui_taffy::TuiBuilder<'_> {
-        self.style(Style {
+    fn col() -> Self {
+        Self {
             display: Display::Flex,
             flex_direction: FlexDirection::Column,
-            padding: Rect::zero(),
-            justify_content: Some(AlignContent::SpaceEvenly),
-            align_content: Some(AlignContent::Stretch),
-            justify_items: Some(AlignItems::Stretch),
-            align_items: Some(AlignItems::Center),
             size: Size {
                 width: percent(1.0),
                 height: auto(),
             },
-            flex_grow: 1.0,
-            ..self.current_style().clone()
-        })
+            ..Default::default()
+        }
     }
-    fn grow(&mut self) -> egui_taffy::TuiBuilder<'_> {
-        self.style(Style {
+
+    fn grow() -> Self {
+        Self {
             flex_grow: 1.0,
-            ..self.current_style().clone()
-        })
+            ..Default::default()
+        }
+    }
+
+    fn pad(self, padding: f32) -> Self {
+        Self {
+            padding: Rect::length(padding),
+            ..self
+        }
+    }
+
+    fn pad2(self, top_bottom: f32, left_right: f32) -> Self {
+        Self {
+            padding: Rect {
+                left: length(left_right),
+                right: length(left_right),
+                top: length(top_bottom),
+                bottom: length(top_bottom),
+            },
+            ..self
+        }
+    }
+
+    fn gap(self, gap: f32) -> Self {
+        Self {
+            gap: length(gap),
+            ..self
+        }
+    }
+    fn center(self) -> Self {
+        Self {
+            display: Display::Flex,
+            align_items: Some(AlignItems::Center),
+            justify_content: Some(JustifyContent::Center),
+            ..self
+        }
+    }
+
+    fn top(self, padding: f32) -> Self {
+        Self {
+            padding: Rect {
+                left: self.padding.left,
+                right: self.padding.right,
+                top: length(padding),
+                bottom: self.padding.bottom,
+            },
+            ..self
+        }
+    }
+
+    fn side(self, padding: f32) -> Self {
+        Self {
+            padding: Rect {
+                left: length(padding),
+                right: length(padding),
+                top: self.padding.top,
+                bottom: self.padding.bottom,
+            },
+            ..self
+        }
     }
 }
 
@@ -185,20 +235,10 @@ pub fn collapsible(tui: &mut egui_taffy::Tui, summary: &str, add_contents: impl 
                 .default_open(false)
                 .show(ui, |ui| {
                     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                    let gap = length(ui.style().spacing.item_spacing.y * 2.0);
+                    let gap = ui.style().spacing.item_spacing.y * 2.0;
                     egui_taffy::tui(ui, ui.id().with("ext"))
                         .reserve_available_width()
-                        .style(taffy::Style {
-                            flex_direction: taffy::FlexDirection::Column,
-                            size: percent(1.0),
-                            flex_grow: 1.0,
-                            gap,
-                            overflow: taffy::Point {
-                                x: Overflow::Hidden,
-                                y: Overflow::Scroll,
-                            },
-                            ..Default::default()
-                        })
+                        .style(Style::col().gap(gap))
                         .show(add_contents)
                 });
             let res = cr.header_response.clone();
@@ -440,23 +480,8 @@ pub fn scroll(tui: &mut egui_taffy::Tui, add_contents: impl FnOnce(&mut Tui), na
                     .show(ui, |ui| {
                         egui_taffy::tui(ui, ui.id().with(name))
                             .reserve_available_width()
-                            .show(|tui| {
-                                tui.style(Style {
-                                    flex_direction: FlexDirection::Column,
-                                    padding: Rect::zero(),
-                                    justify_content: Some(AlignContent::Stretch),
-                                    align_content: Some(AlignContent::Stretch),
-                                    justify_items: Some(AlignItems::Stretch),
-                                    align_items: Some(AlignItems::Stretch),
-                                    size: Size {
-                                        width: length(tui.taffy_container().parent_rect().width()),
-                                        height: auto(),
-                                    },
-                                    flex_grow: 1.0,
-                                    ..tui.current_style().clone()
-                                })
-                                .add(add_contents)
-                            })
+                            .style(Style::col())
+                            .show(add_contents)
                     })
             })
             .response
@@ -472,23 +497,15 @@ pub fn ui_with_label(
     help_text: Option<&str>,
     add_contents: impl FnOnce(&mut Tui),
 ) {
-    tui.horizontal().add(|tui| {
-        let current_style = tui.current_style().clone();
-        tui.grow()
-            .style(Style {
-                gap: length(0.0),
-                align_items: Some(AlignItems::Start),
-                justify_content: Some(AlignContent::Start),
-                ..current_style
-            })
-            .add(|tui| {
-                let res = tui.label(label);
-                if let Some(help_text) = help_text {
-                    tui.small(egui_material_icons::icons::ICON_QUESTION_MARK)
-                        .union(res)
-                        .on_hover_text(help_text);
-                }
-            });
+    tui.style(Style::row()).add(|tui| {
+        tui.style(Style::default()).add(|tui| {
+            let res = tui.label(label);
+            if let Some(help_text) = help_text {
+                tui.small(egui_material_icons::icons::ICON_QUESTION_MARK)
+                    .union(res)
+                    .on_hover_text(help_text);
+            }
+        });
 
         add_contents(tui);
     });
@@ -508,90 +525,73 @@ pub fn point_edit(
     precision: u32,
     point: &mut ComplexPoint,
 ) {
-    let current = tui.current_style().clone();
-    tui.style(Style {
-        gap: length(tui.egui_ui().spacing().item_spacing.y),
-        padding: Rect::zero(),
-        ..current
-    })
-    .add(|tui| {
-        let id = tui.egui_ui().next_auto_id();
-        let mut state =
-            tui.egui_ctx()
-                .data_mut(|d| d.get_persisted(id))
-                .unwrap_or(FloatPointEditState {
-                    x_text: point.x.to_string_radix(10, None),
-                    y_text: point.y.to_string_radix(10, None),
-                });
-
-        tui.style(Style {
-            flex_direction: FlexDirection::Row,
-            padding: Rect::zero(),
-            gap: length(0.0),
-            size: auto(),
-            ..tui.current_style().clone()
-        })
+    tui.style(Style::col().gap(tui.egui_ui().spacing().item_spacing.y))
         .add(|tui| {
-            let res = tui.label(point_name);
-            if let Some(help_text) = help_text {
-                tui.small(egui_material_icons::icons::ICON_QUESTION_MARK)
-                    .union(res)
-                    .on_hover_text(help_text);
-            }
-        });
-        indent_with_line(tui, |tui| {
-            tui.style(taffy::Style {
-                size: Size {
-                    width: percent(1.0),
-                    height: auto(),
-                },
-                display: taffy::Display::Grid,
-                align_items: Some(taffy::AlignItems::Center),
-                justify_items: Some(taffy::AlignItems::Stretch),
-                justify_content: Some(AlignContent::Stretch),
-                grid_template_rows: vec![min_content(); 2],
-                grid_template_columns: vec![auto(), auto()],
-                gap: length(tui.egui_ui().spacing().item_spacing.y),
-                ..Default::default()
-            })
-            .add(|tui| {
-                let text_width = WidgetText::from("imaginary")
-                    .into_galley(
-                        tui.egui_ui(),
-                        None,
-                        tui.egui_ui().available_width(),
-                        TextStyle::Body,
-                    )
-                    .size()
-                    .x;
-                for (label, text_reference, value_reference) in [
-                    ("real", &mut state.x_text, &mut point.x),
-                    ("imaginary", &mut state.y_text, &mut point.y),
-                ] {
-                    tui.label(label);
-                    let available = tui.egui_ui().available_width();
-                    let response =
-                        tui.ui_add(egui::TextEdit::singleline(text_reference).desired_width(
-                            available
-                                - text_width
-                                - tui.egui_ui().spacing().item_spacing.y
-                                - tui.egui_ui().spacing().indent,
-                        ));
-                    if !response.has_focus() {
-                        *text_reference = value_reference.to_string_radix(10, None);
-                    } else if let Ok(res) = Float::parse(text_reference) {
-                        *value_reference = Float::with_val(precision, res);
-                    }
+            let id = tui.egui_ui().next_auto_id();
+            let mut state =
+                tui.egui_ctx()
+                    .data_mut(|d| d.get_persisted(id))
+                    .unwrap_or(FloatPointEditState {
+                        x_text: point.x.to_string_radix(10, None),
+                        y_text: point.y.to_string_radix(10, None),
+                    });
+
+            tui.style(Style::default()).add(|tui| {
+                let res = tui.label(point_name);
+                if let Some(help_text) = help_text {
+                    tui.small(egui_material_icons::icons::ICON_QUESTION_MARK)
+                        .union(res)
+                        .on_hover_text(help_text);
                 }
             });
-            tui.egui_ctx().data_mut(|d| d.insert_persisted(id, state));
+            indent_with_line(tui, |tui| {
+                tui.style(taffy::Style {
+                    size: Size {
+                        width: percent(1.0),
+                        height: auto(),
+                    },
+                    display: taffy::Display::Grid,
+                    align_items: Some(taffy::AlignItems::Center),
+                    justify_items: Some(taffy::AlignItems::Stretch),
+                    justify_content: Some(AlignContent::Stretch),
+                    grid_template_rows: vec![min_content(); 2],
+                    grid_template_columns: vec![auto(), auto()],
+                    gap: length(tui.egui_ui().spacing().item_spacing.y),
+                    ..Default::default()
+                })
+                .add(|tui| {
+                    for (label, text_reference, value_reference) in [
+                        ("real", &mut state.x_text, &mut point.x),
+                        ("imaginary", &mut state.y_text, &mut point.y),
+                    ] {
+                        tui.label(label);
+                        let response = tui.ui_add_manual(
+                            |ui| {
+                                ui.add(
+                                    egui::TextEdit::singleline(text_reference)
+                                        .desired_width(f32::INFINITY),
+                                )
+                            },
+                            |mut res, _ui| {
+                                res.min_size = emath::Vec2::new(0.0, res.min_size.y);
+                                res
+                            },
+                        );
+                        if !response.has_focus() {
+                            *text_reference = value_reference.to_string_radix(10, None);
+                        } else if let Ok(res) = Float::parse(text_reference) {
+                            *value_reference = Float::with_val(precision, res);
+                        }
+                    }
+                });
+                tui.egui_ctx().data_mut(|d| d.insert_persisted(id, state));
+            });
         });
-    });
 }
 
 /// Adds an intented UI with a line decoration in the indent
 pub fn indent_with_line(tui: &mut Tui, add_contents: impl FnOnce(&mut Tui)) {
-    tui.horizontal().add(|tui| {
+    tui.style(Style::row()).add(|tui| {
         {
             let size = taffy::Size {
                 height: auto(),
@@ -624,7 +624,8 @@ pub fn indent_with_line(tui: &mut Tui, add_contents: impl FnOnce(&mut Tui)) {
                 |_, _| {},
             );
         }
-        tui.vertical().add(|tui| {
+        let gap = tui.egui_ui().spacing().item_spacing.y;
+        tui.style(Style::col().gap(gap)).add(|tui| {
             add_contents(tui);
         });
     });
@@ -654,7 +655,7 @@ pub fn color32_edit(tui: &mut egui_taffy::Tui, color: &mut Color32) {
 
 /// Adds a color editing UI in a Tui context for a potentially non-color value
 pub fn pseudo_color_edit(tui: &mut egui_taffy::Tui, color: &mut [f32; 3]) {
-    tui.horizontal().add(|tui| {
+    tui.style(Style::row()).add(|tui| {
         tui.ui_add(
             egui::DragValue::new(&mut color[0])
                 .speed(0.003)

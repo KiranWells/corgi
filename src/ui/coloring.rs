@@ -6,16 +6,16 @@ use corgi_lib::types::{
 };
 use documented::DocumentedFieldsOpt;
 use eframe::egui::collapsing_header::{CollapsingState, paint_default_icon};
+use eframe::egui::color_picker::Alpha;
+use eframe::egui::widgets::color_picker::color_edit_button_rgba;
 use eframe::egui::{self, CornerRadius, Event, RichText, Sense, Stroke};
 use egui_material_icons::icons;
 use egui_taffy::TuiBuilderLogic;
 use taffy::prelude::*;
 
-use super::utils::{
-    TuiExt, fancy_header_tui, indent_with_line, selection_with_label, ui_with_label,
-};
+use super::utils::{fancy_header_tui, indent_with_line, selection_with_label, ui_with_label};
 use super::{EditUI, input_with_label};
-use crate::ui::utils::{color_edit, pseudo_color_edit, selection};
+use crate::ui::utils::{StyleExt, color_edit, pseudo_color_edit, selection};
 
 /// Wrapper type for gradient stops
 struct StopKind(u8);
@@ -80,26 +80,15 @@ impl EditUI for Coloring {
             }
             for i in 0..self.lights.len() {
                 let mut brk = false;
-                tui.vertical().add(|tui| {
-                    tui.style(Style {
-                        flex_direction: FlexDirection::Row,
-                        padding: Rect::zero(),
-                        justify_content: Some(AlignContent::SpaceBetween),
-                        align_content: Some(AlignContent::SpaceBetween),
-                        justify_items: Some(AlignItems::Center),
-                        align_items: Some(AlignItems::Center),
-                        size: Size {
-                            width: percent(1.0),
-                            height: auto(),
-                        },
-                        flex_grow: 1.0,
-                        ..tui.current_style().clone()
-                    })
-                    .add(|tui| {
+                tui.style(Style::col()).add(|tui| {
+                    tui.style(Style::row()).add(|tui| {
                         tui.small(format!("Light {}", i + 1));
                         if tui
                             .enabled_ui(self.lights.len() > 1)
-                            .ui_add(egui::Button::new(icons::ICON_DELETE))
+                            .ui_add(
+                                egui::Button::new(icons::ICON_DELETE)
+                                    .fill(ecolor::Color32::TRANSPARENT),
+                            )
                             .on_hover_text("Delete")
                             .clicked()
                         {
@@ -120,7 +109,7 @@ impl EditUI for Coloring {
                 }
             }
             if tui
-                .horizontal()
+                .style(Style::row())
                 .enabled_ui(self.lights.len() < MAX_LIGHTS)
                 .ui_add(egui::Button::new(format!("{} Add Light", icons::ICON_ADD)))
                 .clicked()
@@ -276,7 +265,7 @@ impl EditUI for Gradient {
                         }
                     });
                     if tui
-                        .horizontal()
+                        .style(Style::row())
                         .enabled_ui(colors.len() < MAX_GRADIENT_STOPS)
                         .ui_add(egui::Button::new(format!(
                             "{} Add Color Stop",
@@ -471,15 +460,16 @@ impl EditUI for Layer {
 
 impl EditUI for Overlays {
     fn render_edit_ui(&mut self, _ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
+        let gap = tui.egui_ui().spacing().item_spacing.x;
         if let Some(iteration_outline) = self.iteration_outline.as_mut() {
-            tui.horizontal().add(|tui| {
-                tui.grow().label("Step Outline");
+            tui.style(Style::row().gap(gap)).add(|tui| {
+                tui.style(Style::grow()).label("Step Outline");
                 tui.ui_add_manual(
                     |ui| {
-                        egui::widgets::color_picker::color_edit_button_rgba(
+                        color_edit_button_rgba(
                             ui,
                             &mut iteration_outline.color,
-                            egui::color_picker::Alpha::BlendOrAdditive,
+                            Alpha::BlendOrAdditive,
                         )
                     },
                     |res, _ui| res,
@@ -493,14 +483,12 @@ impl EditUI for Overlays {
             });
             if iteration_outline.color.a() == 0.0
                 || tui
-                    .horizontal()
                     .ui_add(egui::Button::new(format!("{} Remove", icons::ICON_REMOVE)))
                     .clicked()
             {
                 self.iteration_outline = None;
             }
         } else if tui
-            .horizontal()
             .ui_add(egui::Button::new(format!(
                 "{} Add Iteration Outline",
                 icons::ICON_ADD
@@ -515,16 +503,10 @@ impl EditUI for Overlays {
 
         if let Some(set_outline) = self.set_outline.as_mut() {
             let mut scale = set_outline.parameter as f32 / 10.0;
-            tui.horizontal().add(|tui| {
-                tui.grow().label("Set Outline");
+            tui.style(Style::row().gap(gap)).add(|tui| {
+                tui.style(Style::grow()).label("Set Outline");
                 tui.ui_add_manual(
-                    |ui| {
-                        egui::widgets::color_picker::color_edit_button_rgba(
-                            ui,
-                            &mut set_outline.color,
-                            egui::color_picker::Alpha::BlendOrAdditive,
-                        )
-                    },
+                    |ui| color_edit_button_rgba(ui, &mut set_outline.color, Alpha::BlendOrAdditive),
                     |res, _ui| res,
                 );
                 tui.ui_add(
@@ -538,14 +520,12 @@ impl EditUI for Overlays {
             set_outline.parameter = (scale * 10.0) as u32;
             if set_outline.color.a() == 0.0
                 || tui
-                    .horizontal()
                     .ui_add(egui::Button::new(format!("{} Remove", icons::ICON_REMOVE)))
                     .clicked()
             {
                 self.set_outline = None;
             }
         } else if tui
-            .horizontal()
             .ui_add(egui::Button::new(format!(
                 "{} Add Set Outline",
                 icons::ICON_ADD
@@ -592,32 +572,17 @@ impl EditUI for Vec<Layer> {
                 egui::StrokeKind::Inside,
             );
         }
-        let current_style = tui.current_style().clone();
         let item_spacing = tui.egui_ui().spacing().item_spacing;
-        tui.style(Style {
-            flex_direction: FlexDirection::Column,
-            padding: Rect {
-                left: length(0.0),
-                right: length(0.0),
-                top: length(item_spacing.y * 2.0),
-                bottom: length(item_spacing.y * 2.0),
-            },
-            size: Size {
-                width: percent(1.0),
-                height: auto(),
-            },
-            flex_grow: 1.0,
-            ..current_style
-        })
+        tui.style(
+            Style::col()
+                .pad2(item_spacing.y * 2.0, 0.0)
+                .gap(item_spacing.y),
+        )
         .add_with_background_ui(background, |tui, _| {
             let valid_ct = self.len();
             let mut add_layer = false;
-            tui.horizontal().add(|tui| {
-                tui.style(taffy::Style {
-                    flex_grow: 1.0,
-                    ..Default::default()
-                })
-                .label(
+            tui.style(Style::row()).add(|tui| {
+                tui.label(
                     RichText::new("Layers").text_style(egui::TextStyle::Name("Subheading".into())),
                 );
                 if valid_ct < 8 {
@@ -640,17 +605,7 @@ impl EditUI for Vec<Layer> {
                 let mut state = CollapsingState::load_with_default_open(tui.egui_ctx(), id, true);
                 let is_open = state.openness(tui.egui_ctx()) > 0.0;
                 let radius = tui.egui_ui().visuals().widgets.inactive.corner_radius.nw * 2;
-                tui.style(Style {
-                    flex_direction: FlexDirection::Column,
-                    padding: Rect::zero(),
-                    gap: if is_open {
-                        length(item_spacing.y * 2.0)
-                    } else {
-                        length(0.0)
-                    },
-                    ..tui.current_style().clone()
-                })
-                .add_with_background_ui(
+                tui.style(Style::col()).add_with_background_ui(
                     |ui, container| {
                         ui.painter().rect_filled(
                             container.full_container(),
@@ -659,128 +614,110 @@ impl EditUI for Vec<Layer> {
                         );
                     },
                     |tui, _| {
-                        tui.style(Style {
-                            flex_direction: FlexDirection::Row,
-                            padding: Rect {
-                                left: length(item_spacing.x),
-                                right: length(item_spacing.x),
-                                top: length(0.0),
-                                bottom: length(0.0),
-                            },
-                            align_items: Some(AlignItems::Center),
-                            size: Size {
-                                width: percent(1.0),
-                                height: auto(),
-                            },
-                            gap: length(0.0),
-                            flex_grow: 0.0,
-                            ..tui.current_style().clone()
-                        })
-                        .add_with_background_ui(
-                            |ui, container| {
-                                ui.painter().rect_filled(
-                                    container.full_container(),
-                                    if is_open {
-                                        CornerRadius {
-                                            nw: radius,
-                                            ne: radius,
-                                            sw: 0,
-                                            se: 0,
-                                        }
-                                    } else {
-                                        CornerRadius::same(radius)
-                                    },
-                                    ui.visuals().selection.bg_fill,
-                                );
-                            },
-                            |tui, _| {
-                                let text_color = tui.egui_ui().visuals().selection.stroke.color;
-                                let text_color_alt = tui.egui_ui().visuals().panel_fill;
-                                let widgets = &mut tui.egui_ui_mut().style_mut().visuals.widgets;
-                                widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
-                                widgets.inactive.fg_stroke.color = text_color;
-                                widgets.noninteractive.weak_bg_fill = egui::Color32::TRANSPARENT;
-                                widgets.noninteractive.fg_stroke.color = text_color;
-                                widgets.active.weak_bg_fill = egui::Color32::TRANSPARENT;
-                                widgets.active.fg_stroke.color = text_color;
-                                widgets.hovered.weak_bg_fill = egui::Color32::TRANSPARENT;
-                                widgets.hovered.fg_stroke.color = text_color_alt;
-                                widgets.open.weak_bg_fill = egui::Color32::TRANSPARENT;
-                                widgets.open.fg_stroke.color = text_color;
-                                tui.ui_add_manual(
-                                    |ui| state.show_toggle_button(ui, paint_default_icon),
-                                    |cont, _ui| cont,
-                                );
-                                selection(
-                                    tui,
-                                    &format!("Layer Type {}", layer.id),
-                                    Layer::get_field_docs("kind").ok(),
-                                    &mut layer.kind,
-                                    vec![
-                                        LayerKind::Step,
-                                        LayerKind::SmoothStep,
-                                        LayerKind::Distance,
-                                        LayerKind::OrbitTrap,
-                                        LayerKind::Stripe,
-                                    ],
-                                );
-                                tui.grow().add_empty();
-                                if i > 0
-                                    && tui
-                                        .button(|tui| tui.label(icons::ICON_ARROW_UPWARD))
-                                        .response
-                                        .on_hover_text("Move layer up")
-                                        .clicked()
-                                {
-                                    swap_first = i as i32 - 1;
-                                }
-                                if tui
-                                    .enabled_ui(i < valid_ct.saturating_sub(1))
-                                    .button(|tui| tui.label(icons::ICON_ARROW_DOWNWARD))
-                                    .response
-                                    .on_hover_text("Move layer down")
-                                    .clicked()
-                                {
-                                    swap_first = i as i32;
-                                }
-                                if tui
-                                    .button(|tui| tui.label(icons::ICON_RESET_SETTINGS))
-                                    .response
-                                    .on_hover_text("Reset layer parameters")
-                                    .clicked()
-                                {
-                                    layer.strength = 1.0;
-                                    match layer.kind {
-                                        LayerKind::OrbitTrap | LayerKind::Stripe => {
-                                            layer.param = layer.param.floor();
-                                        }
-                                        _ => layer.param = 0.0,
+                        tui.style(Style::row().side(item_spacing.x))
+                            .add_with_background_ui(
+                                |ui, container| {
+                                    ui.painter().rect_filled(
+                                        container.full_container(),
+                                        if is_open {
+                                            CornerRadius {
+                                                nw: radius,
+                                                ne: radius,
+                                                sw: 0,
+                                                se: 0,
+                                            }
+                                        } else {
+                                            CornerRadius::same(radius)
+                                        },
+                                        ui.visuals().selection.bg_fill,
+                                    );
+                                },
+                                |tui, _| {
+                                    let text_color = tui.egui_ui().visuals().selection.stroke.color;
+                                    let text_color_alt = tui.egui_ui().visuals().panel_fill;
+                                    let widgets =
+                                        &mut tui.egui_ui_mut().style_mut().visuals.widgets;
+                                    widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+                                    widgets.inactive.fg_stroke.color = text_color;
+                                    widgets.noninteractive.weak_bg_fill =
+                                        egui::Color32::TRANSPARENT;
+                                    widgets.noninteractive.fg_stroke.color = text_color;
+                                    widgets.active.weak_bg_fill = egui::Color32::TRANSPARENT;
+                                    widgets.active.fg_stroke.color = text_color;
+                                    widgets.hovered.weak_bg_fill = egui::Color32::TRANSPARENT;
+                                    widgets.hovered.fg_stroke.color = text_color_alt;
+                                    widgets.open.weak_bg_fill = egui::Color32::TRANSPARENT;
+                                    widgets.open.fg_stroke.color = text_color;
+                                    tui.ui_add_manual(
+                                        |ui| state.show_toggle_button(ui, paint_default_icon),
+                                        |cont, _ui| cont,
+                                    );
+                                    selection(
+                                        tui,
+                                        &format!("Layer Type {}", layer.id),
+                                        Layer::get_field_docs("kind").ok(),
+                                        &mut layer.kind,
+                                        vec![
+                                            LayerKind::Step,
+                                            LayerKind::SmoothStep,
+                                            LayerKind::Distance,
+                                            LayerKind::OrbitTrap,
+                                            LayerKind::Stripe,
+                                        ],
+                                    );
+                                    tui.style(Style::grow()).add_empty();
+                                    if i > 0
+                                        && tui
+                                            .button(|tui| tui.label(icons::ICON_ARROW_UPWARD))
+                                            .response
+                                            .on_hover_text("Move layer up")
+                                            .clicked()
+                                    {
+                                        swap_first = i as i32 - 1;
                                     }
-                                }
-                                if valid_ct < 8 {
-                                    duplicate = tui
-                                        .button(|tui| tui.label(icons::ICON_CONTENT_COPY))
+                                    if tui
+                                        .enabled_ui(i < valid_ct.saturating_sub(1))
+                                        .button(|tui| tui.label(icons::ICON_ARROW_DOWNWARD))
                                         .response
-                                        .on_hover_text("Duplicate layer")
+                                        .on_hover_text("Move layer down")
+                                        .clicked()
+                                    {
+                                        swap_first = i as i32;
+                                    }
+                                    if tui
+                                        .button(|tui| tui.label(icons::ICON_RESET_SETTINGS))
+                                        .response
+                                        .on_hover_text("Reset layer parameters")
+                                        .clicked()
+                                    {
+                                        layer.strength = 1.0;
+                                        match layer.kind {
+                                            LayerKind::OrbitTrap | LayerKind::Stripe => {
+                                                layer.param = layer.param.floor();
+                                            }
+                                            _ => layer.param = 0.0,
+                                        }
+                                    }
+                                    if valid_ct < 8 {
+                                        duplicate = tui
+                                            .button(|tui| tui.label(icons::ICON_CONTENT_COPY))
+                                            .response
+                                            .on_hover_text("Duplicate layer")
+                                            .clicked();
+                                    }
+                                    remove = tui
+                                        .button(|tui| tui.label(icons::ICON_DELETE))
+                                        .response
+                                        .on_hover_text("Delete layer")
                                         .clicked();
-                                }
-                                remove = tui
-                                    .button(|tui| tui.label(icons::ICON_DELETE))
-                                    .response
-                                    .on_hover_text("Delete layer")
-                                    .clicked();
-                            },
-                        );
+                                },
+                            );
                         let current = tui.current_style().clone();
-                        tui.style(Style {
-                            size: percent(1.0),
-                            ..current.clone()
-                        })
-                        .ui_add_manual(
+                        tui.ui_add_manual(
                             |ui| {
                                 if let Some(res) = state.show_body_unindented(ui, |ui| {
                                     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                                    let gap = ui.spacing().item_spacing.y * 2.0;
+                                    let gap = ui.spacing().item_spacing.y * 1.0;
                                     egui_taffy::tui(ui, ui.id().with("ext"))
                                         .reserve_available_width()
                                         .style(taffy::Style {
@@ -788,10 +725,10 @@ impl EditUI for Vec<Layer> {
                                             size: percent(1.0),
                                             gap: length(gap),
                                             padding: Rect {
-                                                left: length(gap),
+                                                left: length(gap * 2.0),
                                                 right: length(gap),
                                                 bottom: length(gap),
-                                                top: length(0.0),
+                                                top: length(gap),
                                             },
                                             ..current
                                         })
@@ -834,19 +771,14 @@ impl EditUI for Vec<Layer> {
 
 impl EditUI for Light {
     fn render_edit_ui(&mut self, _ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
-        tui.horizontal().add(|tui| {
-            ui_with_label(tui, "Color", None, |tui| {
-                color_edit(tui, &mut self.color);
-            });
-            input_with_label(
-                tui,
-                "Strength",
-                None,
-                egui::DragValue::new(&mut self.strength).speed(0.003),
-            );
+        tui.style(Style::row()).add(|tui| {
+            tui.label("Color");
+            color_edit(tui, &mut self.color);
+            tui.label("Strength");
+            tui.ui_add(egui::DragValue::new(&mut self.strength).speed(0.003));
         });
-        tui.horizontal().add(|tui| {
-            tui.grow().label("Direction");
+        tui.style(Style::row()).add(|tui| {
+            tui.label("Direction");
             tui.ui_add(egui::DragValue::new(&mut self.direction[0]).speed(0.003));
             tui.ui_add(egui::DragValue::new(&mut self.direction[1]).speed(0.003));
             tui.ui_add(egui::DragValue::new(&mut self.direction[2]).speed(0.003));
