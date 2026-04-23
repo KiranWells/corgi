@@ -5,17 +5,18 @@ use corgi_lib::types::{
     Coloring, Gradient, Layer, LayerKind, Light, LightingKind, Outline, Overlays, next_layer_id,
 };
 use documented::DocumentedFieldsOpt;
-use eframe::egui::collapsing_header::{CollapsingState, paint_default_icon};
 use eframe::egui::color_picker::Alpha;
 use eframe::egui::widgets::color_picker::color_edit_button_rgba;
-use eframe::egui::{self, CornerRadius, Event, RichText, Sense, Stroke};
+use eframe::egui::{self, Event, RichText, Stroke};
 use egui_material_icons::icons;
 use egui_taffy::TuiBuilderLogic;
 use taffy::prelude::*;
 
 use super::utils::{fancy_header_tui, indent_with_line, selection_with_label, ui_with_label};
 use super::{EditUI, input_with_label};
-use crate::ui::utils::{StyleExt, color_edit, pseudo_color_edit, selection};
+use crate::ui::utils::{
+    StyleExt, color_edit, custom_colored_collapse, pseudo_color_edit, selection,
+};
 
 /// Wrapper type for gradient stops
 struct StopKind(u8);
@@ -599,148 +600,78 @@ impl EditUI for Vec<Layer> {
             for (i, layer) in self.iter_mut().enumerate() {
                 let mut remove = false;
                 let mut duplicate = false;
-                let id = tui
-                    .egui_ui()
-                    .make_persistent_id(format!("Layer {}", layer.id));
-                let mut state = CollapsingState::load_with_default_open(tui.egui_ctx(), id, true);
-                let is_open = state.openness(tui.egui_ctx()) > 0.0;
-                let radius = tui.egui_ui().visuals().widgets.inactive.corner_radius.nw * 2;
-                tui.style(Style::col()).add_with_background_ui(
-                    |ui, container| {
-                        ui.painter().rect_filled(
-                            container.full_container(),
-                            radius,
-                            ui.visuals().window_fill,
+                let id = layer.id;
+                custom_colored_collapse(
+                    tui,
+                    format!("Layer {id}"),
+                    layer,
+                    |tui, layer| {
+                        selection(
+                            tui,
+                            format!("Layer Type {id}").as_str(),
+                            Layer::get_field_docs("kind").ok(),
+                            &mut layer.kind,
+                            vec![
+                                LayerKind::Step,
+                                LayerKind::SmoothStep,
+                                LayerKind::Distance,
+                                LayerKind::OrbitTrap,
+                                LayerKind::Stripe,
+                            ],
                         );
-                    },
-                    |tui, _| {
-                        tui.style(Style::row().side(item_spacing.x))
-                            .add_with_background_ui(
-                                |ui, container| {
-                                    ui.painter().rect_filled(
-                                        container.full_container(),
-                                        if is_open {
-                                            CornerRadius {
-                                                nw: radius,
-                                                ne: radius,
-                                                sw: 0,
-                                                se: 0,
-                                            }
-                                        } else {
-                                            CornerRadius::same(radius)
-                                        },
-                                        ui.visuals().selection.bg_fill,
-                                    );
-                                },
-                                |tui, _| {
-                                    let text_color = tui.egui_ui().visuals().selection.stroke.color;
-                                    let text_color_alt = tui.egui_ui().visuals().panel_fill;
-                                    let widgets =
-                                        &mut tui.egui_ui_mut().style_mut().visuals.widgets;
-                                    widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
-                                    widgets.inactive.fg_stroke.color = text_color;
-                                    widgets.noninteractive.weak_bg_fill =
-                                        egui::Color32::TRANSPARENT;
-                                    widgets.noninteractive.fg_stroke.color = text_color;
-                                    widgets.active.weak_bg_fill = egui::Color32::TRANSPARENT;
-                                    widgets.active.fg_stroke.color = text_color;
-                                    widgets.hovered.weak_bg_fill = egui::Color32::TRANSPARENT;
-                                    widgets.hovered.fg_stroke.color = text_color_alt;
-                                    widgets.open.weak_bg_fill = egui::Color32::TRANSPARENT;
-                                    widgets.open.fg_stroke.color = text_color;
-                                    tui.ui_add_manual(
-                                        |ui| state.show_toggle_button(ui, paint_default_icon),
-                                        |cont, _ui| cont,
-                                    );
-                                    selection(
-                                        tui,
-                                        &format!("Layer Type {}", layer.id),
-                                        Layer::get_field_docs("kind").ok(),
-                                        &mut layer.kind,
-                                        vec![
-                                            LayerKind::Step,
-                                            LayerKind::SmoothStep,
-                                            LayerKind::Distance,
-                                            LayerKind::OrbitTrap,
-                                            LayerKind::Stripe,
-                                        ],
-                                    );
-                                    tui.style(Style::grow()).add_empty();
-                                    if i > 0
-                                        && tui
-                                            .button(|tui| tui.label(icons::ICON_ARROW_UPWARD))
-                                            .response
-                                            .on_hover_text("Move layer up")
-                                            .clicked()
-                                    {
-                                        swap_first = i as i32 - 1;
-                                    }
-                                    if tui
-                                        .enabled_ui(i < valid_ct.saturating_sub(1))
-                                        .button(|tui| tui.label(icons::ICON_ARROW_DOWNWARD))
-                                        .response
-                                        .on_hover_text("Move layer down")
-                                        .clicked()
-                                    {
-                                        swap_first = i as i32;
-                                    }
-                                    if tui
-                                        .button(|tui| tui.label(icons::ICON_RESET_SETTINGS))
-                                        .response
-                                        .on_hover_text("Reset layer parameters")
-                                        .clicked()
-                                    {
-                                        layer.strength = 1.0;
-                                        match layer.kind {
-                                            LayerKind::OrbitTrap | LayerKind::Stripe => {
-                                                layer.param = layer.param.floor();
-                                            }
-                                            _ => layer.param = 0.0,
-                                        }
-                                    }
-                                    if valid_ct < 8 {
-                                        duplicate = tui
-                                            .button(|tui| tui.label(icons::ICON_CONTENT_COPY))
-                                            .response
-                                            .on_hover_text("Duplicate layer")
-                                            .clicked();
-                                    }
-                                    remove = tui
-                                        .button(|tui| tui.label(icons::ICON_DELETE))
-                                        .response
-                                        .on_hover_text("Delete layer")
-                                        .clicked();
-                                },
-                            );
-                        let current = tui.current_style().clone();
-                        tui.ui_add_manual(
-                            |ui| {
-                                if let Some(res) = state.show_body_unindented(ui, |ui| {
-                                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                                    let gap = ui.spacing().item_spacing.y * 1.0;
-                                    egui_taffy::tui(ui, ui.id().with("ext"))
-                                        .reserve_available_width()
-                                        .style(taffy::Style {
-                                            flex_direction: taffy::FlexDirection::Column,
-                                            size: percent(1.0),
-                                            gap: length(gap),
-                                            padding: Rect {
-                                                left: length(gap * 2.0),
-                                                right: length(gap),
-                                                bottom: length(gap),
-                                                top: length(gap),
-                                            },
-                                            ..current
-                                        })
-                                        .show(|tui| layer.render_edit_ui(ctx, tui))
-                                }) {
-                                    res.response
-                                } else {
-                                    ui.interact(egui::Rect::ZERO, ui.id(), Sense::hover())
+                        tui.style(Style::grow()).add_empty();
+                        if i > 0
+                            && tui
+                                .button(|tui| tui.label(icons::ICON_ARROW_UPWARD))
+                                .response
+                                .on_hover_text("Move layer up")
+                                .clicked()
+                        {
+                            swap_first = i as i32 - 1;
+                        }
+                        if tui
+                            .enabled_ui(i < valid_ct.saturating_sub(1))
+                            .button(|tui| tui.label(icons::ICON_ARROW_DOWNWARD))
+                            .response
+                            .on_hover_text("Move layer down")
+                            .clicked()
+                        {
+                            swap_first = i as i32;
+                        }
+                        if tui
+                            .button(|tui| tui.label(icons::ICON_RESET_SETTINGS))
+                            .response
+                            .on_hover_text("Reset layer parameters")
+                            .clicked()
+                        {
+                            layer.strength = 1.0;
+                            match layer.kind {
+                                LayerKind::OrbitTrap | LayerKind::Stripe => {
+                                    layer.param = layer.param.floor();
                                 }
-                            },
-                            |cont, _ui| cont,
-                        );
+                                _ => layer.param = 0.0,
+                            }
+                        }
+                        if valid_ct < 8 {
+                            duplicate = tui
+                                .button(|tui| tui.label(icons::ICON_CONTENT_COPY))
+                                .response
+                                .on_hover_text("Duplicate layer")
+                                .clicked();
+                        }
+                        remove = tui
+                            .button(|tui| tui.label(icons::ICON_DELETE))
+                            .response
+                            .on_hover_text("Delete layer")
+                            .clicked();
+                    },
+                    |tui, layer| {
+                        tui.reuse_style()
+                            .mut_style(|style| {
+                                style.padding = Rect::zero();
+                                style.padding.left = length(item_spacing.x);
+                            })
+                            .add(|tui| layer.render_edit_ui(ctx, tui))
                     },
                 );
                 if !remove {

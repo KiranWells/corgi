@@ -7,8 +7,7 @@ use color_eyre::Result;
 use color_eyre::eyre::eyre;
 use corgi_lib::types::ImgSpec;
 use corgi_lib::types::serde::SafeSaveLoad;
-use eframe::egui::collapsing_header::{CollapsingState, paint_default_icon};
-use eframe::egui::{self, CornerRadius, RichText, TextEdit};
+use eframe::egui::{self, RichText, TextEdit};
 use egui_material_icons::icons;
 use egui_taffy::TuiBuilderLogic;
 use little_exif::exif_tag::ExifTag;
@@ -18,7 +17,7 @@ use rand_seeder::{Seeder, SipRng};
 use taffy::prelude::*;
 
 use super::utils::scroll;
-use crate::ui::utils::{StyleExt, fancy_header_tui};
+use crate::ui::utils::{StyleExt, custom_colored_collapse, fancy_header_tui};
 
 const GROUP_NAME_FILE: &str = ".name";
 #[derive(Debug)]
@@ -261,175 +260,108 @@ impl PresetGroup {
         let item_spacing = tui.egui_ui().spacing().item_spacing;
         let mut remove = false;
         let mut edit_clicked = false;
-        let id = tui.egui_ui().make_persistent_id(&self.root);
-        let mut state = CollapsingState::load_with_default_open(tui.egui_ctx(), id, true);
-        let is_open = state.openness(tui.egui_ctx()) > 0.0;
-        let radius = tui.egui_ui().visuals().widgets.inactive.corner_radius.nw * 2;
-        tui.style(Style::col()).add_with_background_ui(
-            |ui, container| {
-                ui.painter().rect_filled(
-                    container.full_container(),
-                    radius,
-                    ui.visuals().window_fill,
-                );
-            },
-            |tui, _| {
-                tui.style(Style::row().pad(item_spacing.x))
-                    .add_with_background_ui(
-                        |ui, container| {
-                            ui.painter().rect_filled(
-                                container.full_container(),
-                                if is_open {
-                                    CornerRadius {
-                                        nw: radius,
-                                        ne: radius,
-                                        sw: 0,
-                                        se: 0,
-                                    }
-                                } else {
-                                    CornerRadius::same(radius)
-                                },
-                                ui.visuals().selection.bg_fill,
-                            );
-                        },
-                        |tui, _| {
-                            let old_text_color = tui.egui_ui().visuals().text_color();
-                            let text_color = tui.egui_ui().visuals().selection.stroke.color;
-                            let text_color_alt = tui.egui_ui().visuals().panel_fill;
-                            let widgets = &mut tui.egui_ui_mut().style_mut().visuals.widgets;
-                            widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
-                            widgets.inactive.fg_stroke.color = text_color;
-                            widgets.noninteractive.weak_bg_fill = egui::Color32::TRANSPARENT;
-                            widgets.noninteractive.fg_stroke.color = text_color;
-                            widgets.active.weak_bg_fill = egui::Color32::TRANSPARENT;
-                            widgets.active.fg_stroke.color = text_color;
-                            widgets.hovered.weak_bg_fill = egui::Color32::TRANSPARENT;
-                            widgets.hovered.fg_stroke.color = text_color_alt;
-                            widgets.open.weak_bg_fill = egui::Color32::TRANSPARENT;
-                            widgets.open.fg_stroke.color = text_color;
-                            tui.egui_style_mut().spacing.button_padding = item_spacing / 2.0;
-                            tui.ui_add_manual(
-                                |ui| state.show_toggle_button(ui, paint_default_icon),
-                                |cont, _ui| cont,
-                            );
-                            if self.ui_edit_mode {
-                                if tui
-                                    .style(Style::grow())
-                                    .mut_style(|s| s.padding = Rect::zero())
-                                    .ui_add(
-                                        TextEdit::singleline(&mut self.edit_name)
-                                            .text_color(old_text_color),
-                                    )
-                                    .lost_focus()
-                                    && self.edit_name != self.name
-                                {
-                                    self.name = self.edit_name.clone();
-                                    if let Ok(mut name_file) = std::fs::OpenOptions::new()
-                                        .create(true)
-                                        .write(true)
-                                        .truncate(true)
-                                        .open(self.root.join(GROUP_NAME_FILE))
-                                    {
-                                        let _ = name_file.write_all(self.name.as_bytes());
-                                    }
-                                }
-                            } else {
-                                tui.style(Style::grow())
-                                    .mut_style(|s| s.padding = Rect::zero())
-                                    .label(&self.name);
-                            }
-                            if self.ui_edit_mode && self.thumbnails.is_empty() {
-                                remove = tui
-                                    .mut_style(|s| s.padding = Rect::zero())
-                                    .add(|tui| {
-                                        tui.ui_add(
-                                            egui::Button::new(icons::ICON_DELETE)
-                                                .fill(tui.egui_ui().style().visuals.error_fg_color),
-                                        )
-                                        .on_hover_text("Delete Group")
-                                    })
-                                    .clicked();
-                                tui.mut_style(|s| s.padding = Rect::length(item_spacing.x))
-                                    .add_empty();
-                            }
-                            if self.editable {
-                                edit_clicked = tui
-                                    .mut_style(|s| s.padding = Rect::zero())
-                                    .add(|tui| {
-                                        tui.ui_add(egui::Button::new(if self.ui_edit_mode {
-                                            icons::ICON_DONE
-                                        } else {
-                                            icons::ICON_EDIT
-                                        }))
-                                        .on_hover_text("Edit Group")
-                                    })
-                                    .clicked()
-                            } else {
-                                tui.enabled_ui(false).ui_add(egui::Button::new(" "));
-                            }
-                        },
-                    );
-                tui.ui_add_manual(
-                    |ui| {
-                        if let Some(res) = state.show_body_unindented(ui, |ui| {
-                            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                            egui_taffy::tui(ui, ui.id().with("ext"))
-                                .reserve_available_width()
-                                .style(taffy::Style {
-                                    size: taffy::Size {
-                                        width: percent(1.0),
-                                        height: auto(),
-                                    },
-                                    display: taffy::Display::Grid,
-                                    grid_template_rows: vec![
-                                        min_content();
-                                        self.thumbnails.len().div_ceil(2)
-                                    ],
-                                    grid_template_columns: vec![fr(0.5); 2],
-                                    padding: Rect::length(item_spacing.y),
-                                    gap: length(item_spacing.y),
-                                    ..Default::default()
-                                })
-                                .show(|tui| {
-                                    if self.thumbnails.is_empty() {
-                                        tui.mut_style(|s| s.padding = Rect::length(item_spacing.x))
-                                            .label("No presets.");
-                                        return;
-                                    }
-                                    let mut new_thumbnails = vec![];
-                                    for mut thumb in mem::take(&mut self.thumbnails).into_iter() {
-                                        let (delete, res) = thumb.render_button(
-                                            tui,
-                                            self.ui_edit_mode,
-                                            uses_location,
-                                        );
-                                        if res.clicked()
-                                            && let LazyPresetThumb::Loaded(preset_thumb) = &thumb
-                                        {
-                                            callback(&preset_thumb.spec);
-                                        }
-                                        if !delete {
-                                            new_thumbnails.push(thumb);
-                                        } else {
-                                            if let Err(err) = std::fs::remove_file(thumb.path()) {
-                                                tracing::error!(
-                                                    "Failed to delete preset file: {err}"
-                                                );
-                                            }
-                                        }
-                                    }
-                                    self.thumbnails = new_thumbnails;
-                                })
-                        }) {
-                            res.response
-                        } else {
-                            ui.interact(egui::Rect::ZERO, ui.id(), egui::Sense::empty())
+        let old_text_color = tui.egui_ui().visuals().text_color();
+        custom_colored_collapse(
+            tui,
+            &self.root,
+            &mut self.thumbnails,
+            |tui, thumbnails| {
+                if self.ui_edit_mode {
+                    if tui
+                        .style(Style::grow())
+                        .mut_style(|s| s.padding = Rect::zero())
+                        .ui_add(
+                            TextEdit::singleline(&mut self.edit_name).text_color(old_text_color),
+                        )
+                        .lost_focus()
+                        && self.edit_name != self.name
+                    {
+                        self.name = self.edit_name.clone();
+                        if let Ok(mut name_file) = std::fs::OpenOptions::new()
+                            .create(true)
+                            .write(true)
+                            .truncate(true)
+                            .open(self.root.join(GROUP_NAME_FILE))
+                        {
+                            let _ = name_file.write_all(self.name.as_bytes());
                         }
+                    }
+                } else {
+                    tui.style(Style::grow())
+                        .mut_style(|s| s.padding = Rect::zero())
+                        .label(&self.name);
+                }
+                if self.ui_edit_mode && thumbnails.is_empty() {
+                    remove = tui
+                        .mut_style(|s| s.padding = Rect::zero())
+                        .add(|tui| {
+                            tui.ui_add(
+                                egui::Button::new(icons::ICON_DELETE)
+                                    .fill(tui.egui_ui().style().visuals.error_fg_color),
+                            )
+                            .on_hover_text("Delete Group")
+                        })
+                        .clicked();
+                    tui.mut_style(|s| s.padding = Rect::length(item_spacing.x))
+                        .add_empty();
+                }
+                if self.editable {
+                    edit_clicked = tui
+                        .mut_style(|s| s.padding = Rect::zero())
+                        .add(|tui| {
+                            tui.ui_add(egui::Button::new(if self.ui_edit_mode {
+                                icons::ICON_DONE
+                            } else {
+                                icons::ICON_EDIT
+                            }))
+                            .on_hover_text("Edit Group")
+                        })
+                        .clicked()
+                } else {
+                    tui.enabled_ui(false).ui_add(egui::Button::new(" "));
+                }
+            },
+            |tui, thumbnails| {
+                tui.style(taffy::Style {
+                    size: taffy::Size {
+                        width: percent(1.0),
+                        height: auto(),
                     },
-                    |cont, _ui| cont,
-                );
+                    display: taffy::Display::Grid,
+                    grid_template_rows: vec![min_content(); thumbnails.len().div_ceil(2)],
+                    grid_template_columns: vec![fr(0.5); 2],
+                    padding: Rect::length(item_spacing.y),
+                    gap: length(item_spacing.y),
+                    ..Default::default()
+                })
+                .add(|tui| {
+                    if thumbnails.is_empty() {
+                        tui.mut_style(|s| s.padding = Rect::length(item_spacing.x))
+                            .label("No presets.");
+                        return;
+                    }
+                    let mut new_thumbnails = vec![];
+                    for mut thumb in mem::take(thumbnails).into_iter() {
+                        let (delete, res) =
+                            thumb.render_button(tui, self.ui_edit_mode, uses_location);
+                        if res.clicked()
+                            && let LazyPresetThumb::Loaded(preset_thumb) = &thumb
+                        {
+                            callback(&preset_thumb.spec);
+                        }
+                        if !delete {
+                            new_thumbnails.push(thumb);
+                        } else {
+                            if let Err(err) = std::fs::remove_file(thumb.path()) {
+                                tracing::error!("Failed to delete preset file: {err}");
+                            }
+                        }
+                    }
+                    *thumbnails = new_thumbnails;
+                })
             },
         );
+
         if edit_clicked {
             self.ui_edit_mode = !self.ui_edit_mode;
             if self.ui_edit_mode {

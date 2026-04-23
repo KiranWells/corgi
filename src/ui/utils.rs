@@ -676,3 +676,87 @@ pub fn pseudo_color_edit(tui: &mut egui_taffy::Tui, color: &mut [f32; 3]) {
         }
     });
 }
+
+pub fn custom_colored_collapse<T>(
+    tui: &mut egui_taffy::Tui,
+    salt: impl std::hash::Hash,
+    data: &mut T,
+    add_header: impl FnOnce(&mut egui_taffy::Tui, &mut T),
+    add_contents: impl FnOnce(&mut egui_taffy::Tui, &mut T),
+) {
+    let item_spacing = tui.egui_ui().spacing().item_spacing;
+    let id = tui.egui_ui().make_persistent_id(salt);
+    let mut state =
+        egui::collapsing_header::CollapsingState::load_with_default_open(tui.egui_ctx(), id, true);
+    let is_open = state.openness(tui.egui_ctx()) > 0.0;
+    let radius = tui.egui_ui().visuals().widgets.inactive.corner_radius.nw * 2;
+    tui.style(Style::col()).add_with_background_ui(
+        |ui, container| {
+            ui.painter()
+                .rect_filled(container.full_container(), radius, ui.visuals().window_fill);
+        },
+        |tui, _| {
+            tui.style(Style::row().pad(item_spacing.x))
+                .add_with_background_ui(
+                    |ui, container| {
+                        ui.painter().rect_filled(
+                            container.full_container(),
+                            if is_open {
+                                egui::CornerRadius {
+                                    nw: radius,
+                                    ne: radius,
+                                    sw: 0,
+                                    se: 0,
+                                }
+                            } else {
+                                egui::CornerRadius::same(radius)
+                            },
+                            ui.visuals().selection.bg_fill,
+                        );
+                    },
+                    |tui, _| {
+                        let text_color = tui.egui_ui().visuals().selection.stroke.color;
+                        let text_color_alt = tui.egui_ui().visuals().panel_fill;
+                        let widgets = &mut tui.egui_ui_mut().style_mut().visuals.widgets;
+                        widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+                        widgets.inactive.fg_stroke.color = text_color;
+                        widgets.noninteractive.weak_bg_fill = egui::Color32::TRANSPARENT;
+                        widgets.noninteractive.fg_stroke.color = text_color;
+                        widgets.active.weak_bg_fill = egui::Color32::TRANSPARENT;
+                        widgets.active.fg_stroke.color = text_color;
+                        widgets.hovered.weak_bg_fill = egui::Color32::TRANSPARENT;
+                        widgets.hovered.fg_stroke.color = text_color_alt;
+                        widgets.open.weak_bg_fill = egui::Color32::TRANSPARENT;
+                        widgets.open.fg_stroke.color = text_color;
+                        tui.egui_style_mut().spacing.button_padding = item_spacing / 2.0;
+                        tui.style(Style::default()).ui_add_manual(
+                            |ui| {
+                                state.show_toggle_button(
+                                    ui,
+                                    egui::collapsing_header::paint_default_icon,
+                                )
+                            },
+                            |cont, _ui| cont,
+                        );
+                        add_header(tui, data)
+                    },
+                );
+            tui.ui_add_manual(
+                |ui| {
+                    if let Some(res) = state.show_body_unindented(ui, |ui| {
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                        egui_taffy::tui(ui, ui.id().with("ext"))
+                            .reserve_available_width()
+                            .style(Style::col().pad(item_spacing.x).gap(item_spacing.x))
+                            .show(|tui| add_contents(tui, data))
+                    }) {
+                        res.response
+                    } else {
+                        ui.interact(egui::Rect::ZERO, ui.id(), egui::Sense::empty())
+                    }
+                },
+                |cont, _ui| cont,
+            );
+        },
+    );
+}
