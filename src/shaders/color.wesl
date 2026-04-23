@@ -164,6 +164,32 @@ fn calculate_lighting_layers(x: u32, y: u32, color_params: ColorParams) -> f32 {
     return brightness;
 }
 
+fn calc_normal(global_id_in: vec3<u32>, color_params: ColorParams) -> vec3f {
+    var global_id = global_id_in;
+    if global_id.x == 0 {
+        global_id.x += 1;
+    }
+    if global_id.y == 0 {
+        global_id.y += 1;
+    }
+    if global_id.x >= render_params.width-1 {
+        global_id.x -= 1;
+    }
+    if global_id.y >= render_params.height-1 {
+        global_id.y -= 1;
+    }
+    var plus_x = calculate_lighting_layers(global_id.x + 1, global_id.y, color_params);
+    var plus_y = calculate_lighting_layers(global_id.x, global_id.y + 1, color_params);
+    var sub_x = calculate_lighting_layers(global_id.x - 1, global_id.y, color_params);
+    var sub_y = calculate_lighting_layers(global_id.x, global_id.y - 1, color_params);
+    let delta_xy = 1.0;
+    let normal = normalize(cross(
+        vec3f(delta_xy, 0.0, plus_x - sub_x),
+        vec3f(0.0, delta_xy, plus_y - sub_y),
+    ));
+    return normal;
+}
+
 @compute @workgroup_size(16, 16, 1)
 fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if global_id.x >= render_params.width || global_id.y >= render_params.height {
@@ -310,20 +336,7 @@ fn main_color(@builtin(global_invocation_id) global_id: vec3<u32>) {
             brightness = vec3(cos(calculate_lighting_layers(global_id.x, global_id.y, color_params)) * 0.5 + 0.5);
         }
         case LIGHTING_SHADED {
-            let point = calculate_lighting_layers(global_id.x, global_id.y, color_params);
-            let plus_x = calculate_lighting_layers(global_id.x + 1, global_id.y, color_params);
-            let plus_y = calculate_lighting_layers(global_id.x, global_id.y + 1, color_params);
-            var aspect_scale = vec2<f32>(1.0, 1.0);
-            let aspect = f32(render_params.width) / f32(render_params.height);
-            if aspect< 1.0 {
-                aspect_scale.x = aspect;
-            } else {
-                aspect_scale.y = 1.0 / aspect;
-            }
-            let normal = normalize(cross(
-                vec3f(100.0 / f32(300) * aspect_scale.x, 0.0, plus_x - point),
-                vec3f(0.0, 100.0 / f32(300) * aspect_scale.y, plus_y - point),
-            ));
+            let normal = calc_normal(global_id, color_params);
             for (var i = 0u; i < 3; i+=1) {
                 let light = color_params.lights[i];
                 brightness += max(dot(normal, light.direction), 0.0) * light.strength * light.color;
