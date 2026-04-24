@@ -325,8 +325,9 @@ impl GPUData {
         })
     }
 
-    /// Load the data from the currently rendered image from th GPU to the CPU.
+    /// Load the data from the currently rendered image from the GPU to the CPU.
     pub fn get_texture_data(&self) -> Option<Vec<u8>> {
+        let (send, recv) = mpsc::channel();
         let ext = self.texture.read().size();
         let padded_width = ((ext.width * 4) as f32 / 256.0).ceil() as usize * 256;
         let tmp_buffer = Buffers::create_buffer::<u8>(
@@ -350,13 +351,14 @@ impl GPUData {
             },
             self.texture.read().size(),
         );
-        self.shared.queue.submit([encoder.finish()]);
-        let slice = tmp_buffer.slice(..);
-        let (send, recv) = mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |res| {
+        encoder.map_buffer_on_submit(&tmp_buffer, wgpu::MapMode::Read, .., move |res| {
             let _ = send.send(res);
         });
-        let _ = self.shared.device.poll(wgpu::PollType::wait_indefinitely());
+        let si = self.shared.queue.submit([encoder.finish()]);
+        let _ = self.shared.device.poll(wgpu::PollType::Wait {
+            submission_index: Some(si),
+            timeout: None,
+        });
         match recv.recv() {
             Ok(Ok(())) => {
                 let mut out = Vec::new();

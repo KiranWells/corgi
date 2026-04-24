@@ -307,7 +307,7 @@ impl Engine {
                 self.reprobe(image, status_callback);
             }
             if !self.cache_validity.gpu_probe {
-                self.reupload(status_callback);
+                self.reupload(status_callback)?;
             }
             timings.probe = Instant::now() - start;
         }
@@ -323,7 +323,7 @@ impl Engine {
 
         if !self.cache_validity.color {
             let start = Instant::now();
-            self.recolor(image, status_callback);
+            self.recolor(image, status_callback)?;
             timings.color = Instant::now() - start;
         }
         Ok(timings)
@@ -477,7 +477,10 @@ impl Engine {
         self.cache_validity.probe = true;
     }
 
-    fn reupload(&mut self, status_callback: &mut impl FnMut(ProgressUpdate)) {
+    fn reupload(
+        &mut self,
+        status_callback: &mut impl FnMut(ProgressUpdate),
+    ) -> Result<(), RenderingError> {
         status_callback(ProgressUpdate::msg("Uploading probe"));
         self.gpu_data.shared.queue.write_buffer(
             &self.gpu_data.buffers.probe,
@@ -486,13 +489,11 @@ impl Engine {
         );
         // We wait for this operation to complete to get accurate timings;
         // this upload is usually a negligible cost.
-        self.gpu_data.shared.queue.submit([]);
-        let _ = self
-            .gpu_data
-            .shared
-            .device
-            .poll(wgpu::PollType::wait_indefinitely());
+        let si = self.gpu_data.shared.queue.submit([]);
+
+        self.poll_unless_cancelled(Some(si), status_callback)?;
         self.cache_validity.gpu_probe = true;
+        Ok(())
     }
 
     fn recompute(
@@ -509,14 +510,47 @@ impl Engine {
             self.cancelled.clone(),
             status_callback,
         )?;
+        self.poll_unless_cancelled(None, status_callback)?;
         self.cache_validity.compute = true;
         Ok(())
     }
 
-    fn recolor(&mut self, image: &ImgSpec, status_callback: &mut impl FnMut(ProgressUpdate)) {
+    fn recolor(
+        &mut self,
+        image: &ImgSpec,
+        status_callback: &mut impl FnMut(ProgressUpdate),
+    ) -> Result<(), RenderingError> {
         status_callback(ProgressUpdate::msg("Rendering Colors"));
-        run_render_step(&self.gpu_data, image);
+        let si = run_render_step(&self.gpu_data, image);
+        self.poll_unless_cancelled(Some(si), status_callback)?;
         self.cache_validity.color = true;
+        Ok(())
+    }
+
+    fn poll_unless_cancelled(
+        &mut self,
+        si: Option<wgpu::SubmissionIndex>,
+        status_callback: &mut impl FnMut(ProgressUpdate),
+    ) -> Result<(), RenderingError> {
+        loop {
+            match self.gpu_data.shared.device.poll(wgpu::PollType::Wait {
+                submission_index: si.clone(),
+                timeout: Some(Duration::from_millis(100)),
+            }) {
+                Ok(wgpu::PollStatus::QueueEmpty) => return Ok(()),
+                Ok(wgpu::PollStatus::WaitSucceeded) => return Ok(()),
+                Ok(wgpu::PollStatus::Poll) => unreachable!(),
+                Err(wgpu::PollError::Timeout) => {
+                    if self.is_cancelled(status_callback) {
+                        return Err(RenderingError::Cancelled);
+                    }
+                }
+                Err(wgpu::PollError::WrongSubmissionIndex(a, b)) => {
+                    tracing::error!("Received the wrong submission index! {a}, {b}");
+                    return Ok(());
+                }
+            }
+        }
     }
 
     fn is_cancelled(&mut self, status_callback: &mut impl FnMut(ProgressUpdate)) -> bool {
@@ -660,7 +694,7 @@ fn run_compute_step(
 }
 
 /// Runs the render shader on the GPU
-fn run_render_step(gpu_data: &GPUData, image: &ImgSpec) {
+fn run_render_step(gpu_data: &GPUData, image: &ImgSpec) -> wgpu::SubmissionIndex {
     let GPUData {
         shared: SharedState { device, queue, .. },
         bind_groups,
@@ -715,9 +749,5 @@ fn run_render_step(gpu_data: &GPUData, image: &ImgSpec) {
     }
 
     // submit the render command queue
-    let si = queue.submit(Some(encoder.finish()));
-    let _ = device.poll(wgpu::PollType::Wait {
-        submission_index: Some(si),
-        timeout: Some(Duration::from_secs(1)),
-    });
+    queue.submit(Some(encoder.finish()))
 }

@@ -245,7 +245,7 @@ impl CorgiApp {
 }
 
 impl eframe::App for CorgiApp {
-    fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
         for msg in self.status_channel.try_iter() {
             match msg {
                 StatusMessage::Progress(ProgressUpdate { message, progress }) => {
@@ -312,6 +312,10 @@ impl eframe::App for CorgiApp {
         if Instant::now() - self.last_save_time > Duration::from_secs(10) {
             self.context.save();
             self.last_save_time = Instant::now();
+        }
+        if let Some(rs) = frame.wgpu_render_state() {
+            // Force a device wait before finishing the frame to prevent rendering errors
+            let _ = rs.device.poll(wgpu::PollType::wait_indefinitely());
         }
     }
 
