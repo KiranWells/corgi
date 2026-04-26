@@ -1020,6 +1020,7 @@ dependencies = [
  "egui_material_icons",
  "egui_taffy",
  "emath",
+ "exr",
  "image",
  "little_exif",
  "nanoid",

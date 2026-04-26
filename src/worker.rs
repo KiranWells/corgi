@@ -223,16 +223,25 @@ impl WorkerState {
                 self.ctx.request_repaint();
             }
             for (id, (path, compression_params, name)) in save_commands {
-                if let Err(err) = self.renderers.get(&id).unwrap().save_to_file(
-                    &path,
-                    name,
-                    compression_params,
-                    corgi_lib::types::serde::is_metadata_supported(&path),
-                    &mut |pu| {
-                        let _ = self.status_channel.send(StatusMessage::Progress(pu));
-                        self.ctx.request_repaint();
-                    },
-                ) {
+                let mut status_callback = |pu| {
+                    let _ = self.status_channel.send(StatusMessage::Progress(pu));
+                    self.ctx.request_repaint();
+                };
+                let result = if path.extension() == Some(&std::ffi::OsString::from("exr")) {
+                    self.renderers
+                        .get_mut(&id)
+                        .unwrap()
+                        .save_to_exr(&path, &mut status_callback)
+                } else {
+                    self.renderers.get(&id).unwrap().save_to_file(
+                        &path,
+                        name,
+                        compression_params,
+                        corgi_lib::types::serde::is_metadata_supported(&path),
+                        &mut status_callback,
+                    )
+                };
+                if let Err(err) = result {
                     let _ = self.status_channel.send(StatusMessage::Error(err.into()));
                 } else {
                     let _ = self

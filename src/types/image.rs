@@ -8,6 +8,12 @@ use super::Coloring;
 use crate::image_gen::shader_types::Transform;
 use crate::types::{LayerKind, Rotate};
 
+pub const STRIPES_ENABLED: u32 = 0x1;
+pub const TOTAL_ANGLE_ENABLED: u32 = 0x2;
+pub const ORBIT_ENABLED: u32 = 0x4;
+pub const DERIVATIVE_ENABLED: u32 = 0x8;
+pub const JULIA: u32 = 0x1000_0000;
+
 /// A representation of the current fractal being rendered, including
 /// the fractal location, settings, coloring, and image parameters
 #[derive(Debug, Clone, PartialEq)]
@@ -237,11 +243,6 @@ impl ImgSpec {
     /// Returns the set of bit flags to send to the shader based on the
     /// features necessary to render this image and the optimization level.
     pub fn get_flags(&self) -> u32 {
-        const STRIPES_ENABLED: u32 = 0x1;
-        const TOTAL_ANGLE_ENABLED: u32 = 0x2;
-        const ORBIT_ENABLED: u32 = 0x4;
-        const DERIVATIVE_ENABLED: u32 = 0x8;
-        const JULIA: u32 = 0x1000_0000;
         let kind_flags = match &self.location.fractal_kind {
             FractalKind::Mandelbrot => 0,
             FractalKind::Julia(_) => JULIA,

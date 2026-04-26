@@ -119,13 +119,17 @@ fn headless_render(
     };
     let timings = engine.render_image(&image, &mut status_callback)?;
     print!("\n------- | Rendering timings: {}", timings);
-    engine.save_to_file(
-        path,
-        None,
-        compression_params,
-        corgi_lib::types::serde::is_metadata_supported(path),
-        &mut status_callback,
-    )?;
+    if path.extension() == Some(&std::ffi::OsString::from("exr")) {
+        engine.save_to_exr(path, &mut status_callback)?;
+    } else {
+        engine.save_to_file(
+            path,
+            None,
+            compression_params,
+            corgi_lib::types::serde::is_metadata_supported(path),
+            &mut status_callback,
+        )?;
+    }
     println!();
     Ok(())
 }

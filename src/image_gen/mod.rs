@@ -48,8 +48,12 @@ pub enum RenderingError {
 pub enum SaveError {
     #[error("There is no rendered image")]
     NoImage,
+    #[error("Failed to load data from GPU")]
+    FailedLoad(#[from] wgpu::BufferAsyncError),
     #[error("Failed to save the image data to a file")]
     Save(#[from] image::ImageError),
+    #[error("Failed to save the image data to an EXR file")]
+    ExrSave(#[from] exr::error::Error),
     #[error("Failed to serialize image spec")]
     Serialization(#[from] crate::types::serde::SaveLoadError),
     #[error("Metadata not supported for image format: {0:?}")]
@@ -347,7 +351,7 @@ impl Engine {
             return Err(SaveError::NoImage);
         }
         status_callback(ProgressUpdate::msg("Fetching image data"));
-        if let Some(data) = self.gpu_data.get_texture_data() {
+        if let Ok(data) = self.gpu_data.get_texture_data() {
             status_callback(ProgressUpdate::msg("Saving image"));
             let mut img = image::DynamicImage::ImageRgba8(
                 ImageBuffer::from_raw(image_settings.width, image_settings.height, data)
@@ -448,6 +452,199 @@ impl Engine {
         } else {
             None
         }
+    }
+
+    pub fn save_to_exr(
+        &self,
+        path: &Path,
+        status_callback: &mut impl FnMut(ProgressUpdate),
+    ) -> Result<(), SaveError> {
+        use exr::prelude::*;
+        let size = self.gpu_data.texture.read().size();
+        let size = (size.width as usize, size.height as usize);
+        // Color layer
+        let color_data = self.gpu_data.get_texture_data()?;
+
+        fn byte_to_linear_f16(byte: u8) -> f16 {
+            f16::from_f32((((byte as f32) / 256.0 + 0.055) / 1.055).powf(2.4))
+        }
+
+        let color_channels = SpecificChannels::rgb(|loc: Vec2<usize>| {
+            (
+                byte_to_linear_f16(color_data[(loc.x() + loc.y() * size.0) * 4]),
+                byte_to_linear_f16(color_data[(loc.x() + loc.y() * size.0) * 4 + 1]),
+                byte_to_linear_f16(color_data[(loc.x() + loc.y() * size.0) * 4 + 2]),
+            )
+        });
+
+        let color_layer = Layer::new(
+            size,
+            LayerAttributes {
+                layer_name: Some("Final Color".into()),
+                ..Default::default()
+            },
+            Encoding {
+                compression: Compression::B44A,
+                ..Default::default()
+            },
+            color_channels,
+        );
+
+        // Step layer
+        let step_data = self.gpu_data.get_buffer_data(gpu_setup::BufferId::Step)?;
+
+        let step_channels = SpecificChannels::build()
+            .with_channel("x") // step
+            .with_channel("y") // escaped
+            .with_pixel_fn(|loc: Vec2<usize>| {
+                let index = (loc.x() + loc.y() * size.0) * 4;
+                let steps = i32::from_ne_bytes(step_data[index..index + 4].try_into().unwrap());
+                (steps.unsigned_abs(), ((steps.signum() + 1) / 2) as u32)
+            });
+
+        let step_layer = Layer::new(
+            size,
+            LayerAttributes {
+                layer_name: Some("Steps".into()),
+                ..Default::default()
+            },
+            Encoding {
+                compression: Compression::PXR24,
+                ..Default::default()
+            },
+            step_channels,
+        );
+
+        // Z layer
+        let z_data = self.gpu_data.get_buffer_data(gpu_setup::BufferId::Z)?;
+
+        let z_channels = SpecificChannels::build()
+            .with_channel("x") // real
+            .with_channel("y") // imaginary
+            .with_channel("z") // scale
+            .with_pixel_fn(|loc: Vec2<usize>| {
+                let index = (loc.x() + loc.y() * size.0) * 16;
+                let x = f32::from_ne_bytes(z_data[index..index + 4].try_into().unwrap());
+                let y = f32::from_ne_bytes(z_data[index + 4..index + 8].try_into().unwrap());
+                let scale = f32::from_ne_bytes(z_data[index + 8..index + 12].try_into().unwrap());
+                (x, y, scale)
+            });
+
+        let z_layer = Layer::new(
+            size,
+            LayerAttributes {
+                layer_name: Some("Z".into()),
+                ..Default::default()
+            },
+            Encoding {
+                compression: Compression::PIZ,
+                ..Default::default()
+            },
+            z_channels,
+        );
+
+        // dz layer
+        let dz_data = self.gpu_data.get_buffer_data(gpu_setup::BufferId::Dz)?;
+
+        let dz_channels = SpecificChannels::build()
+            .with_channel("x") // real
+            .with_channel("y") // imaginary
+            .with_channel("z") // scale
+            .with_pixel_fn(|loc: Vec2<usize>| {
+                let index = (loc.x() + loc.y() * size.0) * 16;
+                let x = f32::from_ne_bytes(dz_data[index..index + 4].try_into().unwrap());
+                let y = f32::from_ne_bytes(dz_data[index + 4..index + 8].try_into().unwrap());
+                let scale = f32::from_ne_bytes(dz_data[index + 8..index + 12].try_into().unwrap());
+                (x, y, scale)
+            });
+
+        let dz_layer = Layer::new(
+            size,
+            LayerAttributes {
+                layer_name: Some("dZ".into()),
+                ..Default::default()
+            },
+            Encoding {
+                compression: Compression::PIZ,
+                ..Default::default()
+            },
+            dz_channels,
+        );
+
+        // orbit layer
+        let orbit_data = self.gpu_data.get_buffer_data(gpu_setup::BufferId::Orbit)?;
+
+        let orbit_channels = SpecificChannels::build()
+            .with_channel("x")
+            .with_channel("y")
+            .with_channel("z")
+            .with_channel("w")
+            .with_pixel_fn(|loc: Vec2<usize>| {
+                let index = (loc.x() + loc.y() * size.0) * 16;
+                let x = f32::from_ne_bytes(orbit_data[index..index + 4].try_into().unwrap());
+                let y = f32::from_ne_bytes(orbit_data[index + 4..index + 8].try_into().unwrap());
+                let z = f32::from_ne_bytes(orbit_data[index + 8..index + 12].try_into().unwrap());
+                let w = f32::from_ne_bytes(orbit_data[index + 12..index + 16].try_into().unwrap());
+                (x, y, z, w)
+            });
+
+        let orbit_layer = Layer::new(
+            size,
+            LayerAttributes {
+                layer_name: Some("Orbit".into()),
+                ..Default::default()
+            },
+            Encoding {
+                compression: Compression::PIZ,
+                ..Default::default()
+            },
+            orbit_channels,
+        );
+
+        // stripe layer
+        let stripe_data = self.gpu_data.get_buffer_data(gpu_setup::BufferId::Stripe)?;
+
+        let stripe_channels = SpecificChannels::build()
+            .with_channel("x")
+            .with_channel("y")
+            .with_channel("z")
+            .with_channel("w")
+            .with_pixel_fn(|loc: Vec2<usize>| {
+                let index = (loc.x() + loc.y() * size.0) * 16;
+                let x = f32::from_ne_bytes(stripe_data[index..index + 4].try_into().unwrap());
+                let y = f32::from_ne_bytes(stripe_data[index + 4..index + 8].try_into().unwrap());
+                let z = f32::from_ne_bytes(stripe_data[index + 8..index + 12].try_into().unwrap());
+                let w = f32::from_ne_bytes(stripe_data[index + 12..index + 16].try_into().unwrap());
+                (x, y, z, w)
+            });
+
+        let stripe_layer = Layer::new(
+            size,
+            LayerAttributes {
+                layer_name: Some("Stripe".into()),
+                ..Default::default()
+            },
+            Encoding {
+                compression: Compression::PIZ,
+                ..Default::default()
+            },
+            stripe_channels,
+        );
+
+        Image::empty(ImageAttributes::with_size(size))
+            .with_layer(color_layer)
+            .with_layer(step_layer)
+            .with_layer(z_layer)
+            .with_layer(dz_layer)
+            .with_layer(orbit_layer)
+            .with_layer(stripe_layer)
+            .write()
+            .on_progress(|progress| {
+                status_callback(ProgressUpdate::partial("Writing EXR file", progress))
+            })
+            .to_file(path)?;
+
+        Ok(())
     }
 }
 

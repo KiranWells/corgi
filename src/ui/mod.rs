@@ -78,8 +78,17 @@ struct StyleTabState {
 }
 #[derive(Debug)]
 struct RenderTabState {
+    exr_mode: bool,
+    state: RenderState,
     rendered_view: View,
     save_path: PathBuf,
+}
+#[derive(Debug, PartialEq)]
+enum RenderState {
+    Init,
+    Rendering,
+    Cancelled,
+    Rendered,
 }
 
 /// The main UI state struct.
@@ -95,7 +104,6 @@ pub struct CorgiUI {
     setting_probe: bool,
     show_camera: bool,
     show_settings: bool,
-    rendering_output: bool,
     /// Whether the viewport should load the current image from
     /// the rendering thread into the UI view.
     pub swap: bool,
@@ -145,6 +153,8 @@ impl CorgiUI {
                 ),
             },
             render_state: RenderTabState {
+                exr_mode: false,
+                state: RenderState::Init,
                 rendered_view: image.view(),
                 save_path: context.cache().previous_paths.image.clone(),
             },
@@ -161,7 +171,6 @@ impl CorgiUI {
             preset_name: "New Preset".into(),
             preset_group: "New Group".into(),
             new_group_active: false,
-            rendering_output: false,
             status: Status::default(),
             command_channel,
         }
@@ -572,6 +581,41 @@ impl CorgiUI {
         cancel: impl FnOnce(),
         tui: &mut egui_taffy::Tui,
     ) {
+        tui.style(Style::row()).add(|tui| {
+            tui.egui_style_mut().visuals.widgets.inactive.corner_radius = CornerRadius::ZERO;
+            tui.egui_style_mut().visuals.widgets.active.corner_radius = CornerRadius::ZERO;
+            tui.egui_style_mut().visuals.widgets.hovered.corner_radius = CornerRadius::ZERO;
+            if tui
+                .style(Style::grow().center())
+                .selectable(!self.render_state.exr_mode, |tui| {
+                    let fill = if !self.render_state.exr_mode {
+                        tui.egui_ui().style().visuals.window_fill
+                    } else {
+                        tui.egui_ui().visuals().text_color()
+                    };
+                    tui.label(egui::RichText::new("Save Image").heading().color(fill));
+                })
+                .clicked()
+            {
+                self.render_state.exr_mode = false;
+                self.render_state.state = RenderState::Init;
+            }
+            if tui
+                .style(Style::grow().center())
+                .selectable(self.render_state.exr_mode, |tui| {
+                    let fill = if self.render_state.exr_mode {
+                        tui.egui_ui().style().visuals.window_fill
+                    } else {
+                        tui.egui_ui().visuals().text_color()
+                    };
+                    tui.label(egui::RichText::new("Export Data").heading().color(fill));
+                })
+                .clicked()
+            {
+                self.render_state.exr_mode = true;
+                self.render_state.state = RenderState::Init;
+            }
+        });
         section(tui, "Image Settings", true, |tui| {
             input_with_label(
                 tui,
@@ -636,10 +680,14 @@ impl CorgiUI {
                     self.render_state.save_path = path;
                 }
             });
-            let mut compression_params = context.cache().compression_params;
-            compression_params.render_edit_ui(ctx, tui);
-            if context.cache().compression_params != compression_params {
-                context.cache_mut().compression_params = compression_params;
+            if self.render_state.exr_mode {
+                // TODO: add layer selection
+            } else {
+                let mut compression_params = context.cache().compression_params;
+                compression_params.render_edit_ui(ctx, tui);
+                if context.cache().compression_params != compression_params {
+                    context.cache_mut().compression_params = compression_params;
+                }
             }
         });
         let item_spacing = tui.egui_ui().spacing().item_spacing;
@@ -649,38 +697,62 @@ impl CorgiUI {
                 .gap(item_spacing.y * 2.0),
         )
         .add(|tui| {
-            if !self.rendering_output {
+            if self.render_state.state != RenderState::Rendering {
                 if tui.ui_add(Button::new("Render")).clicked() {
-                    let image = self.root_spec.clone();
+                    let mut image = self.root_spec.clone();
+                    if self.render_state.exr_mode {
+                        image.optimization_level = OptLevel::CacheOptimized;
+                    }
                     let _ = self
                         .command_channel
                         .send(ImageGenCommand::Render(RendererId::Render, Box::new(image)));
-                    self.rendering_output = true;
+                    self.render_state.state = RenderState::Rendering;
                 }
             } else if tui.ui_add(Button::new("Cancel Render")).clicked() {
-                self.rendering_output = false;
+                self.render_state.state = RenderState::Cancelled;
                 cancel();
             }
-            if tui.ui_add(Button::new("Save to file")).clicked()
-                && let Some(path) = rfd::FileDialog::new()
-                    .set_directory(&self.render_state.save_path)
-                    .add_filter(
-                        "image with metadata",
-                        &["avif", "jpg", "jpeg", "webp", "png"],
-                    )
-                    .add_filter("image without metadata", &["gif", "qoi", "tiff", "exr"])
-                    .set_file_name(format!("fractal.{}", context.cache().default_image_type))
-                    .save_file()
+            if tui
+                .enabled_ui(self.render_state.state == RenderState::Rendered)
+                .ui_add(Button::new(if self.render_state.exr_mode {
+                    "Save as EXR"
+                } else {
+                    "Save Image"
+                }))
+                .clicked()
             {
-                if let Some(ext) = path.extension().and_then(OsStr::to_str) {
-                    context.cache_mut().default_image_type = ext.to_owned();
+                let mut dialog = rfd::FileDialog::new().set_directory(&self.render_state.save_path);
+                if self.render_state.exr_mode {
+                    dialog = dialog.add_filter("EXR", &["exr"]);
+                } else {
+                    dialog = dialog
+                        .add_filter(
+                            "image with metadata",
+                            &["avif", "jpg", "jpeg", "webp", "png"],
+                        )
+                        .add_filter("image without metadata", &["gif", "qoi", "tiff"])
                 }
-                let _ = self.command_channel.send(ImageGenCommand::SaveToFile(
-                    RendererId::Render,
-                    path.clone(),
-                    context.cache().compression_params,
-                    None,
-                ));
+                let extension = if self.render_state.exr_mode {
+                    "exr"
+                } else {
+                    &context.cache().default_image_type
+                };
+                if let Some(path) = dialog
+                    .set_file_name(format!("fractal.{}", extension))
+                    .save_file()
+                {
+                    if let Some(ext) = path.extension().and_then(OsStr::to_str)
+                        && !self.render_state.exr_mode
+                    {
+                        context.cache_mut().default_image_type = ext.to_owned();
+                    }
+                    let _ = self.command_channel.send(ImageGenCommand::SaveToFile(
+                        RendererId::Render,
+                        path.clone(),
+                        context.cache().compression_params,
+                        None,
+                    ));
+                }
             }
         });
     }
@@ -1219,7 +1291,7 @@ impl CorgiUI {
                 view.height = self.current_view.height;
                 self.current_view = view;
                 self.current_view.zoom_to_fit(&viewport);
-                self.rendering_output = false;
+                self.render_state.state = RenderState::Rendered;
             }
             RendererId::Thumbnail => {}
         }

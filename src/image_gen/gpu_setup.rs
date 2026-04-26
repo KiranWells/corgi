@@ -12,8 +12,8 @@ use std::sync::{Arc, mpsc};
 
 use parking_lot::RwLock;
 use wgpu::{
-    self, BindGroup, BindGroupLayoutEntry, Buffer, ComputePipeline, Device, ExperimentalFeatures,
-    PipelineLayout, Queue, ShaderModule, Texture, TextureView,
+    self, BindGroup, BindGroupLayoutEntry, Buffer, BufferAsyncError, ComputePipeline, Device,
+    ExperimentalFeatures, PipelineLayout, Queue, ShaderModule, Texture, TextureView,
 };
 
 use crate::image_gen::shader_types::{
@@ -98,6 +98,14 @@ enum BuffType {
     HostReadable,
     /// A uniform buffer that can be written by the host.
     Uniform,
+}
+
+pub enum BufferId {
+    Step,
+    Orbit,
+    Stripe,
+    Z,
+    Dz,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -326,10 +334,10 @@ impl GPUData {
     }
 
     /// Load the data from the currently rendered image from the GPU to the CPU.
-    pub fn get_texture_data(&self) -> Option<Vec<u8>> {
+    pub fn get_texture_data(&self) -> Result<Vec<u8>, BufferAsyncError> {
         let (send, recv) = mpsc::channel();
         let ext = self.texture.read().size();
-        let padded_width = ((ext.width * 4) as f32 / 256.0).ceil() as usize * 256;
+        let padded_width = (ext.width * 4).div_ceil(256) as usize * 256;
         let tmp_buffer = Buffers::create_buffer::<u8>(
             &self.shared.device,
             padded_width * ext.height as usize,
@@ -360,21 +368,46 @@ impl GPUData {
             timeout: None,
         });
         match recv.recv() {
-            Ok(Ok(())) => {
-                let mut out = Vec::new();
-                for chunk in tmp_buffer.slice(..).get_mapped_range().chunks(padded_width) {
-                    out.extend_from_slice(&chunk[..(ext.width * 4) as usize]);
-                }
-                Some(out)
-            }
-            Ok(Err(err)) => {
-                tracing::error!("Error: {err:?}");
-                None
-            }
-            Err(err) => {
-                tracing::error!("Error: {err:?}");
-                None
-            }
+            Ok(Ok(())) => Ok(tmp_buffer.get_mapped_range(..).to_vec()),
+            Ok(Err(err)) => Err(err),
+            // we always send exactly one message
+            Err(_recv_err) => unreachable!(),
+        }
+    }
+
+    /// Load the data from the currently rendered image from the GPU to the CPU.
+    pub fn get_buffer_data(&self, id: BufferId) -> Result<Vec<u8>, BufferAsyncError> {
+        let (send, recv) = mpsc::channel();
+        let buffer = match id {
+            BufferId::Step => &self.buffers.step,
+            BufferId::Orbit => &self.buffers.orbits,
+            BufferId::Stripe => &self.buffers.stripes,
+            BufferId::Z => &self.buffers.delta_n,
+            BufferId::Dz => &self.buffers.delta_prime,
+        };
+        let tmp_buffer = Buffers::create_buffer::<u8>(
+            &self.shared.device,
+            buffer.size() as usize,
+            BuffType::HostReadable,
+        );
+        let mut encoder = self
+            .shared
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        encoder.copy_buffer_to_buffer(buffer, 0, &tmp_buffer, 0, None);
+        encoder.map_buffer_on_submit(&tmp_buffer, wgpu::MapMode::Read, .., move |res| {
+            let _ = send.send(res);
+        });
+        let si = self.shared.queue.submit([encoder.finish()]);
+        let _ = self.shared.device.poll(wgpu::PollType::Wait {
+            submission_index: Some(si),
+            timeout: None,
+        });
+        match recv.recv() {
+            Ok(Ok(())) => Ok(tmp_buffer.get_mapped_range(..).to_vec()),
+            Ok(Err(err)) => Err(err),
+            // we always send exactly one message
+            Err(_recv_err) => unreachable!(),
         }
     }
 }
@@ -406,7 +439,7 @@ impl Buffers {
             label: None,
             size: (size * core::mem::size_of::<T>()) as u64,
             usage: match ty {
-                ShaderOnly => wgpu::BufferUsages::STORAGE,
+                ShaderOnly => wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
                 HostWritable => wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                 HostReadable => wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                 Uniform => wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,

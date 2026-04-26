@@ -28,8 +28,10 @@ required-features = ["binary-deps"]
 
 [dependencies]
 bytemuck = { version = "1.23", features = ["derive"] }
+documented = "0.9.2"
 ecolor = { version = "0.33.0", features = ["serde", "bytemuck"] }
 emath = "0.33.3"
+exr = "1.74.0"
 image = { version = "0.25", features = ["avif-native"] }
 little_exif = "0.6.23"
 parking_lot = "0.12.5"
@@ -52,7 +54,6 @@ egui_taffy = { version = "0.10.0", optional = true }
 rfd = { version = "0.15.4", features = ["xdg-portal"], optional = true }
 taffy = { version = "0.7.7", optional = true }
 tracing-subscriber = { version = "0.3", optional = true, features = ["env-filter"] }
-documented = "0.9.2"
 egui_extras = { version = "0.33.3", optional = true, features = ["file", "image"] }
 nanoid = { version = "0.5.0", optional = true }
 rand = { version = "0.10.1", optional = true }
@@ -67,3 +68,5 @@ wesl = "0.3.2"
 [profile.dev.package."*"]
 opt-level = 3
 
+[profile.release]
+lto = true
