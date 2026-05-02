@@ -46,6 +46,7 @@ pub mod debouncer;
 mod preset_library;
 mod preview_resources;
 mod settings;
+mod shortcuts;
 mod utils;
 
 pub use preview_resources::{PreviewRenderResources, ThumbnailRenderResources};
@@ -91,6 +92,21 @@ enum RenderState {
     Rendered,
 }
 
+#[derive(Debug)]
+struct ActiveFile {
+    path: PathBuf,
+    last_saved_spec: ImgSpec,
+}
+
+#[expect(clippy::type_complexity)]
+struct DynCallback(Box<dyn FnOnce(&mut CorgiUI, &mut crate::Context, &egui::Context)>);
+
+impl std::fmt::Debug for DynCallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Dyncallback")
+    }
+}
+
 /// The main UI state struct.
 #[derive(Debug)]
 pub struct CorgiUI {
@@ -113,6 +129,8 @@ pub struct CorgiUI {
     preset_name: String,
     preset_group: String,
     new_group_active: bool,
+    active_file: Option<ActiveFile>,
+    confirm: Option<(String, Vec<(String, DynCallback)>)>,
 }
 
 impl CorgiUI {
@@ -120,6 +138,7 @@ impl CorgiUI {
     pub fn new(
         context: &crate::Context,
         image: ImgSpec,
+        input_path: Option<PathBuf>,
         command_channel: mpsc::Sender<ImageGenCommand>,
     ) -> Self {
         let dirs = corgi_project_dirs();
@@ -135,6 +154,12 @@ impl CorgiUI {
             dirs.config_dir().join("presets"),
             install_dir.join("presets"),
         ];
+
+        let active_file = if let Some(path) = input_path {
+            ActiveFile::try_new(image.clone(), path)
+        } else {
+            None
+        };
         Self {
             tab: UITab::Explore,
             explore_state: ExploreTabState {
@@ -173,6 +198,8 @@ impl CorgiUI {
             new_group_active: false,
             status: Status::default(),
             command_channel,
+            active_file,
+            confirm: None,
         }
     }
 
@@ -189,7 +216,7 @@ impl CorgiUI {
             .show(ctx, |ui| {
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
 
-                self.menu(context, ui);
+                self.menu(context, ctx, ui);
                 ScrollArea::vertical().show(ui, |ui| {
                     tui(ui, ui.id().with("side"))
                         .reserve_available_width()
@@ -208,7 +235,7 @@ impl CorgiUI {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 self.viewport(ui, ctx);
                 self.render_widgets(ui, ctx, context);
-                self.footer(ui)
+                self.footer(ui);
             });
 
         let style = ctx.style().clone();
@@ -306,10 +333,79 @@ impl CorgiUI {
                 });
             });
 
+        if ctx.input(|i| i.viewport().close_requested()) {
+            // check if we need to save
+            if self
+                .active_file
+                .as_ref()
+                .is_none_or(|af| af.last_saved_spec != self.root_spec)
+            {
+                self.confirm = Some((
+                    format!(
+                        "Save {}?",
+                        self.active_file
+                            .as_ref()
+                            .map(|af| af.path.to_string_lossy().to_string())
+                            .unwrap_or("unsaved settings".into())
+                    ),
+                    vec![
+                        (
+                            "Save".into(),
+                            DynCallback(Box::new(|ui_state, context, ctx| {
+                                if ui_state.save(context) {
+                                    ui_state.force_close(ctx);
+                                }
+                            })),
+                        ),
+                        (
+                            "Don't Save".into(),
+                            DynCallback(Box::new(|ui_state, _, ctx| {
+                                ui_state.force_close(ctx);
+                            })),
+                        ),
+                        ("Cancel".into(), DynCallback(Box::new(|_, _, _| {}))),
+                    ],
+                ));
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            }
+        }
+
+        if let Some(mut confirm) = self.confirm.take() {
+            let style = ctx.style().clone();
+            egui::Window::new(&confirm.0)
+                .collapsible(false)
+                .default_pos(res.response.rect.center())
+                .pivot(egui::Align2::CENTER_TOP)
+                .show(ctx, |ui| {
+                    ui.set_style(style);
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+
+                    ui.horizontal(|ui| {
+                        let mut selection = None;
+                        for (index, (label, _)) in confirm.1.iter().enumerate() {
+                            if ui.button(label).clicked() {
+                                selection = Some(index)
+                            }
+                        }
+                        if let Some(selection) = selection {
+                            confirm.1.remove(selection).1.0(self, context, ctx);
+                        } else {
+                            self.confirm = Some(confirm);
+                        }
+                    });
+                });
+        }
+        self.handle_shortcuts(context, ctx);
+
         self.swap = false;
     }
 
-    fn menu(&mut self, context: &mut crate::config::Context, ui: &mut egui::Ui) {
+    fn menu(
+        &mut self,
+        context: &mut crate::config::Context,
+        ctx: &egui::Context,
+        ui: &mut egui::Ui,
+    ) {
         let y = ui.style_mut().spacing.item_spacing.y;
         ui.style_mut().spacing.item_spacing.y = 0.0;
         // Top bar
@@ -324,7 +420,6 @@ impl CorgiUI {
                 style.override_text_style = Some(TextStyle::Heading);
             }
             {
-                let this = &mut *self;
                 let spacing = ui.spacing().button_padding.y;
                 MenuButton::from_button(Button::new(icons::ICON_MENU)).ui(ui, |ui| {
                     {
@@ -338,51 +433,61 @@ impl CorgiUI {
                             CornerRadius::same(spacing as u8);
                         style.spacing.button_padding = Vec2::splat(spacing);
                     }
-                    if ui.add(Button::new("Save Image Settings")).clicked()
-                        && let Some(path) = rfd::FileDialog::new()
-                            .set_directory(context.cache().previous_paths.settings.clone())
-                            .set_file_name("saved_fractal.corg")
-                            .add_filter("corg", &["corg"])
-                            .save_file()
+
+                    if ui
+                        .add(
+                            Button::new(if self.active_file.is_some() {
+                                "Save"
+                            } else {
+                                "Save…"
+                            })
+                            .shortcut_text(ui.ctx().format_shortcut(&shortcuts::SAVE)),
+                        )
+                        .clicked()
                     {
-                        if let Some(dir) = path.parent() {
-                            context.cache_mut().previous_paths.settings = dir.to_owned();
-                        }
-                        // write to file
-                        match this.root_spec.save(&path) {
-                            Err(err) => {
-                                tracing::error!("Failed to save image settings: {err:?}");
-                                this.status.message =
-                                    format!("Failed to save image settings: {err:?}")
-                            }
-                            Ok(_) => this.status.message = "Saved settings".to_string(),
-                        }
+                        self.save(context);
                     }
-                    if ui.add(Button::new("Load Image Settings")).clicked()
-                        && let Some(path) = rfd::FileDialog::new()
-                            .set_directory(context.cache().previous_paths.settings.clone())
-                            .add_filter(
-                                "settings file or image with metadata",
-                                &["corg", "json", "avif", "jpg", "jpeg", "webp", "png"],
-                            )
-                            .pick_file()
+                    if ui
+                        .add(
+                            Button::new("Save As…")
+                                .shortcut_text(ui.ctx().format_shortcut(&shortcuts::SAVE_AS)),
+                        )
+                        .clicked()
                     {
-                        if let Some(dir) = path.parent() {
-                            context.cache_mut().previous_paths.settings = dir.to_owned();
-                        }
-                        match ImgSpec::load(&path) {
-                            Ok(image) => {
-                                this.root_spec = image;
-                            }
-                            Err(err) => {
-                                tracing::error!("Failed to load image settings `{path:?}`: {err}");
-                                this.status.message =
-                                    format!("Failed to load image settings: {err:?}")
-                            }
-                        }
+                        self.save_as(context);
                     }
+                    if ui
+                        .add(
+                            Button::new("Open…")
+                                .shortcut_text(ui.ctx().format_shortcut(&shortcuts::OPEN)),
+                        )
+                        .clicked()
+                    {
+                        self.open(context);
+                    }
+                    ui.separator();
                     if ui.add(Button::new("Settings")).clicked() {
-                        this.show_settings = true;
+                        self.show_settings = true;
+                    }
+                    ui.separator();
+                    if ui
+                        .add(
+                            Button::new(
+                                if self
+                                    .active_file
+                                    .as_ref()
+                                    .is_some_and(|af| af.last_saved_spec == self.root_spec)
+                                {
+                                    "Exit"
+                                } else {
+                                    "Exit…"
+                                },
+                            )
+                            .shortcut_text(ui.ctx().format_shortcut(&shortcuts::CLOSE)),
+                        )
+                        .clicked()
+                    {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 });
             };
@@ -979,7 +1084,7 @@ impl CorgiUI {
         }
     }
 
-    fn footer(&mut self, ui: &mut egui::Ui) -> egui::InnerResponse<egui::Response> {
+    fn footer(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_centered(|ui| {
             ui.scope_builder(
                 UiBuilder::new().max_rect(
@@ -995,8 +1100,20 @@ impl CorgiUI {
                 },
             );
             ui.separator();
-            ui.label(&self.status.message)
-        })
+            ui.label(&self.status.message);
+            ui.separator();
+            if let Some(af) = self.active_file.as_ref() {
+                ui.label(format!(
+                    "Editing {}{}",
+                    if af.last_saved_spec == self.root_spec {
+                        ""
+                    } else {
+                        "* "
+                    },
+                    af.path.file_name().unwrap_or_default().to_string_lossy()
+                ));
+            }
+        });
     }
 
     fn save_preset_window(&mut self, context: &mut crate::config::Context, ui: &mut egui::Ui) {
@@ -1302,6 +1419,191 @@ impl CorgiUI {
             UITab::Explore => RendererId::Explore,
             UITab::Style => RendererId::Style,
             UITab::Render => RendererId::Render,
+        }
+    }
+
+    fn save(&mut self, context: &mut crate::Context) -> bool {
+        let path = if let Some(af) = self.active_file.as_ref() {
+            af.path.clone()
+        } else if let Some(path) = rfd::FileDialog::new()
+            .set_directory(context.cache().previous_paths.settings.clone())
+            .set_file_name("saved_fractal.corg")
+            .add_filter("corg", &["corg"])
+            .save_file()
+        {
+            path
+        } else {
+            self.status.message = "Save cancelled".into();
+            self.status.progress = None;
+            return false;
+        };
+        if let Err(err) = self.root_spec.save(&path) {
+            tracing::error!("Failed to save image settings: {err:?}");
+            self.status.message = format!("Failed to save image settings: {err}");
+            self.status.progress = None;
+            return false;
+        } else {
+            self.status.message = format!("Saved {}", path.as_os_str().to_string_lossy());
+            self.status.progress = None;
+            if let Some(dir) = path.parent() {
+                context.cache_mut().previous_paths.settings = dir.to_owned();
+            }
+            self.active_file = Some(ActiveFile {
+                path,
+                last_saved_spec: self.root_spec.clone(),
+            });
+        }
+        true
+    }
+
+    fn save_as(&mut self, context: &mut crate::Context) {
+        let (starting_path, starting_filename) = if let Some(af) = &self.active_file
+            && let Some(parent) = af
+                .path
+                .canonicalize()
+                .ok()
+                .as_deref()
+                .and_then(Path::parent)
+                .map(Path::to_path_buf)
+            && let Some(file_name) = af.path.file_name().and_then(OsStr::to_str)
+        {
+            (parent, file_name)
+        } else {
+            (
+                context.cache().previous_paths.settings.clone(),
+                "saved_fractal.corg",
+            )
+        };
+        if let Some(path) = rfd::FileDialog::new()
+            .set_directory(starting_path)
+            .set_file_name(starting_filename)
+            .add_filter("corg", &["corg"])
+            .save_file()
+        {
+            if let Err(err) = self.root_spec.save(&path) {
+                self.active_file = Some(ActiveFile {
+                    path,
+                    last_saved_spec: self.root_spec.clone(),
+                });
+                self.status.message = format!("Failed to save: {err}");
+                self.status.progress = None;
+            } else {
+                self.status.message = format!("Saved {}", path.as_os_str().to_string_lossy());
+                self.status.progress = None;
+            }
+            return;
+        }
+        self.status.message = "Save as cancelled".into();
+        self.status.progress = None;
+    }
+
+    fn open(&mut self, context: &mut crate::Context) {
+        let (starting_path, _starting_filename) = if let Some(af) = &self.active_file
+            && let Some(parent) = af
+                .path
+                .canonicalize()
+                .ok()
+                .as_deref()
+                .and_then(Path::parent)
+                .map(Path::to_path_buf)
+            && let Some(file_name) = af.path.file_name().and_then(OsStr::to_str)
+        {
+            (parent, file_name)
+        } else {
+            (
+                context.cache().previous_paths.settings.clone(),
+                "saved_fractal.corg",
+            )
+        };
+        if let Some(path) = rfd::FileDialog::new()
+            .set_directory(starting_path)
+            .add_filter(
+                "settings file or image with metadata",
+                &["corg", "json", "avif", "jpg", "jpeg", "webp", "png"],
+            )
+            .pick_file()
+        {
+            if let Some(dir) = path.parent() {
+                context.cache_mut().previous_paths.settings = dir.to_owned();
+            }
+            match ImgSpec::load(&path) {
+                Ok(image) => {
+                    self.status.message = format!(
+                        "Opened {}",
+                        path.file_name().unwrap_or_default().to_string_lossy()
+                    );
+                    self.status.progress = None;
+                    self.root_spec = image.clone();
+                    self.active_file = ActiveFile::try_new(image, path);
+                }
+                Err(err) => {
+                    tracing::error!("Failed to load image settings `{path:?}`: {err}");
+                    self.status.message = format!("Failed to load image settings: {err:?}");
+                    self.status.progress = None;
+                }
+            }
+        } else {
+            self.status.message = "Open cancelled".into();
+            self.status.progress = None;
+        }
+    }
+
+    fn force_close(&mut self, ctx: &egui::Context) {
+        self.active_file = Some(ActiveFile {
+            path: PathBuf::default(),
+            last_saved_spec: self.root_spec.clone(),
+        });
+        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+
+    fn handle_shortcuts(&mut self, context: &mut crate::Context, ctx: &eframe::egui::Context) {
+        // We collect the pressed shortcut here to avoid running the action within input_mut -
+        // calling ctx within will lead to a deadlock as it is already locked by input_mut.
+        let mut pressed_shortcut = None;
+        ctx.input_mut(|input| {
+            for shortcut in shortcuts::ALL {
+                if input.consume_shortcut(shortcut) {
+                    pressed_shortcut = Some(*shortcut);
+                    return;
+                }
+            }
+        });
+        match pressed_shortcut {
+            Some(x) if x == shortcuts::SAVE => {
+                self.save(context);
+            }
+            Some(x) if x == shortcuts::SAVE_AS => {
+                self.save_as(context);
+            }
+            Some(x) if x == shortcuts::OPEN => {
+                self.open(context);
+            }
+            Some(x) if x == shortcuts::CLOSE => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            Some(x) if x == shortcuts::FORCE_CLOSE => {
+                self.force_close(ctx);
+            }
+            Some(_) => unreachable!(),
+            None => {}
+        }
+    }
+}
+
+impl ActiveFile {
+    fn try_new(image: ImgSpec, path: PathBuf) -> Option<ActiveFile> {
+        if path.exists()
+            && path.metadata().is_ok_and(|m| !m.permissions().readonly())
+            && path
+                .extension()
+                .is_some_and(|ext| ["corg", "json"].contains(&ext.to_str().unwrap_or_default()))
+        {
+            Some(ActiveFile {
+                path,
+                last_saved_spec: image,
+            })
+        } else {
+            None
         }
     }
 }

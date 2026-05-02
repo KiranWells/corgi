@@ -201,7 +201,12 @@ impl CorgiApp {
             &context,
         );
         let extents = initial_image.extents();
-        let ui_state = CorgiUI::new(&context, initial_image, ui_send.clone());
+        let ui_state = CorgiUI::new(
+            &context,
+            initial_image,
+            cli_options.settings_file.clone(),
+            ui_send.clone(),
+        );
 
         wgpu.renderer
             .write()
