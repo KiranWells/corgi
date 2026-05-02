@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 pub mod app;
+pub mod app_log;
 pub mod config;
 pub mod ui;
 pub mod worker;
@@ -22,6 +23,7 @@ use tracing_subscriber::prelude::*;
 use tracing_subscriber::{EnvFilter, fmt};
 
 use crate::app::{CorgiApp, CorgiCliOptions};
+use crate::app_log::AppSubscriber;
 use crate::config::{Config, Context, Theme};
 
 fn main() -> Result<()> {
@@ -30,6 +32,7 @@ fn main() -> Result<()> {
     tracing_subscriber::registry()
         .with(fmt::layer())
         .with(EnvFilter::from_env("CORGI_LOG_LEVEL"))
+        .with(AppSubscriber {})
         .init();
     color_eyre::install()?;
 
