@@ -50,7 +50,7 @@ pub struct Light {
     padding: f32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, DocumentedFieldsOpt)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, DocumentedFieldsOpt)]
 pub struct Layer {
     /// A unique ID used to ensure consistent UI state tracking. This should always be initialized with [`next_layer_id`]
     #[serde(skip)]
@@ -61,6 +61,12 @@ pub struct Layer {
     pub strength: f32,
     /// An extra parameter value for the layer. The purpose varies for each type.
     pub param: f32,
+}
+
+impl PartialEq for Layer {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind && self.strength == other.strength && self.param == other.param
+    }
 }
 
 impl Default for Layer {

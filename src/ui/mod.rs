@@ -425,6 +425,7 @@ impl CorgiUI {
                 .active_file
                 .as_ref()
                 .is_none_or(|af| af.last_saved_spec != self.root_spec)
+                && self.root_spec != ImgSpec::default()
             {
                 self.confirm = Some((
                     format!(
@@ -563,6 +564,7 @@ impl CorgiUI {
                                     .active_file
                                     .as_ref()
                                     .is_some_and(|af| af.last_saved_spec == self.root_spec)
+                                    || self.root_spec == ImgSpec::default()
                                 {
                                     "Exit"
                                 } else {
