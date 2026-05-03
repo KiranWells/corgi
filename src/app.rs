@@ -11,6 +11,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
+use color_eyre::eyre::eyre;
 use corgi_lib::image_gen::{ImageTimings, ProgressUpdate};
 use corgi_lib::types::serde::SafeSaveLoad;
 use corgi_lib::types::{ImgSpec, View};
@@ -187,7 +188,8 @@ impl CorgiApp {
         egui_extras::install_image_loaders(ctx);
 
         if let Some(image_file) = &cli_options.settings_file {
-            initial_image = ImgSpec::load(image_file)?
+            initial_image = ImgSpec::load(image_file)
+                .map_err(|err| eyre!("Cannot load {}: {err}", image_file.to_string_lossy()))?
         }
 
         let mut worker_state = WorkerState::new(
@@ -219,7 +221,7 @@ impl CorgiApp {
                 worker_state.texture(RendererId::Render),
                 (extents.width, extents.height),
                 (output_image.width, output_image.height),
-            )?);
+            ));
         wgpu.renderer
             .write()
             .callback_resources
@@ -231,7 +233,7 @@ impl CorgiApp {
                     context.config().thumbnail_size,
                     context.config().thumbnail_size,
                 ),
-            )?);
+            ));
         let handle = thread::spawn(move || {
             worker_state.run();
         });
@@ -282,7 +284,7 @@ impl eframe::App for CorgiApp {
             self.cancel_worker
                 .store(true, std::sync::atomic::Ordering::Relaxed)
         });
-        if self.ui_state.has_active_viewport() {
+        if self.ui_state.has_active_viewport() && self.worker_handle.is_some() {
             let image = self.ui_state.image();
             match self
                 .debouncers
@@ -300,8 +302,9 @@ impl eframe::App for CorgiApp {
                     self.cancel_worker
                         .store(true, std::sync::atomic::Ordering::Relaxed);
 
-                    if let Err(err) = self.ui_state.send_render() {
-                        tracing::warn!("Failed to send image update: {err}")
+                    if self.ui_state.send_render().is_err() {
+                        tracing::error!("Worker thread has stopped; please restart the app.");
+                        let _ = self.worker_handle.take().unwrap().join();
                     }
                 }
                 PollState::Repoll => {
@@ -326,7 +329,20 @@ impl eframe::App for CorgiApp {
 
     fn on_exit(&mut self) {
         self.context.save();
-        let _ = self.command_channel.send(ImageGenCommand::ShutDown);
-        let _ = self.worker_handle.take().unwrap().join();
+        if self
+            .command_channel
+            .send(ImageGenCommand::ShutDown)
+            .is_err()
+        {
+            tracing::warn!("Worker already exited")
+        }
+        if self
+            .worker_handle
+            .take()
+            .map(|t| t.join().is_err())
+            .is_some_and(|x| x)
+        {
+            tracing::warn!("Error in worker thread; see logs");
+        }
     }
 }

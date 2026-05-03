@@ -189,10 +189,11 @@ fn load_from_toml<T: for<'a> Deserialize<'a> + Default>(path: &PathBuf) -> T {
 }
 
 fn save_to_toml<T: Serialize + Default>(value: &T, path: &PathBuf) {
-    let directory = path.parent().unwrap();
-    let err = fs::create_dir_all(directory);
-    if !directory.exists() {
-        tracing::error!("Failed to create save directory: {directory:?}: {err:?}");
+    if let Some(directory) = path.parent() {
+        let err = fs::create_dir_all(directory);
+        if !directory.exists() {
+            tracing::error!("Failed to create save directory: {directory:?}: {err:?}");
+        }
     }
     let serialized = toml::to_string_pretty(&value);
     match serialized {

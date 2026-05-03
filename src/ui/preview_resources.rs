@@ -1,7 +1,6 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
-use color_eyre::Result;
 use corgi_lib::image_gen::shader_types::Transform;
 use corgi_lib::types::View;
 use eframe::egui::{self};
@@ -48,16 +47,16 @@ impl PreviewRenderResources {
         output_texture: Arc<RwLock<wgpu::Texture>>,
         preview_size: (u32, u32),
         output_size: (u32, u32),
-    ) -> Result<Self> {
-        let preview = SubResources::init(device, format, preview_size)?;
-        let output = SubResources::init(device, format, output_size)?;
-        Ok(Self {
+    ) -> Self {
+        let preview = SubResources::init(device, format, preview_size);
+        let output = SubResources::init(device, format, output_size);
+        Self {
             preview,
             output,
             explore_texture,
             style_texture,
             output_texture,
-        })
+        }
     }
 }
 
@@ -67,19 +66,15 @@ impl ThumbnailRenderResources {
         format: wgpu::TextureFormat,
         texture: Arc<RwLock<wgpu::Texture>>,
         size: (u32, u32),
-    ) -> Result<Self> {
-        let sub = SubResources::init(device, format, size)?;
-        Ok(Self { sub, texture })
+    ) -> Self {
+        let sub = SubResources::init(device, format, size);
+        Self { sub, texture }
     }
 }
 
 impl SubResources {
     /// Create a new set of preview render resources
-    pub fn init(
-        device: &wgpu::Device,
-        format: wgpu::TextureFormat,
-        size: (u32, u32),
-    ) -> Result<Self> {
+    pub fn init(device: &wgpu::Device, format: wgpu::TextureFormat, size: (u32, u32)) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("preview"),
             source: wgpu::ShaderSource::Wgsl(wesl::include_wesl!("preview").into()),
@@ -222,7 +217,7 @@ impl SubResources {
             }],
         });
 
-        Ok(Self {
+        Self {
             format,
             pipeline,
             bind_group,
@@ -230,7 +225,7 @@ impl SubResources {
             uniform_buffer,
             texture,
             size,
-        })
+        }
     }
 
     /// Resize the render resources. This must be called when the render thread resizes,
@@ -241,10 +236,9 @@ impl SubResources {
         queue: &Queue,
         new_size: (u32, u32),
         source_texture: &impl Deref<Target = wgpu::Texture>,
-    ) -> Result<()> {
-        *self = Self::init(device, self.format, new_size)?;
+    ) {
+        *self = Self::init(device, self.format, new_size);
         self.swap(device, queue, source_texture);
-        Ok(())
     }
 
     /// Copies the source texture onto the preview texture
@@ -325,8 +319,7 @@ impl CallbackTrait for PaintCallback {
         let size = (extents.width, extents.height);
         if size != *res.size() {
             // resize the render resources, refreshing the texture reference
-            res.resize(device, queue, size, &texture)
-                .expect("to resize render resources");
+            res.resize(device, queue, size, &texture);
         }
         let transforms = self.rendered_viewport.transforms_from(&self.view);
 
@@ -378,8 +371,7 @@ impl CallbackTrait for ThumbPaintCallback {
         if self.size != *res.sub.size() {
             // resize the render resources, refreshing the texture reference
             res.sub
-                .resize(device, queue, self.size, &res.texture.read())
-                .expect("to resize render resources");
+                .resize(device, queue, self.size, &res.texture.read());
         }
         res.sub.prepare(device, queue, Transform::default());
         Vec::new()

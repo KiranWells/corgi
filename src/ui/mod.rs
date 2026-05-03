@@ -325,8 +325,9 @@ impl CorgiUI {
             });
 
         let style = ctx.style().clone();
+        let mut show_settings = self.show_settings;
         egui::Window::new("Settings")
-            .open(&mut self.show_settings)
+            .open(&mut show_settings)
             .default_pos(res.response.rect.center())
             .pivot(egui::Align2::CENTER_BOTTOM)
             .show(ctx, |ui| {
@@ -348,13 +349,13 @@ impl CorgiUI {
                 if context.config().ui_max_shader_batch_iters
                     != previous_config.ui_max_shader_batch_iters
                 {
-                    let _ = self.command_channel.send(ImageGenCommand::UpdateConstants(
+                    self.send(ImageGenCommand::UpdateConstants(
                         RendererId::Explore,
                         corgi_lib::image_gen::Constants {
                             iter_batch_size: context.config().ui_max_shader_batch_iters,
                         },
                     ));
-                    let _ = self.command_channel.send(ImageGenCommand::UpdateConstants(
+                    self.send(ImageGenCommand::UpdateConstants(
                         RendererId::Style,
                         corgi_lib::image_gen::Constants {
                             iter_batch_size: context.config().ui_max_shader_batch_iters,
@@ -363,7 +364,7 @@ impl CorgiUI {
                 }
                 if context.config().max_shader_batch_iters != previous_config.max_shader_batch_iters
                 {
-                    let _ = self.command_channel.send(ImageGenCommand::UpdateConstants(
+                    self.send(ImageGenCommand::UpdateConstants(
                         RendererId::Render,
                         corgi_lib::image_gen::Constants {
                             iter_batch_size: context.config().max_shader_batch_iters,
@@ -371,6 +372,7 @@ impl CorgiUI {
                     ));
                 }
             });
+        self.show_settings = show_settings;
 
         let style = ctx.style().clone();
         let mut open = self.preset_save_active.is_some();
@@ -624,7 +626,7 @@ impl CorgiUI {
             img.location.zoom = self.root_spec.location.zoom;
             img.width = context.config().thumbnail_size;
             img.height = context.config().thumbnail_size;
-            let _ = self.command_channel.send(ImageGenCommand::Render(
+            self.send(ImageGenCommand::Render(
                 RendererId::Thumbnail,
                 Box::new(img),
             ));
@@ -748,7 +750,7 @@ impl CorgiUI {
             img.location.zoom = self.root_spec.location.zoom;
             img.width = context.config().thumbnail_size;
             img.height = context.config().thumbnail_size;
-            let _ = self.command_channel.send(ImageGenCommand::Render(
+            self.send(ImageGenCommand::Render(
                 RendererId::Thumbnail,
                 Box::new(img),
             ));
@@ -896,9 +898,7 @@ impl CorgiUI {
                     if self.render_state.exr_mode {
                         image.optimization_level = OptLevel::CacheOptimized;
                     }
-                    let _ = self
-                        .command_channel
-                        .send(ImageGenCommand::Render(RendererId::Render, Box::new(image)));
+                    self.send(ImageGenCommand::Render(RendererId::Render, Box::new(image)));
                     self.render_state.state = RenderState::Rendering;
                 }
             } else if tui.ui_add(Button::new("Cancel Render")).clicked() {
@@ -939,7 +939,7 @@ impl CorgiUI {
                     {
                         context.cache_mut().default_image_type = ext.to_owned();
                     }
-                    let _ = self.command_channel.send(ImageGenCommand::SaveToFile(
+                    self.send(ImageGenCommand::SaveToFile(
                         RendererId::Render,
                         path.clone(),
                         context.cache().compression_params,
@@ -1281,15 +1281,23 @@ impl CorgiUI {
                     {
                         match preset_library.create_preset(&self.preset_name, &self.preset_group) {
                             Ok(path) => {
-                                let _ = self.command_channel.send(ImageGenCommand::SaveToFile(
-                                    RendererId::Thumbnail,
-                                    path,
-                                    CompressionParams {
-                                        speed: 1,
-                                        quality: 50,
-                                    },
-                                    Some(self.preset_name.clone()),
-                                ));
+                                if self
+                                    .command_channel
+                                    .send(ImageGenCommand::SaveToFile(
+                                        RendererId::Thumbnail,
+                                        path,
+                                        CompressionParams {
+                                            speed: 1,
+                                            quality: 50,
+                                        },
+                                        Some(self.preset_name.clone()),
+                                    ))
+                                    .is_err()
+                                {
+                                    tracing::error!(
+                                        "Worker thread has stopped; please restart the app."
+                                    );
+                                }
                                 tui.egui_ui().close_kind(egui::UiKind::Window);
                             }
                             Err(err) => tracing::error!("Failed to create preset: {err}"),
@@ -1674,6 +1682,12 @@ impl CorgiUI {
             }
             Some(_) => unreachable!(),
             None => {}
+        }
+    }
+
+    fn send(&self, cmd: ImageGenCommand) {
+        if self.command_channel.send(cmd).is_err() {
+            tracing::error!("Worker thread has stopped; please restart the app.");
         }
     }
 }

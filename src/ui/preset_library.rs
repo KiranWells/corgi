@@ -282,8 +282,9 @@ impl PresetGroup {
                             .write(true)
                             .truncate(true)
                             .open(self.root.join(GROUP_NAME_FILE))
+                            && let Err(err) = name_file.write_all(self.name.as_bytes())
                         {
-                            let _ = name_file.write_all(self.name.as_bytes());
+                            tracing::error!("Failed to write group name file: {err}");
                         }
                     }
                 } else {
@@ -415,6 +416,9 @@ impl LazyPresetThumb {
                 return Ok(thumb);
             }
             Self::Failed(fail) => {
+                if fail.retry_count == 1 {
+                    tracing::warn!("{}", fail.err_msg);
+                }
                 if fail.should_retry() {
                     (fail.retry_count, mem::take(&mut fail.path))
                 } else {
@@ -426,8 +430,11 @@ impl LazyPresetThumb {
         *self = match PresetThumb::new(path.clone()) {
             Ok(thumb) => Self::Loaded(Box::new(thumb)),
             Err(err) => Self::Failed(FailedLoad {
+                err_msg: format!(
+                    "Failed to load preset image '{}': {err}",
+                    path.file_name().unwrap_or_default().to_string_lossy()
+                ),
                 path,
-                err_msg: format!("Failed to load image: {err}"),
                 retry_count: count + 1,
                 last_try_time: Instant::now(),
             }),
@@ -561,7 +568,10 @@ impl PresetThumb {
         let res = ui.add(
             egui::Image::new(format!(
                 "file://{}",
-                self.path.canonicalize().unwrap().to_string_lossy()
+                self.path
+                    .canonicalize()
+                    .unwrap_or_default()
+                    .to_string_lossy()
             ))
             .corner_radius(item_spacing.x),
         );
@@ -597,14 +607,19 @@ impl PresetThumb {
                                         .lost_focus()
                                     {
                                         let mut meta = Metadata::new();
-                                        let description = self.spec.stringify().unwrap();
-
-                                        meta.set_tag(ExifTag::ImageDescription(description));
-                                        // There is no "name" field, so thumbnails use this instead
-                                        meta.set_tag(ExifTag::Make(self.name.clone()));
-                                        meta.set_tag(ExifTag::Software("Corgi".into()));
-                                        if let Err(err) = meta.write_to_file(&self.path) {
-                                            tracing::error!("Failed to save preset name: {err}");
+                                        match self.spec.stringify() {
+                                            Ok(description) => {
+                                                meta.set_tag(ExifTag::ImageDescription(description));
+                                                // There is no "name" field, so thumbnails use this instead
+                                                meta.set_tag(ExifTag::Make(self.name.clone()));
+                                                meta.set_tag(ExifTag::Software("Corgi".into()));
+                                                if let Err(err) = meta.write_to_file(&self.path) {
+                                                    tracing::error!("Failed to save preset name: {err}");
+                                                }
+                                            },
+                                            Err(err) => {
+                                                tracing::warn!("Failed to update metadata; cannot serialize image spec: {err}");
+                                            }
                                         }
                                     }
                                     ui.add_space(ui.available_width());

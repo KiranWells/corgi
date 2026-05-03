@@ -130,7 +130,7 @@ impl WorkerState {
     /// and will run until the given message channel is closed. `status` is used to communicate the
     /// current status of the render process to the main thread.
     pub fn run(&mut self) {
-        while let Ok(msg) = self.command_channel.recv() {
+        'outer: while let Ok(msg) = self.command_channel.recv() {
             self.cancelled
                 .store(false, std::sync::atomic::Ordering::Release);
             let mut render_commands = HashMap::new();
@@ -161,7 +161,7 @@ impl WorkerState {
                     }
                     Ok(ImageGenCommand::ShutDown) => return,
                     Err(mpsc::TryRecvError::Empty) => break,
-                    Err(mpsc::TryRecvError::Disconnected) => return,
+                    Err(mpsc::TryRecvError::Disconnected) => break 'outer,
                 }
             }
             for (id, image) in render_commands {
@@ -192,39 +192,68 @@ impl WorkerState {
                     }
                 }
 
+                let mut send_err = false;
                 let result = self
                     .renderers
                     .get_mut(&id)
                     .unwrap()
                     .render_image(&image, &mut |pu| {
-                        let _ = self.status_channel.send(StatusMessage::Progress(pu));
+                        if self
+                            .status_channel
+                            .send(StatusMessage::Progress(pu))
+                            .is_err()
+                        {
+                            send_err = true;
+                        }
                         self.ctx.request_repaint();
                     });
+                if send_err {
+                    break 'outer;
+                }
                 match result {
                     Ok(timings) => {
-                        let _ = self.status_channel.send(StatusMessage::RenderFinished(
-                            id,
-                            timings,
-                            image.view(),
-                        ));
+                        if self
+                            .status_channel
+                            .send(StatusMessage::RenderFinished(id, timings, image.view()))
+                            .is_err()
+                        {
+                            break 'outer;
+                        }
                     }
                     Err(corgi_lib::image_gen::RenderingError::Cancelled) => {
-                        let _ = self
+                        if self
                             .status_channel
                             .send(StatusMessage::Progress(ProgressUpdate {
                                 message: "Generation Cancelled",
                                 progress: None,
-                            }));
+                            }))
+                            .is_err()
+                        {
+                            break 'outer;
+                        }
                     }
                     Err(err) => {
-                        let _ = self.status_channel.send(StatusMessage::Error(err.into()));
+                        if self
+                            .status_channel
+                            .send(StatusMessage::Error(err.into()))
+                            .is_err()
+                        {
+                            break 'outer;
+                        }
                     }
                 }
                 self.ctx.request_repaint();
             }
             for (id, (path, compression_params, name)) in save_commands {
+                let mut send_err = false;
                 let mut status_callback = |pu| {
-                    let _ = self.status_channel.send(StatusMessage::Progress(pu));
+                    if self
+                        .status_channel
+                        .send(StatusMessage::Progress(pu))
+                        .is_err()
+                    {
+                        send_err = true;
+                    }
                     self.ctx.request_repaint();
                 };
                 let result = if path.extension() == Some(&std::ffi::OsString::from("exr")) {
@@ -241,17 +270,31 @@ impl WorkerState {
                         &mut status_callback,
                     )
                 };
+                if send_err {
+                    break 'outer;
+                }
                 if let Err(err) = result {
-                    let _ = self.status_channel.send(StatusMessage::Error(err.into()));
+                    if self
+                        .status_channel
+                        .send(StatusMessage::Error(err.into()))
+                        .is_err()
+                    {
+                        break 'outer;
+                    }
                 } else {
-                    let _ = self
+                    if self
                         .status_channel
                         .send(StatusMessage::Progress(ProgressUpdate::msg(
                             "Image Save Complete",
-                        )));
+                        )))
+                        .is_err()
+                    {
+                        break 'outer;
+                    }
                 }
             }
         }
+        tracing::warn!("Parent disconnected; worker exiting");
     }
 
     pub fn texture(&self, id: RendererId) -> Arc<RwLock<wgpu::Texture>> {
