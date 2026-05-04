@@ -1,3 +1,6 @@
+use ecolor::Color32;
+use eframe::egui;
+use egui_material_icons::icons;
 use parking_lot::RwLock;
 use tracing::Subscriber;
 use tracing_subscriber::Layer;
@@ -58,4 +61,85 @@ impl<'a> From<&tracing::Event<'a>> for AppLog {
 /// Allows handling the global stored logs. DO NOT log new messages within this scope
 pub fn logs_mut(callback: impl FnOnce(&mut Vec<AppLog>)) {
     callback(&mut LOGS.write());
+}
+
+pub fn logs_ui(ui: &mut egui::Ui, origin_rect: egui::Rect) {
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(origin_rect.shrink(ui.spacing().indent))
+            .layout(egui::Layout {
+                main_dir: egui::Direction::TopDown,
+                main_wrap: false,
+                main_align: egui::Align::Min,
+                main_justify: false,
+                cross_align: egui::Align::Min,
+                cross_justify: false,
+            }),
+        |ui| {
+            logs_mut(|logs| {
+                let mut closed = None;
+                for (i, log) in logs.iter().enumerate() {
+                    egui::Frame::new()
+                        .shadow(egui::Shadow {
+                            offset: [4, 4],
+                            blur: 4,
+                            spread: 4,
+                            color: Color32::from_black_alpha(128),
+                        })
+                        .fill(ui.visuals().window_fill)
+                        .inner_margin(ui.spacing().item_spacing.x * 2.0)
+                        .show(ui, |ui| {
+                            ui.set_height(
+                                ui.text_style_height(&egui::TextStyle::Button) * 2.0
+                                    + ui.spacing().item_spacing.y * 2.0,
+                            );
+                            ui.set_width(ui.spacing().indent * 10.0);
+                            ui.horizontal_centered(|ui| {
+                                ui.label(
+                                    egui::RichText::new(match log.level {
+                                        tracing::Level::ERROR => {
+                                            format!("{} Error", icons::ICON_ERROR)
+                                        }
+                                        tracing::Level::WARN => {
+                                            format!("{} Warning", icons::ICON_WARNING)
+                                        }
+                                        _ => format!("{} Notice", icons::ICON_INFO),
+                                    })
+                                    .color(match log.level {
+                                        tracing::Level::ERROR => ui.visuals().error_fg_color,
+                                        tracing::Level::WARN => ui.visuals().warn_fg_color,
+                                        _ => ui.visuals().text_color(),
+                                    }),
+                                );
+                                ui.add_space(ui.available_width() - ui.available_height());
+                                if ui
+                                    .add(
+                                        egui::Button::new(icons::ICON_CLOSE)
+                                            .frame_when_inactive(false),
+                                    )
+                                    .clicked()
+                                {
+                                    closed = Some(i);
+                                }
+                            });
+                            ui.label(&log.message);
+                        });
+                    // not sure why, but `add_space` does nothing here
+                    ui.label("");
+                }
+                let mut offset = 0;
+                for i in 0..logs.len() {
+                    let i = i - offset;
+                    if logs[i].level != tracing::Level::ERROR
+                        && std::time::Instant::now() - logs[i].time
+                            > std::time::Duration::from_secs(5)
+                        || closed == Some(i)
+                    {
+                        logs.remove(i);
+                        offset += 1;
+                    }
+                }
+            });
+        },
+    );
 }
