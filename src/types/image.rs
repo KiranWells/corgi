@@ -370,7 +370,7 @@ impl View {
 
     /// The aspect ratio of the viewport
     pub fn aspect_ratio(&self) -> f64 {
-        self.width as f64 / self.height as f64
+        self.width as f64 / self.height.max(1) as f64
     }
 
     pub fn aspect_scale(&self) -> Vec2 {
@@ -440,7 +440,7 @@ impl View {
     }
 
     pub fn size(&self) -> Vec2 {
-        Vec2::new(self.width as f32, self.height as f32)
+        Vec2::new(self.width.max(1) as f32, self.height.max(1) as f32)
     }
 }
 

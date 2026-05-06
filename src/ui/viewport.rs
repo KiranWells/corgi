@@ -245,6 +245,10 @@ impl super::CorgiUI {
         view_image: &ImgSpec,
     ) {
         let response = ui.response();
+        if response.rect.width() < 1.0 || response.rect.height() < 1.0 {
+            // The viewport is too small for the following math to make sense
+            return;
+        }
         // get inputs to change the viewport
         let (mut scroll, pixel_scale, mouse, modifiers) = ui.input(|i| {
             (
