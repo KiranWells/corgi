@@ -271,7 +271,11 @@ impl CorgiUI {
                 ui.set_style(style);
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
 
-                ui.text_edit_singleline(&mut self.preset_group);
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.preset_group)
+                        .desired_width(ui.available_width() - ui.spacing().button_padding.x * 2.0)
+                        .margin(ui.spacing().button_padding),
+                );
                 ui.horizontal(|ui| {
                     if ui.button("Create").clicked() {
                         let preset_library = match self.preset_save_active {
@@ -551,8 +555,15 @@ impl CorgiUI {
                     "Name",
                     Some("The name to save the preset under"),
                     |tui| {
-                        tui.style(Style::grow())
-                            .ui_add(TextEdit::singleline(&mut self.preset_name));
+                        let margin = tui.egui_ui().spacing().button_padding;
+                        let width =
+                            tui.egui_ui().available_width() - margin.x * 2.0 - item_spacing.x;
+                        tui.style(Style::grow()).ui_add(
+                            TextEdit::singleline(&mut self.preset_name)
+                                .desired_width(width)
+                                .margin(margin)
+                                .horizontal_align(egui::Align::Max),
+                        )
                     },
                 );
                 let preset_library = match self.preset_save_active {
@@ -564,7 +575,7 @@ impl CorgiUI {
                     }
                 };
 
-                tui.style(Style::row()).add(|tui| {
+                tui.style(Style::row().gap(item_spacing.x)).add(|tui| {
                     ui_with_label(
                         tui,
                         "Group",
@@ -576,14 +587,14 @@ impl CorgiUI {
                                 None,
                                 &mut self.preset_group,
                                 preset_library.group_names(),
-                            );
+                            )
                         },
                     );
                     if tui.ui_add(Button::new("New Group")).clicked() {
                         self.new_group_active = true;
                     }
                 });
-                tui.style(Style::row()).add(|tui| {
+                tui.style(Style::row().gap(item_spacing.x)).add(|tui| {
                     if tui
                         .style(Style::grow())
                         .ui_add(Button::new("Save"))

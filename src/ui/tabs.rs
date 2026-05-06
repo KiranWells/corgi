@@ -159,7 +159,8 @@ impl super::CorgiUI {
                 .then(|| self.setting_probe = !self.setting_probe);
             });
         });
-        section(tui, "Camera", false, |tui| {
+        section(tui, "Camera", true, |tui| {
+            tui.egui_style_mut().spacing.icon_width = tui.egui_ui().spacing().icon_width * 1.5;
             tui.ui_add(egui::Checkbox::new(&mut self.show_camera, "Show Camera"));
             input_with_label(
                 tui,
@@ -213,7 +214,7 @@ impl super::CorgiUI {
                 .external_coloring
                 .render_edit_ui(ctx, tui);
         });
-        section(tui, "Internal", false, |tui| {
+        section(tui, "Internal", true, |tui| {
             self.root_spec
                 .style
                 .internal_coloring
@@ -304,12 +305,14 @@ impl super::CorgiUI {
                 let spacing = tui.egui_ui().spacing().clone();
                 let available_width = tui.egui_ui().available_width();
                 tui.style(Style::grow()).ui_add(
-                    egui::TextEdit::singleline(&mut str_path).desired_width(
-                        available_width
-                            - text_size.x
-                            - spacing.button_padding.x * 2.0
-                            - spacing.item_spacing.x * 2.0,
-                    ),
+                    egui::TextEdit::singleline(&mut str_path)
+                        .margin(spacing.button_padding)
+                        .desired_width(
+                            available_width
+                                - text_size.x
+                                - spacing.button_padding.x * 4.0
+                                - spacing.item_spacing.x,
+                        ),
                 );
                 if let Some(home_dir) = &home_opt
                     && str_path.starts_with("~/")

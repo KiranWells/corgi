@@ -348,19 +348,12 @@ pub fn section(tui: &mut Tui, title: &str, expand: bool, add_contents: impl FnOn
                 let indent = ui.spacing().indent;
                 egui_taffy::tui(ui, ui.id().with("ext"))
                     .reserve_available_width()
-                    .style(taffy::Style {
-                        flex_direction: taffy::FlexDirection::Column,
-                        size: percent(1.0),
-                        flex_grow: 1.0,
-                        gap,
-                        padding: Rect {
-                            left: length(indent),
-                            right: length(indent),
-                            top: length(item_spacing.y),
-                            bottom: length(0.0),
-                        },
-                        ..Default::default()
-                    })
+                    .style(
+                        taffy::Style::col()
+                            .gap(gap)
+                            .pad2(item_spacing.y * 3.0, indent)
+                            .top(item_spacing.y),
+                    )
                     .show(add_contents)
             });
             if let Some(res) = res {
@@ -378,11 +371,9 @@ pub fn input_with_label(
     tui: &mut egui_taffy::Tui,
     label: &str,
     help_text: Option<&str>,
-    widget: impl TuiWidget,
-) {
-    ui_with_label(tui, label, help_text, |tui| {
-        tui.ui_add(widget);
-    });
+    widget: impl TuiWidget<Response = egui::Response>,
+) -> egui::Response {
+    ui_with_label(tui, label, help_text, |tui| tui.ui_add(widget))
 }
 
 /// Adds a selectable ComboBox in a Tui context
@@ -392,7 +383,7 @@ pub fn selection<T: PartialEq + ToLabel + ToHelpText>(
     help_text: Option<&str>,
     current_value: &mut T,
     options: Vec<T>,
-) {
+) -> egui::Response {
     tui.ui_add_manual(
         |ui| {
             let res = egui::ComboBox::from_id_salt(label)
@@ -417,7 +408,7 @@ pub fn selection<T: PartialEq + ToLabel + ToHelpText>(
             }
         },
         |res, _ui| res,
-    );
+    )
 }
 
 /// Adds a selectable ComboBox in a Tui context
@@ -427,7 +418,7 @@ pub fn raw_selection(
     help_text: Option<&str>,
     current_value: &mut String,
     options: Vec<String>,
-) {
+) -> egui::Response {
     tui.ui_add_manual(
         |ui| {
             let res = egui::ComboBox::from_id_salt(label)
@@ -447,7 +438,7 @@ pub fn raw_selection(
             }
         },
         |res, _ui| res,
-    );
+    )
 }
 
 /// Adds a selection with a label in a Tui context
@@ -457,7 +448,7 @@ pub fn selection_with_label<T: PartialEq + ToLabel + ToHelpText>(
     help_text: Option<&str>,
     current_value: &mut T,
     options: Vec<T>,
-) {
+) -> egui::Response {
     ui_with_label(tui, label, help_text, |tui| {
         selection(
             tui,
@@ -465,8 +456,8 @@ pub fn selection_with_label<T: PartialEq + ToLabel + ToHelpText>(
             Some(current_value.help_text()),
             current_value,
             options,
-        );
-    });
+        )
+    })
 }
 
 /// Adds a vertical ScrollArea in a Tui context
@@ -495,20 +486,30 @@ pub fn ui_with_label(
     tui: &mut egui_taffy::Tui,
     label: &str,
     help_text: Option<&str>,
-    add_contents: impl FnOnce(&mut Tui),
-) {
-    tui.style(Style::row()).add(|tui| {
-        tui.style(Style::default()).add(|tui| {
-            let res = tui.label(label);
-            if let Some(help_text) = help_text {
-                tui.small(egui_material_icons::icons::ICON_QUESTION_MARK)
-                    .union(res)
-                    .on_hover_text(help_text);
-            }
-        });
+    add_contents: impl FnOnce(&mut Tui) -> egui::Response,
+) -> egui::Response {
+    let gap = tui.egui_ui().spacing().item_spacing.x;
+    let res = tui.style(Style::row().gap(gap)).add(|tui| {
+        let res = tui.label(label);
+        let size = tui.egui_ui().spacing().indent * 4.0;
 
-        add_contents(tui);
+        res.union(
+            tui.style(Style {
+                display: Display::Flex,
+                size: percent(1.0),
+                justify_content: Some(AlignContent::End),
+                ..Default::default()
+            })
+            .egui_layout(egui::Layout::top_down(egui::Align::Max))
+            .mut_egui_style(|s| s.spacing.interact_size.x = size)
+            .add(add_contents),
+        )
     });
+    if let Some(help_text) = help_text {
+        res.on_hover_text(help_text)
+    } else {
+        res
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -539,9 +540,7 @@ pub fn point_edit(
             tui.style(Style::default()).add(|tui| {
                 let res = tui.label(point_name);
                 if let Some(help_text) = help_text {
-                    tui.small(egui_material_icons::icons::ICON_QUESTION_MARK)
-                        .union(res)
-                        .on_hover_text(help_text);
+                    res.on_hover_text(help_text);
                 }
             });
             indent_with_line(tui, |tui| {
@@ -569,6 +568,8 @@ pub fn point_edit(
                             |ui| {
                                 ui.add(
                                     egui::TextEdit::singleline(text_reference)
+                                        .margin(ui.spacing().button_padding)
+                                        .horizontal_align(egui::Align::Max)
                                         .desired_width(f32::INFINITY),
                                 )
                             },
@@ -632,15 +633,15 @@ pub fn indent_with_line(tui: &mut Tui, add_contents: impl FnOnce(&mut Tui)) {
 }
 
 /// Adds a color editing UI in a Tui context for `[f32; 3]`
-pub fn color_edit(tui: &mut egui_taffy::Tui, color: &mut [f32; 3]) {
+pub fn color_edit(tui: &mut egui_taffy::Tui, color: &mut [f32; 3]) -> egui::Response {
     tui.ui_add_manual(
         |ui| egui::widgets::color_picker::color_edit_button_rgb(ui, color),
         |res, _ui| res,
-    );
+    )
 }
 
 /// Adds a color editing UI in a Tui context for a [`Color32`]
-pub fn color32_edit(tui: &mut egui_taffy::Tui, color: &mut Color32) {
+pub fn color32_edit(tui: &mut egui_taffy::Tui, color: &mut Color32) -> egui::Response {
     tui.ui_add_manual(
         |ui| {
             egui::widgets::color_picker::color_edit_button_srgba(
@@ -650,7 +651,7 @@ pub fn color32_edit(tui: &mut egui_taffy::Tui, color: &mut Color32) {
             )
         },
         |res, _ui| res,
-    );
+    )
 }
 
 /// Adds a color editing UI in a Tui context for a potentially non-color value

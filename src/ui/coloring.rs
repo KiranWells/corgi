@@ -86,10 +86,7 @@ impl EditUI for Coloring {
                         tui.small(format!("Light {}", i + 1));
                         if tui
                             .enabled_ui(self.lights.len() > 1)
-                            .ui_add(
-                                egui::Button::new(icons::ICON_DELETE)
-                                    .fill(ecolor::Color32::TRANSPARENT),
-                            )
+                            .ui_add(egui::Button::new(icons::ICON_DELETE).frame(false))
                             .on_hover_text("Delete")
                             .clicked()
                         {
@@ -171,9 +168,7 @@ impl EditUI for Gradient {
         indent_with_line(tui, |tui| {
             match self {
                 Gradient::Flat(color) => {
-                    ui_with_label(tui, "Color", None, |tui| {
-                        color_edit(tui, color);
-                    });
+                    ui_with_label(tui, "Color", None, |tui| color_edit(tui, color));
                 }
                 Gradient::Procedural(colors) => {
                     pseudo_color_edit(tui, &mut colors[0]);
@@ -588,9 +583,7 @@ impl EditUI for Vec<Layer> {
                 );
                 if valid_ct < 8 {
                     add_layer = tui
-                        .button(|tui| {
-                            tui.label(format!("{} Add Layer", icons::ICON_ADD));
-                        })
+                        .ui_add(egui::Button::new(format!("{} Add Layer", icons::ICON_ADD)))
                         .clicked();
                 }
             });

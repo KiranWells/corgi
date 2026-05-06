@@ -267,11 +267,14 @@ impl PresetGroup {
             &mut self.thumbnails,
             |tui, thumbnails| {
                 if self.ui_edit_mode {
+                    let margin = tui.egui_ui().spacing().button_padding;
                     if tui
                         .style(Style::grow())
                         .mut_style(|s| s.padding = Rect::zero())
                         .ui_add(
-                            TextEdit::singleline(&mut self.edit_name).text_color(old_text_color),
+                            TextEdit::singleline(&mut self.edit_name)
+                                .margin(margin)
+                                .text_color(old_text_color),
                         )
                         .lost_focus()
                         && self.edit_name != self.name
@@ -597,6 +600,7 @@ impl PresetThumb {
                                     if ui
                                         .add(
                                             TextEdit::singleline(&mut self.name)
+                                                .margin(ui.spacing().button_padding)
                                                 .desired_width(
                                                     ui.available_width()
                                                         - item_spacing.x * 2.0

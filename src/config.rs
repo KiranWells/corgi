@@ -247,26 +247,26 @@ impl Theme {
                 ),
             ]
             .into(),
-            drag_value_text_style: TextStyle::Monospace,
+            drag_value_text_style: TextStyle::Body,
             spacing: eframe::egui::Spacing {
                 item_spacing: vec2(self.spacing, self.spacing),
                 window_margin: eframe::egui::Margin::same(self.spacing as i8),
                 menu_margin: eframe::egui::Margin::same(self.spacing as i8),
                 button_padding: vec2(self.spacing, self.spacing),
                 indent: self.spacing * 4.0,
-                interact_size: vec2(self.rem(5.0), self.rem(1.5)),
-                slider_width: 100.0,
-                slider_rail_height: 8.0,
-                combo_width: 80.0,
-                text_edit_width: 200.0,
-                icon_width: self.rem(1.25),
-                icon_width_inner: self.rem(0.75),
+                interact_size: vec2(self.rem(5.0), self.rem(1.0) + self.spacing * 2.0),
+                slider_width: self.rem(10.0),
+                slider_rail_height: self.rem(2.0),
+                combo_width: self.rem(5.0),
+                text_edit_width: self.rem(5.0),
+                icon_width: self.rem(1.0),
+                icon_width_inner: self.rem(1.0),
                 icon_spacing: self.spacing,
                 default_area_size: vec2(600.0, 400.0),
-                tooltip_width: 300.0,
-                menu_width: 400.0,
+                tooltip_width: self.rem(20.0),
+                menu_width: self.rem(10.0),
                 menu_spacing: 0.0,
-                combo_height: 200.0,
+                combo_height: self.rem(15.0),
                 scroll: Default::default(),
                 indent_ends_with_horizontal_line: false,
             },
@@ -274,14 +274,14 @@ impl Theme {
                 interact_radius: 8.0,
                 resize_grab_radius_side: 5.0,
                 resize_grab_radius_corner: 10.0,
-                show_tooltips_only_when_still: true,
-                tooltip_delay: 0.5,
-                tooltip_grace_time: 0.2,
+                show_tooltips_only_when_still: false,
+                tooltip_delay: 0.3,
+                tooltip_grace_time: 0.5,
                 selectable_labels: true,
                 multi_widget_text_select: true,
             },
             visuals: eframe::egui::Visuals {
-                dark_mode: true,
+                dark_mode: self.bg_color.lightness() < 0.5,
                 text_alpha_from_coverage: if self.bg_color.lightness() < 0.5 {
                     eframe::epaint::AlphaFromCoverage::DARK_MODE_DEFAULT
                 } else {
@@ -298,25 +298,25 @@ impl Theme {
                     },
                     inactive: eframe::egui::style::WidgetVisuals {
                         weak_bg_fill: self.surface1(),
-                        bg_fill: self.surface2(),
+                        bg_fill: self.surface1(),
                         bg_stroke: Default::default(),
                         fg_stroke: Stroke::new(2.0, self.text()),
                         corner_radius: CornerRadius::same(self.radius()),
                         expansion: 0.0,
                     },
                     hovered: WidgetVisuals {
-                        weak_bg_fill: self.overlay1(),
-                        bg_fill: self.overlay1(),
+                        weak_bg_fill: self.surface2(),
+                        bg_fill: self.surface2(),
                         bg_stroke: Default::default(),
-                        fg_stroke: Stroke::new(2.5, self.text()),
+                        fg_stroke: Stroke::new(2.5, self.subtext()),
                         corner_radius: CornerRadius::same(self.radius()),
                         expansion: 0.0,
                     },
                     active: WidgetVisuals {
-                        weak_bg_fill: self.overlay1(),
-                        bg_fill: self.accent(),
-                        bg_stroke: Default::default(),
-                        fg_stroke: Stroke::new(2.0, self.crust()),
+                        weak_bg_fill: self.surface2(),
+                        bg_fill: self.overlay1(),
+                        bg_stroke: Stroke::new(2.0, self.accent()),
+                        fg_stroke: Stroke::new(2.0, self.text()),
                         corner_radius: CornerRadius::same(self.radius()),
                         expansion: 0.0,
                     },
@@ -360,7 +360,7 @@ impl Theme {
         self.fg_color
     }
     fn subtext(&self) -> Color32 {
-        self.bg_color.lerp_to_gamma(self.fg_color, 0.9)
+        self.fg_color.extreme(0.075)
     }
     fn overlay2(&self) -> Color32 {
         self.bg_color.lerp_to_gamma(self.fg_color, 0.7)

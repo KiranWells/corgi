@@ -90,8 +90,8 @@ pub fn logs_ui(ui: &mut egui::Ui, origin_rect: egui::Rect) {
                         .inner_margin(ui.spacing().item_spacing.x * 2.0)
                         .show(ui, |ui| {
                             ui.set_height(
-                                ui.text_style_height(&egui::TextStyle::Button) * 2.0
-                                    + ui.spacing().item_spacing.y * 2.0,
+                                ui.text_style_height(&egui::TextStyle::Button)
+                                    + ui.spacing().button_padding.y * 2.0,
                             );
                             ui.set_width(ui.spacing().indent * 10.0);
                             ui.horizontal_centered(|ui| {

@@ -36,13 +36,13 @@ impl EditUI for crate::Config {
 impl EditUI for crate::Theme {
     fn render_edit_ui(&mut self, ctx: &eframe::egui::Context, tui: &mut egui_taffy::Tui) {
         ui_with_label(tui, "Background Color", None, |tui| {
-            color32_edit(tui, &mut self.bg_color);
+            color32_edit(tui, &mut self.bg_color)
         });
         ui_with_label(tui, "Text Color", None, |tui| {
-            color32_edit(tui, &mut self.fg_color);
+            color32_edit(tui, &mut self.fg_color)
         });
         ui_with_label(tui, "Accent Color", None, |tui| {
-            color32_edit(tui, &mut self.accent_color);
+            color32_edit(tui, &mut self.accent_color)
         });
         input_with_label(
             tui,
