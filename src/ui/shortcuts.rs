@@ -101,15 +101,15 @@ impl super::CorgiUI {
             .save_file()
         {
             if let Err(err) = self.root_spec.save(&path) {
-                self.active_file = Some(ActiveFile {
-                    path,
-                    last_saved_spec: self.root_spec.clone(),
-                });
                 self.status.message = format!("Failed to save: {err}");
                 self.status.progress = None;
             } else {
                 self.status.message = format!("Saved {}", path.as_os_str().to_string_lossy());
                 self.status.progress = None;
+                self.active_file = Some(ActiveFile {
+                    path,
+                    last_saved_spec: self.root_spec.clone(),
+                });
             }
             return;
         }
