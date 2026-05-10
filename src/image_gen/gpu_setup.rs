@@ -368,7 +368,13 @@ impl GPUData {
             timeout: None,
         });
         match recv.recv() {
-            Ok(Ok(())) => Ok(tmp_buffer.get_mapped_range(..).to_vec()),
+            Ok(Ok(())) => {
+                let mut out = Vec::new();
+                for chunk in tmp_buffer.slice(..).get_mapped_range().chunks(padded_width) {
+                    out.extend_from_slice(&chunk[..(ext.width * 4) as usize]);
+                }
+                Ok(out)
+            }
             Ok(Err(err)) => Err(err),
             // we always send exactly one message
             Err(_recv_err) => unreachable!(),
