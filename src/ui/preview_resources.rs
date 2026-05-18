@@ -1,7 +1,8 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
-use corgi_lib::image_gen::shader_types::Transform;
+use corgi_lib::shared::types::Transform;
+use corgi_lib::shared::wgsl_primitives::Vec2;
 use corgi_lib::types::View;
 use eframe::egui::{self};
 use eframe::egui_wgpu::{self, CallbackTrait};
@@ -201,9 +202,9 @@ impl SubResources {
             contents: bytemuck::cast_slice(&[Transform {
                 angle: 0.0,
                 _padding: 0.0,
-                prescale: [1.0; 2],
-                postscale: [1.0; 2],
-                offset: [0.0; 2],
+                prescale: Vec2::splat(1.0),
+                postscale: Vec2::splat(1.0),
+                offset: Vec2::splat(0.0),
             }]),
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
         });

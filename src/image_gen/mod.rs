@@ -29,10 +29,10 @@ use little_exif::metadata::Metadata;
 use parking_lot::RwLock;
 use probe::probe;
 use serde::{Deserialize, Serialize};
-use shader_types::{ColorParams, ComputeParams};
 use wgpu::{self, Extent3d};
 
-use crate::image_gen::shader_types::RenderParams;
+use crate::shared::coloring::main::{ColorParams, RenderParams};
+use crate::shared::types::ComputeParams;
 use crate::types::serde::{SafeSaveLoad, is_metadata_supported};
 use crate::types::{ImageDiff, ImgSpec};
 

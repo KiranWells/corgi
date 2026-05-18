@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use wgpu::Extent3d;
 
 use super::Coloring;
-use crate::image_gen::shader_types::Transform;
+use crate::shared::types::Transform;
+use crate::shared::wgsl_primitives;
 use crate::types::{LayerKind, Rotate};
 
 pub const STRIPES_ENABLED: u32 = 0x1;
@@ -335,9 +336,9 @@ impl View {
         Transform {
             angle: self.angle - other.angle,
             _padding: 0.0,
-            prescale: [self_aspect.x, self_aspect.y],
-            postscale: [scale * aspect_scale.x, scale * aspect_scale.y],
-            offset: (offset).into(),
+            prescale: wgsl_primitives::Vec2::new(self_aspect.x, self_aspect.y),
+            postscale: wgsl_primitives::Vec2::new(scale * aspect_scale.x, scale * aspect_scale.y),
+            offset: offset.into(),
         }
     }
 

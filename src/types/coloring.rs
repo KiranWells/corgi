@@ -6,6 +6,8 @@ use std::sync::atomic::AtomicU64;
 use documented::{DocumentedFieldsOpt, DocumentedVariants};
 use serde::{Deserialize, Serialize};
 
+use crate::shared::coloring::main::Light;
+
 /// The coloring parameters for the image. These are interpreted
 /// slightly differently for internal and external coloring, as
 /// some coloring algorithms are incompatible between the two.
@@ -36,18 +38,6 @@ pub enum LightingKind {
     RepeatingGradient,
     /// Mimics a 3D shape with lighting.
     Shaded,
-}
-
-#[repr(C)]
-#[derive(
-    Clone, Copy, Debug, PartialEq, Deserialize, Serialize, bytemuck::Pod, bytemuck::Zeroable,
-)]
-pub struct Light {
-    pub color: [f32; 3],
-    pub strength: f32,
-    pub direction: [f32; 3],
-    /// Included for compatibility with GPU binary format
-    padding: f32,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, DocumentedFieldsOpt)]
@@ -163,6 +153,7 @@ impl Gradient {
         }
     }
 }
+
 impl Default for Coloring {
     fn default() -> Self {
         Self {
@@ -270,55 +261,5 @@ impl Coloring {
     pub fn contains_kind(&self, kind: LayerKind) -> bool {
         self.color_layers.iter().filter(|x| x.kind == kind).count() > 0
             || self.light_layers.iter().filter(|x| x.kind == kind).count() > 0
-    }
-}
-
-impl Default for Light {
-    fn default() -> Self {
-        Self {
-            color: [1.0; 3],
-            strength: 0.0,
-            direction: [0.0, 0.0, 1.0],
-            padding: 0.0,
-        }
-    }
-}
-
-impl Light {
-    pub fn new(color: [f32; 3], strength: f32, direction: [f32; 3]) -> Self {
-        let direction_length = (direction[0] * direction[0]
-            + direction[1] * direction[1]
-            + direction[2] * direction[2])
-            .sqrt();
-        let direction = [
-            direction[0] / direction_length,
-            direction[1] / direction_length,
-            direction[2] / direction_length,
-        ];
-        Self {
-            color,
-            strength,
-            direction,
-            padding: 0.0,
-        }
-    }
-
-    pub fn normalize(&mut self) {
-        let direction = self.direction;
-        let direction_length = (direction[0] * direction[0]
-            + direction[1] * direction[1]
-            + direction[2] * direction[2])
-            .sqrt();
-        // prevent instability where calling normalize
-        // repeatedly results in different values
-        if (direction_length - 1.0).abs() < 1e-4 {
-            return;
-        }
-        let direction = [
-            direction[0] / direction_length,
-            direction[1] / direction_length,
-            direction[2] / direction_length,
-        ];
-        self.direction = direction;
     }
 }

@@ -2,16 +2,10 @@
 // These perform the necessary transformations to show the rendered
 // image at the correct location relative to the current viewport
 // location in fractal space.
-import super::utils::rotation_matrix;
+import shared::utils::rotation_matrix;
+import shared::types::Transform;
 
-struct Uniforms {
-    angle: f32,
-    _padding: f32,
-    prescale: vec2<f32>,
-    postscale: vec2<f32>,
-    offset: vec2<f32>,
-}
-@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+@group(0) @binding(0) var<uniform> uniforms: Transform;
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,

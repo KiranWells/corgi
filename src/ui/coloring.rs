@@ -1,8 +1,8 @@
 use std::mem::discriminant;
 
-use corgi_lib::image_gen::shader_types::{MAX_GRADIENT_STOPS, MAX_LIGHTS};
+use corgi_lib::shared::coloring::main::{Light, MAX_GRADIENT_STOPS, MAX_LIGHTS};
 use corgi_lib::types::{
-    Coloring, Gradient, Layer, LayerKind, Light, LightingKind, Outline, Overlays, next_layer_id,
+    Coloring, Gradient, Layer, LayerKind, LightingKind, Outline, Overlays, next_layer_id,
 };
 use documented::DocumentedFieldsOpt;
 use eframe::egui::color_picker::Alpha;
@@ -697,15 +697,17 @@ impl EditUI for Light {
     fn render_edit_ui(&mut self, _ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
         tui.style(Style::row()).add(|tui| {
             tui.label("Color");
-            color_edit(tui, &mut self.color);
+            let mut color = self.color.into();
+            color_edit(tui, &mut color);
+            self.color = color.into();
             tui.label("Strength");
             tui.ui_add(egui::DragValue::new(&mut self.strength).speed(0.003));
         });
         tui.style(Style::row()).add(|tui| {
             tui.label("Direction");
-            tui.ui_add(egui::DragValue::new(&mut self.direction[0]).speed(0.003));
-            tui.ui_add(egui::DragValue::new(&mut self.direction[1]).speed(0.003));
-            tui.ui_add(egui::DragValue::new(&mut self.direction[2]).speed(0.003));
+            tui.ui_add(egui::DragValue::new(&mut self.direction.x).speed(0.003));
+            tui.ui_add(egui::DragValue::new(&mut self.direction.y).speed(0.003));
+            tui.ui_add(egui::DragValue::new(&mut self.direction.z).speed(0.003));
         });
         self.normalize()
     }

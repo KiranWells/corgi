@@ -1,58 +1,34 @@
 /*!
 # Shader Types
 
-This module contains the types that are passed to the GPU and
+This module contains additional types that are passed to the GPU and
 conversion logic from internal types.
  */
-use crate::types::{Coloring, ImgSpec, Light, Outline, Overlays};
-
-// These constants need to match the values defined in the
-// compute shaders.
-pub const MAX_GRADIENT_STOPS: usize = 50;
-pub const MAX_LAYERS: usize = 8;
-pub const MAX_LIGHTS: usize = 3;
-
-/// The GPU-safe version of coloring data. This is sent as a uniform
-/// to the compute shader.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct ColorParams {
-    pub saturation: f32,
-    pub brightness: f32,
-    pub color_frequency: f32,
-    pub color_offset: f32,
-    pub gradient_kind: u32,
-    pub gradient_size: u32,
-    pub lighting_kind: u32,
-    padding: u32,
-    pub color_layer_types: [u8; MAX_LAYERS],
-    pub light_layer_types: [u8; MAX_LAYERS],
-    pub color_strengths: [f32; MAX_LAYERS],
-    pub color_params: [f32; MAX_LAYERS],
-    pub light_strengths: [f32; MAX_LAYERS],
-    pub light_params: [f32; MAX_LAYERS],
-    pub lights: [Light; MAX_LIGHTS],
-    pub overlays: OverlayParams,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct OverlayParams {
-    pub iteration_outline: [f32; 4],
-    pub set_outline: [f32; 4],
-}
+use crate::shared::coloring::main::{ColorParams, Light, Overlays as OverlayParams, RenderParams};
+use crate::shared::wgsl_primitives::{Vec4, Vec4f};
+use crate::types::{Coloring, ImgSpec, Outline, Overlays};
 
 impl From<&Coloring> for ColorParams {
     fn from(value: &Coloring) -> Self {
         let (gradient_kind, gradient_vec) = value.gradient.decompose();
-        fn map_to_array<T: Default + Copy, U, const N: usize>(
-            v: &[U],
-            f: impl Fn(&U) -> T,
-        ) -> [T; N] {
-            let mut arr = [T::default(); N];
-            let newv = v.iter().map(f).collect::<Vec<T>>();
-            arr[..newv.len()].copy_from_slice(&newv);
-            arr
+        fn bytecast_map<ArrT, MapT, OutT, const N: usize>(
+            v: &[ArrT],
+            f: impl Fn(&ArrT) -> MapT,
+        ) -> [OutT; N]
+        where
+            OutT: bytemuck::AnyBitPattern,
+            MapT: bytemuck::NoUninit + Default,
+        {
+            let mut mapped = v.iter().map(f).collect::<Vec<MapT>>();
+            mapped.extend_from_slice(&vec![
+                MapT::default();
+                (size_of::<OutT>() * N / size_of::<MapT>())
+                    .checked_sub(mapped.len())
+                    .unwrap()
+            ]);
+            bytemuck::cast_slice::<MapT, OutT>(&mapped)
+                .try_into()
+                .unwrap()
         }
         ColorParams {
             saturation: value.saturation,
@@ -62,13 +38,13 @@ impl From<&Coloring> for ColorParams {
             gradient_kind,
             gradient_size: gradient_vec.len() as u32 / 4,
             lighting_kind: value.lighting_kind as u32,
-            color_layer_types: map_to_array(&value.color_layers, |x| x.kind as u8),
-            light_layer_types: map_to_array(&value.light_layers, |x| x.kind as u8),
-            color_strengths: map_to_array(&value.color_layers, |x| x.strength),
-            color_params: map_to_array(&value.color_layers, |x| x.param),
-            light_strengths: map_to_array(&value.light_layers, |x| x.strength),
-            light_params: map_to_array(&value.light_layers, |x| x.param),
-            lights: map_to_array(&value.lights, Light::clone),
+            color_layer_types: bytecast_map(&value.color_layers, |x| x.kind as u8).into(),
+            light_layer_types: bytecast_map(&value.light_layers, |x| x.kind as u8).into(),
+            color_strengths: bytecast_map(&value.color_layers, |x| x.strength),
+            color_params: bytecast_map(&value.color_layers, |x| x.param),
+            light_strengths: bytecast_map(&value.light_layers, |x| x.strength),
+            light_params: bytecast_map(&value.light_layers, |x| x.param),
+            lights: bytecast_map(&value.lights, Light::clone),
             overlays: (&value.overlays).into(),
             padding: 0,
         }
@@ -84,43 +60,15 @@ impl From<&Overlays> for OverlayParams {
     }
 }
 
-fn pack_outline(value: &Option<Outline>) -> [f32; 4] {
+fn pack_outline(value: &Option<Outline>) -> Vec4f {
     if let Some(inner) = value {
         let mut packed = inner.color.to_rgba_unmultiplied();
         packed[3] *= 0.999;
         packed[3] += inner.parameter as f32;
-        packed
+        packed.into()
     } else {
-        [0.0; 4]
+        Vec4::splat(0.0)
     }
-}
-
-/// The parameters for the compute shader. This is sent as a uniform
-/// to the compute shader.
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct ComputeParams {
-    pub width: u32,
-    pub height: u32,
-    pub max_iter: u32,
-    pub chunk_max_iter: u32,
-    pub probe_len: u32,
-    pub iter_offset: u32,
-    pub x: f32,
-    pub y: f32,
-    pub zoom: f32,
-    pub angle: f32,
-    pub julia_x: f32,
-    pub julia_y: f32,
-}
-
-/// The parameters for the render shader. This is sent as a uniform
-/// to the render shader.
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct RenderParams {
-    pub width: u32,
-    pub height: u32,
 }
 
 impl From<&ImgSpec> for RenderParams {
@@ -128,30 +76,6 @@ impl From<&ImgSpec> for RenderParams {
         RenderParams {
             width: (image.width as f64) as u32,
             height: (image.height as f64) as u32,
-        }
-    }
-}
-
-/// The parameters for the preview shader. This is sent as a uniform
-/// to the preview shader.
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct Transform {
-    pub angle: f32,
-    pub _padding: f32,
-    pub prescale: [f32; 2],
-    pub postscale: [f32; 2],
-    pub offset: [f32; 2],
-}
-
-impl Default for Transform {
-    fn default() -> Self {
-        Self {
-            angle: 0.0,
-            _padding: 0.0,
-            prescale: [1.0, 1.0],
-            postscale: [1.0, 1.0],
-            offset: [0.0, 0.0],
         }
     }
 }

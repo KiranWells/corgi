@@ -16,9 +16,8 @@ use wgpu::{
     ExperimentalFeatures, PipelineLayout, Queue, ShaderModule, Texture, TextureView,
 };
 
-use crate::image_gen::shader_types::{
-    ColorParams, ComputeParams, MAX_GRADIENT_STOPS, RenderParams,
-};
+use crate::shared::coloring::main::{ColorParams, MAX_GRADIENT_STOPS, RenderParams};
+use crate::shared::types::ComputeParams;
 
 /// Contains GPU state that can be shared between all image generation
 /// contexts.
