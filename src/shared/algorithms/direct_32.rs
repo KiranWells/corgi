@@ -18,8 +18,8 @@ pub fn calculate_point(
     let aspect_scale = aspect(params.width, params.height);
     let offset = Vec2::new(params.x, params.y)
         + (Vec2::new(
-            global_id.x as f32 / params.width as f32,
-            global_id.y as f32 / params.height as f32,
+            (global_id.x as f32 + 0.5) / params.width as f32,
+            (global_id.y as f32 + 0.5) / params.height as f32,
         ) - 0.5f32)
             * 2.0f32
             * 2.0f32.powf(-params.zoom)

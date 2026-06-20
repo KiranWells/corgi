@@ -21,10 +21,10 @@ use std::time::{Duration, Instant};
 
 use documented::DocumentedFields;
 pub use gpu_setup::{Constants, GPUData, SharedState, get_device_and_queue};
+use image::ImageFormat;
 use image::codecs::avif::AvifEncoder;
 use image::codecs::gif::GifEncoder;
 use image::codecs::jpeg::JpegEncoder;
-use image::{ImageBuffer, ImageFormat};
 use little_exif::exif_tag::ExifTag;
 use little_exif::metadata::Metadata;
 use parking_lot::RwLock;
@@ -50,8 +50,8 @@ pub enum RenderingError {
 #[derive(thiserror::Error, Debug)]
 #[non_exhaustive]
 pub enum SaveError {
-    #[error("There is no rendered image")]
-    NoImage,
+    #[error(transparent)]
+    GetImage(#[from] GetImageError),
     #[error("Failed to load data from GPU")]
     FailedLoad(#[from] wgpu::BufferAsyncError),
     #[error("Failed to save the image data to a file")]
@@ -73,6 +73,17 @@ pub enum CompressionParamsError {
     InvalidSpeed,
     #[error("Quality must be within 1-100, inclusive")]
     InvalidQuality,
+}
+
+#[derive(thiserror::Error, Debug)]
+#[non_exhaustive]
+pub enum GetImageError {
+    #[error("There is no rendered image")]
+    NoImage,
+    #[error("Failed to load data from GPU")]
+    FailedLoad(#[from] wgpu::BufferAsyncError),
+    #[error("Data on the GPU could not be made into an image")]
+    BadImageData,
 }
 
 /// Manages rendering fractal images.
@@ -348,72 +359,79 @@ impl Engine {
         add_metadata: bool,
         status_callback: &mut impl FnMut(ProgressUpdate),
     ) -> Result<(), SaveError> {
-        let Some(image_settings) = &self.last_image else {
-            return Err(SaveError::NoImage);
-        };
-        if !self.cache_validity.color {
-            return Err(SaveError::NoImage);
-        }
         status_callback(ProgressUpdate::msg("Fetching image data"));
-        if let Ok(data) = self.gpu_data.get_texture_data() {
-            status_callback(ProgressUpdate::msg("Saving image"));
-            let mut img = image::DynamicImage::ImageRgba8(
-                ImageBuffer::from_raw(image_settings.width, image_settings.height, data)
-                    .expect("image data to be properly formatted"),
-            );
-            img = image::DynamicImage::ImageRgb8(img.flipv().into_rgb8());
-            let lazy_writer = || -> Result<BufWriter<std::fs::File>, SaveError> {
-                Ok(BufWriter::new(
-                    OpenOptions::new()
-                        .write(true)
-                        .truncate(true)
-                        .create(true)
-                        .open(path)?,
-                ))
-            };
-            match ImageFormat::from_path(path)? {
-                // 1 <= quality <= 100
-                ImageFormat::Jpeg => img.write_with_encoder(JpegEncoder::new_with_quality(
-                    lazy_writer()?,
-                    compression_params.quality,
-                ))?,
-                // 1 <= speed <= 30
-                ImageFormat::Gif => img.write_with_encoder(GifEncoder::new_with_speed(
-                    lazy_writer()?,
-                    ((compression_params.speed as u32 * 30) / 100).max(1) as i32,
-                ))?,
-                // 1 <= speed <= 10, 1 <= quality <= 100
-                ImageFormat::Avif => {
-                    img.write_with_encoder(AvifEncoder::new_with_speed_quality(
-                        lazy_writer()?,
-                        (compression_params.speed / 10).max(1),
-                        compression_params.quality,
-                    ))?
-                }
-                _ => img.save(path)?,
-            }
+        let img = self.get_image()?;
+        status_callback(ProgressUpdate::msg("Saving image"));
+        let lazy_writer = || -> Result<BufWriter<std::fs::File>, SaveError> {
+            Ok(BufWriter::new(
+                OpenOptions::new()
+                    .write(true)
+                    .truncate(true)
+                    .create(true)
+                    .open(path)?,
+            ))
+        };
+        match ImageFormat::from_path(path)? {
+            // 1 <= quality <= 100
+            ImageFormat::Jpeg => img.write_with_encoder(JpegEncoder::new_with_quality(
+                lazy_writer()?,
+                compression_params.quality,
+            ))?,
+            // 1 <= speed <= 30
+            ImageFormat::Gif => img.write_with_encoder(GifEncoder::new_with_speed(
+                lazy_writer()?,
+                ((compression_params.speed as u32 * 30) / 100).max(1) as i32,
+            ))?,
+            // 1 <= speed <= 10, 1 <= quality <= 100
+            ImageFormat::Avif => img.write_with_encoder(AvifEncoder::new_with_speed_quality(
+                lazy_writer()?,
+                (compression_params.speed / 10).max(1),
+                compression_params.quality,
+            ))?,
+            _ => img.save(path)?,
+        }
 
-            // add metadata
-            if add_metadata {
-                status_callback(ProgressUpdate::msg("Updating metadata"));
-                if !is_metadata_supported(path) {
-                    return Err(SaveError::MetadataNotSupported(
-                        path.extension().map(|os| os.to_os_string()),
-                    ));
-                }
-                let mut meta = Metadata::new();
-                let description = image_settings.stringify()?;
-
-                meta.set_tag(ExifTag::ImageDescription(description));
-                if let Some(name) = name {
-                    // There is no "name" field, so thumbnails use this instead
-                    meta.set_tag(ExifTag::Make(name));
-                }
-                meta.set_tag(ExifTag::Software("Corgi".into()));
-                meta.write_to_file(path)?;
+        // add metadata
+        if add_metadata {
+            status_callback(ProgressUpdate::msg("Updating metadata"));
+            if !is_metadata_supported(path) {
+                return Err(SaveError::MetadataNotSupported(
+                    path.extension().map(|os| os.to_os_string()),
+                ));
             }
+            let image_settings = self
+                .last_image
+                .as_ref()
+                .expect("image to be available if get_image succeeded");
+            let mut meta = Metadata::new();
+            let description = image_settings.stringify()?;
+
+            meta.set_tag(ExifTag::ImageDescription(description));
+            if let Some(name) = name {
+                // There is no "name" field, so thumbnails use this instead
+                meta.set_tag(ExifTag::Make(name));
+            }
+            meta.set_tag(ExifTag::Software("Corgi".into()));
+            meta.write_to_file(path)?;
         }
         Ok(())
+    }
+
+    pub fn get_image(&self) -> Result<image::DynamicImage, GetImageError> {
+        let Some(image_settings) = &self.last_image else {
+            return Err(GetImageError::NoImage);
+        };
+        if !self.cache_validity.color {
+            return Err(GetImageError::NoImage);
+        }
+        let data = self.gpu_data.get_texture_data()?;
+
+        let Some(img) =
+            image::ImageBuffer::from_raw(image_settings.width, image_settings.height, data)
+        else {
+            return Err(GetImageError::BadImageData);
+        };
+        Ok(image::DynamicImage::ImageRgba8(img).flipv())
     }
 
     /// Update the cached probe data within this engine. Assumes the probe corresponds
