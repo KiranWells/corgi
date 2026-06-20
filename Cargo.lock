@@ -1029,6 +1029,7 @@ dependencies = [
  "pollster",
  "rand 0.10.1",
  "rand_seeder",
+ "rayon",
  "regex",
  "rfd",
  "rug",

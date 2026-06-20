@@ -19,6 +19,57 @@ pub struct ComputeParams {
     pub julia_y: f32,
 }
 
+impl ComputeParams {
+    pub fn create(image: &crate::types::ImgSpec, probe_len: usize) -> Self {
+        use crate::types::Algorithm::*;
+        let julia_point = match &image.location.fractal_kind {
+            crate::types::FractalKind::Mandelbrot => emath::Vec2::new(0.0, 0.0),
+            crate::types::FractalKind::Julia(pt) => pt.to_vec2(),
+        };
+        let (pt, probe_len) = match image.algorithm() {
+            Directf32 | Directf32CPU | DirectFloatCPU => {
+                (image.location.center.to_vec2(), image.location.max_iter)
+            }
+            Perturbedf32 | Perturbedf32CPU => {
+                let offset = image
+                    .view()
+                    .complex_to_px_delta(&image.location.probe_location);
+                (offset / image.size(), probe_len as u32)
+            }
+        };
+        ComputeParams {
+            width: image.width,
+            height: image.height,
+            max_iter: image.location.max_iter,
+            chunk_max_iter: 0,
+            probe_len,
+            iter_offset: 0,
+            x: pt.x,
+            y: pt.y,
+            zoom: image.location.zoom,
+            angle: image.location.angle,
+            julia_x: julia_point.x,
+            julia_y: julia_point.y,
+        }
+    }
+
+    pub fn with_iter(
+        mut self,
+        image: &crate::types::ImgSpec,
+        i: u32,
+        iter_batch_size: u32,
+    ) -> Self {
+        self.chunk_max_iter = if (i + 1) * iter_batch_size > image.location.max_iter {
+            image.location.max_iter % iter_batch_size
+        } else {
+            iter_batch_size
+        };
+        self.iter_offset = i * iter_batch_size;
+        self
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct BufferValues {
     pub delta_n: Vec2f,
     pub zoom: f32,
@@ -28,6 +79,21 @@ pub struct BufferValues {
     pub orbits: Vec4f,
     pub stripes: Vec4f,
     pub step: i32,
+}
+
+impl BufferValues {
+    pub fn zero() -> Self {
+        BufferValues {
+            delta_n: Vec2::splat(0.0),
+            zoom: 0.0,
+            ref_iteration: 0,
+            z_n_prime: Vec2::splat(0.0),
+            zoom_prime: 0.0,
+            orbits: Vec4::splat(0.0),
+            stripes: Vec4::splat(0.0),
+            step: 0,
+        }
+    }
 }
 
 /// The parameters for the preview shader. This is sent as a uniform

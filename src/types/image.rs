@@ -86,9 +86,16 @@ pub struct ComplexPoint {
 pub enum Algorithm {
     Directf32,
     Perturbedf32,
+    Directf32CPU,
+    Perturbedf32CPU,
+    DirectFloatCPU,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[cfg_attr(
+    feature = "binary-deps",
+    derive(clap::ValueEnum, documented::DocumentedVariants)
+)]
 pub enum OptLevel {
     /// Optimizes for preventing cache invalidation, assuming all features are needed
     #[default]
@@ -97,6 +104,22 @@ pub enum OptLevel {
     AccuracyOptimized,
     /// Optimizes for the fastest render possible, even at the cost of minor inaccuracy
     PerformanceOptimized,
+    /// Uses a slow, high-precision method. Runs on CPU
+    HighPrecisionFloat,
+    /// Uses CPU alternatives to the normal algorithms
+    CPUOnly,
+}
+
+impl std::fmt::Display for OptLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            OptLevel::CacheOptimized => "cache-optimized",
+            OptLevel::AccuracyOptimized => "accuracy-optimized",
+            OptLevel::PerformanceOptimized => "performance-optimized",
+            OptLevel::HighPrecisionFloat => "high-precision-float",
+            OptLevel::CPUOnly => "cpu-only",
+        })
+    }
 }
 
 #[derive(
@@ -162,10 +185,20 @@ impl Default for ComplexPoint {
 
 impl ImgSpec {
     pub fn algorithm(&self) -> Algorithm {
-        match self.location.zoom {
-            // TODO: This is a poor estimate for Julia sets
-            x if x < 13.0 => Algorithm::Directf32,
-            _ => Algorithm::Perturbedf32,
+        if self.optimization_level == OptLevel::HighPrecisionFloat {
+            Algorithm::DirectFloatCPU
+        } else if self.optimization_level == OptLevel::CPUOnly {
+            match self.location.zoom {
+                // TODO: This is a poor estimate for Julia sets
+                x if x < 13.0 => Algorithm::Directf32CPU,
+                _ => Algorithm::Perturbedf32CPU,
+            }
+        } else {
+            match self.location.zoom {
+                // TODO: This is a poor estimate for Julia sets
+                x if x < 13.0 => Algorithm::Directf32,
+                _ => Algorithm::Perturbedf32,
+            }
         }
     }
 
@@ -216,7 +249,8 @@ impl ImgSpec {
             || rebuild;
         // if the probe location has changed or the image viewport has changed, re-generate the delta grid
         // if the image generation parameters have changed, re-run the compute shader
-        let recompute = self.location != other.location || reprobe;
+        let recompute =
+            self.location != other.location || self.algorithm() != other.algorithm() || reprobe;
         // if the image coloring parameters have changed, re-run the image render
         let recolor = self.style.external_coloring != other.style.external_coloring
             || self.style.internal_coloring != other.style.internal_coloring
@@ -256,7 +290,10 @@ impl ImgSpec {
                     | DERIVATIVE_ENABLED
                     | kind_flags
             }
-            OptLevel::AccuracyOptimized | OptLevel::PerformanceOptimized => {
+            OptLevel::AccuracyOptimized
+            | OptLevel::PerformanceOptimized
+            | OptLevel::CPUOnly
+            | OptLevel::HighPrecisionFloat => {
                 let mut flags = 0;
                 if self.contains_kind(LayerKind::Stripe) {
                     flags |= STRIPES_ENABLED;

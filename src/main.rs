@@ -44,6 +44,7 @@ fn main() -> Result<()> {
                 cli_options.compression_speed,
                 cli_options.compression_quality,
             )?,
+            cli_options.opt_level,
         )?;
         return Ok(());
     }
@@ -79,6 +80,7 @@ fn headless_render(
     settings_file: Option<&PathBuf>,
     path: &Path,
     compression_params: CompressionParams,
+    opt_level: OptLevel,
 ) -> Result<()> {
     let (device, queue) = get_device_and_queue().block_on()?;
     let Some(settings_file) = settings_file else {
@@ -88,7 +90,7 @@ fn headless_render(
         return Err(eyre!("Settings file does not exist"));
     }
     let mut image = ImgSpec::load(settings_file)?;
-    image.optimization_level = OptLevel::AccuracyOptimized;
+    image.optimization_level = opt_level;
     let mut engine = Engine::init(
         SharedState::new(device, queue),
         "cli renderer",

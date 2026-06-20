@@ -14,7 +14,7 @@ use clap::Parser;
 use color_eyre::eyre::eyre;
 use corgi_lib::image_gen::{ImageTimings, ProgressUpdate};
 use corgi_lib::types::serde::SafeSaveLoad;
-use corgi_lib::types::{ImgSpec, View};
+use corgi_lib::types::{ImgSpec, OptLevel, View};
 
 use crate::config::Context;
 use crate::ui::debouncer::Debouncer;
@@ -53,6 +53,9 @@ pub struct CorgiCliOptions {
     /// format supports it.
     #[arg(short = 'q', long, default_value_t = 80)]
     pub compression_quality: u8,
+    /// Overrides the optimization level when using headless rendering.
+    #[arg(long, default_value_t = OptLevel::AccuracyOptimized)]
+    pub opt_level: OptLevel,
 }
 
 /// The App State management struct

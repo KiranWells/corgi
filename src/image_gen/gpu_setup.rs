@@ -415,6 +415,34 @@ impl GPUData {
             Err(_recv_err) => unreachable!(),
         }
     }
+
+    /// Send data for a CPU rendered image from the CPU to the GPU.
+    pub fn upload_buffer_data(&self, id: BufferId, data: &[u8]) {
+        let buffer = match id {
+            BufferId::Step => &self.buffers.step,
+            BufferId::Orbit => &self.buffers.orbits,
+            BufferId::Stripe => &self.buffers.stripes,
+            BufferId::Z => &self.buffers.delta_n,
+            BufferId::Dz => &self.buffers.delta_prime,
+        };
+        let tmp_buffer = Buffers::create_buffer::<u8>(
+            &self.shared.device,
+            buffer.size() as usize,
+            BuffType::HostWritable,
+        );
+        // TODO: write_buffer_with?
+        self.shared.queue.write_buffer(&tmp_buffer, 0, data);
+        let mut encoder = self
+            .shared
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        encoder.copy_buffer_to_buffer(&tmp_buffer, 0, buffer, 0, None);
+        let si = self.shared.queue.submit([encoder.finish()]);
+        let _ = self.shared.device.poll(wgpu::PollType::Wait {
+            submission_index: Some(si),
+            timeout: None,
+        });
+    }
 }
 
 impl Buffers {
@@ -444,8 +472,16 @@ impl Buffers {
             label: None,
             size: (size * core::mem::size_of::<T>()) as u64,
             usage: match ty {
-                ShaderOnly => wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-                HostWritable => wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                ShaderOnly => {
+                    wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_SRC
+                        | wgpu::BufferUsages::COPY_DST
+                }
+                HostWritable => {
+                    wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_DST
+                        | wgpu::BufferUsages::COPY_SRC
+                }
                 HostReadable => wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                 Uniform => wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             },

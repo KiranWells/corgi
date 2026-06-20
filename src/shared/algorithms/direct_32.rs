@@ -13,6 +13,7 @@ pub fn calculate_point(
     initial_values: BufferValues,
     flags: u32,
     params: ComputeParams,
+    _probed_point: &[Vec2f],
 ) -> BufferValues {
     let aspect_scale = aspect(params.width, params.height);
     let offset = Vec2::new(params.x, params.y)

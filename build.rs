@@ -51,6 +51,8 @@ fn gen_shared_wesl() {
             (r"(?m)^.*\#\[host\]\n.*\n", ""),
             // remove attributes and derives
             (r"(?m)^ *#\[[^\]]+\]$", ""),
+            // remove impl blocks
+            (r"(?m)^impl[^}]+\{(.|\s)*?^\}", ""),
             // remove visibility descriptors
             (r"(?m)^( *)pub ", "$1"),
             // remove slice function parameters (these are global in wgsl)

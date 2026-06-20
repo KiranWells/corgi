@@ -8,14 +8,14 @@ the main entry point of [`Engine::render_image`]
  */
 
 mod gpu_setup;
-mod probe;
+pub mod probe;
 pub mod shader_types;
 
 use std::fs::OpenOptions;
 use std::io::BufWriter;
 use std::path::Path;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use documented::DocumentedFields;
@@ -28,13 +28,16 @@ use little_exif::exif_tag::ExifTag;
 use little_exif::metadata::Metadata;
 use parking_lot::RwLock;
 use probe::probe;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use wgpu::{self, Extent3d};
 
+use crate::shared::algorithms::{direct_32, perturbed_32};
 use crate::shared::coloring::main::{ColorParams, RenderParams};
-use crate::shared::types::ComputeParams;
+use crate::shared::types::{BufferValues, ComputeParams};
+use crate::shared::wgsl_primitives::{Vec2, Vec4};
 use crate::types::serde::{SafeSaveLoad, is_metadata_supported};
-use crate::types::{ImageDiff, ImgSpec};
+use crate::types::{Algorithm, ImageDiff, ImgSpec};
 
 #[derive(thiserror::Error, Debug)]
 #[non_exhaustive]
@@ -699,14 +702,26 @@ impl Engine {
         status_callback: &mut impl FnMut(ProgressUpdate),
     ) -> Result<(), RenderingError> {
         status_callback(ProgressUpdate::partial("Computing iterations", 0.0));
-        run_compute_step(
-            &self.gpu_data,
-            &self.probed_data,
-            image,
-            self.constants,
-            self.cancelled.clone(),
-            status_callback,
-        )?;
+        match image.algorithm() {
+            Algorithm::Directf32 | Algorithm::Perturbedf32 => run_compute_step(
+                &self.gpu_data,
+                &self.probed_data,
+                image,
+                self.constants,
+                self.cancelled.clone(),
+                status_callback,
+            )?,
+            Algorithm::Directf32CPU | Algorithm::Perturbedf32CPU | Algorithm::DirectFloatCPU => {
+                run_cpu_compute(
+                    &self.gpu_data,
+                    &self.probed_data,
+                    image,
+                    self.constants,
+                    self.cancelled.clone(),
+                    status_callback,
+                )?
+            }
+        }
         self.poll_unless_cancelled(None, status_callback)?;
         self.cache_validity.compute = true;
         Ok(())
@@ -751,7 +766,7 @@ impl Engine {
     }
 
     fn is_cancelled(&mut self, status_callback: &mut impl FnMut(ProgressUpdate)) -> bool {
-        if self.cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+        if self.cancelled.load(Ordering::Relaxed) {
             status_callback(ProgressUpdate::partial("Cancelled", 1.0));
             true
         } else {
@@ -765,6 +780,122 @@ impl Engine {
             .map(|img| image.compare(img))
             .unwrap_or(ImageDiff::full())
     }
+}
+
+fn run_cpu_compute(
+    gpu_data: &GPUData,
+    probed_data: &[[f32; 2]],
+    image: &ImgSpec,
+    constants: Constants,
+    cancelled: Arc<AtomicBool>,
+    status_callback: &mut impl FnMut(ProgressUpdate),
+) -> Result<(), RenderingError> {
+    let image_size = image.width * image.height;
+    let mut data = vec![];
+
+    let render_func: for<'a> fn(_, _, _, _, &'a _) -> BufferValues = match image.algorithm() {
+        Algorithm::Directf32 | Algorithm::Perturbedf32 => unreachable!(),
+        Algorithm::Directf32CPU => direct_32::calculate_point,
+        Algorithm::Perturbedf32CPU => perturbed_32::calculate_point,
+        Algorithm::DirectFloatCPU => unimplemented!(),
+    };
+
+    let parameters = ComputeParams::create(image, probed_data.len());
+
+    // run render function
+
+    let (send, rcv) = mpsc::channel();
+
+    let finished = AtomicU64::new(0);
+    std::thread::scope(|s| {
+        s.spawn(|| {
+            data = (0..image_size)
+                .into_par_iter()
+                .map(|index| {
+                    if cancelled.load(Ordering::Relaxed) {
+                        return BufferValues::zero();
+                    }
+                    let mut bv = BufferValues::zero();
+                    for i in 0..=(image.location.max_iter / constants.iter_batch_size) {
+                        let parameters = parameters.with_iter(image, i, constants.iter_batch_size);
+                        if parameters.chunk_max_iter == 0 {
+                            break;
+                        }
+                        let new_values = render_func(
+                            Vec2::new(index % image.width, index / image.width),
+                            bv.clone(),
+                            image.get_flags(),
+                            parameters,
+                            bytemuck::cast_slice(probed_data),
+                        );
+                        bv = new_values;
+                        if bv.step != 0 {
+                            break;
+                        }
+                    }
+                    if finished
+                        .fetch_add(1, Ordering::Relaxed)
+                        .is_multiple_of(1000)
+                    {
+                        let _ = send.send(ProgressUpdate::partial(
+                            "Computing iterations",
+                            finished.load(Ordering::Relaxed) as f64 / image_size as f64,
+                        ));
+                    };
+                    bv
+                })
+                .collect::<Vec<BufferValues>>();
+            drop(send);
+        });
+        while let Ok(val) = rcv.recv() {
+            status_callback(val);
+        }
+    });
+    if cancelled.load(Ordering::Relaxed) {
+        return Err(RenderingError::Cancelled);
+    }
+    status_callback(ProgressUpdate::partial("Computing iterations", 1.0));
+
+    // upload data to GPU buffers
+    gpu_data.upload_buffer_data(
+        gpu_setup::BufferId::Step,
+        bytemuck::cast_slice(&data.iter().map(|x| x.step).collect::<Vec<_>>()),
+    );
+    gpu_data.upload_buffer_data(
+        gpu_setup::BufferId::Orbit,
+        bytemuck::cast_slice(&data.iter().map(|x| x.orbits).collect::<Vec<_>>()),
+    );
+    gpu_data.upload_buffer_data(
+        gpu_setup::BufferId::Stripe,
+        bytemuck::cast_slice(&data.iter().map(|x| x.stripes).collect::<Vec<_>>()),
+    );
+    gpu_data.upload_buffer_data(
+        gpu_setup::BufferId::Z,
+        bytemuck::cast_slice(
+            &data
+                .iter()
+                .map(|x| {
+                    Vec4::new(
+                        x.delta_n.x,
+                        x.delta_n.y,
+                        x.zoom,
+                        bytemuck::cast(x.ref_iteration),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        ),
+    );
+    gpu_data.upload_buffer_data(
+        gpu_setup::BufferId::Dz,
+        bytemuck::cast_slice(
+            &data
+                .iter()
+                .map(|x| Vec4::new(x.z_n_prime.x, x.z_n_prime.y, x.zoom_prime, 0.0))
+                .collect::<Vec<_>>(),
+        ),
+    );
+
+    Ok(())
 }
 
 /// Runs the compute shader on the GPU. This is the most expensive step, so the output
@@ -788,23 +919,12 @@ fn run_compute_step(
     } = gpu_data;
     let texture_size: Extent3d = image.extents();
 
-    let (compute_pipeline, pt, probe_len) = match image.algorithm() {
-        crate::types::Algorithm::Directf32 => (
-            direct_f32_pipeline,
-            image.location.center.to_vec2(),
-            image.location.max_iter as usize,
-        ),
-        crate::types::Algorithm::Perturbedf32 => {
-            let offset = image
-                .view()
-                .complex_to_px_delta(&image.location.probe_location);
-            (
-                perturbed_f32_pipeline,
-                offset / image.size(),
-                probed_data.len(),
-            )
-        }
+    let compute_pipeline = match image.algorithm() {
+        crate::types::Algorithm::Directf32 => direct_f32_pipeline,
+        crate::types::Algorithm::Perturbedf32 => perturbed_f32_pipeline,
+        _ => unreachable!(),
     };
+    let parameters = ComputeParams::create(image, probed_data.len());
 
     // Compute passes have encountered timeouts on some GPUs, so we split the compute passes into
     // multiple smaller passes.
@@ -830,29 +950,8 @@ fn run_compute_step(
         }
 
         let command_buffer = encoder.finish();
-        let julia_point = match &image.location.fractal_kind {
-            crate::types::FractalKind::Mandelbrot => emath::Vec2::new(0.0, 0.0),
-            crate::types::FractalKind::Julia(pt) => pt.to_vec2(),
-        };
         // Update the parameters
-        let parameters = ComputeParams {
-            width: texture_size.width,
-            height: texture_size.height,
-            max_iter: image.location.max_iter,
-            chunk_max_iter: if (i + 1) * constants.iter_batch_size > image.location.max_iter {
-                image.location.max_iter % constants.iter_batch_size
-            } else {
-                constants.iter_batch_size
-            },
-            probe_len: probe_len as u32,
-            iter_offset: i * constants.iter_batch_size,
-            x: pt.x,
-            y: pt.y,
-            zoom: image.location.zoom,
-            angle: image.location.angle,
-            julia_x: julia_point.x,
-            julia_y: julia_point.y,
-        };
+        let parameters = parameters.with_iter(image, i, constants.iter_batch_size);
         if parameters.chunk_max_iter == 0 {
             break;
         }
@@ -882,7 +981,7 @@ fn run_compute_step(
             (i * constants.iter_batch_size + parameters.chunk_max_iter) as f64
                 / image.location.max_iter as f64,
         ));
-        if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+        if cancelled.load(Ordering::Relaxed) {
             status_callback(ProgressUpdate::partial("Cancelled", 1.0));
             return Err(RenderingError::Cancelled);
         }
