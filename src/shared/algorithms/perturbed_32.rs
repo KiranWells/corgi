@@ -224,7 +224,9 @@ pub fn calculate_point(
 
         // update cycle reference
         #[expect(clippy::manual_is_multiple_of)]
-        if step + params.iter_offset >= 100u32 && (step - 100u32) % (1024u32) == 0 {
+        if step + params.iter_offset >= 100u32
+            && (step + params.iter_offset - 100u32) % (1024u32) == 0
+        {
             x_old = x_n;
             delta_old = delta_n;
             zoom_old = zoom;

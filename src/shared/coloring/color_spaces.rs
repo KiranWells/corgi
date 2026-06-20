@@ -129,7 +129,7 @@ pub fn hue_to_rgb(hue: f32) -> Vec3f {
 // Converts from HSV to linear RGB
 pub fn hsv_to_linear_srgb(hsv: Vec3f) -> Vec3f {
     let rgb = hue_to_rgb(hsv.x);
-    return ((rgb - 1.0f32) * hsv.y + 1.0) * hsv.z;
+    return ((rgb - 1.0f32) * hsv.y + 1.0f32) * hsv.z;
 }
 
 // Converts from HSL to linear RGB

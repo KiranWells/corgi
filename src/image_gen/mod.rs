@@ -8,6 +8,7 @@ the main entry point of [`Engine::render_image`]
  */
 
 mod gpu_setup;
+mod hpf_algorithm;
 pub mod probe;
 pub mod shader_types;
 
@@ -797,7 +798,8 @@ fn run_cpu_compute(
         Algorithm::Directf32 | Algorithm::Perturbedf32 => unreachable!(),
         Algorithm::Directf32CPU => direct_32::calculate_point,
         Algorithm::Perturbedf32CPU => perturbed_32::calculate_point,
-        Algorithm::DirectFloatCPU => unimplemented!(),
+        // direct float function interface is not compatible
+        Algorithm::DirectFloatCPU => direct_32::calculate_point,
     };
 
     let parameters = ComputeParams::create(image, probed_data.len());
@@ -816,22 +818,40 @@ fn run_cpu_compute(
                         return BufferValues::zero();
                     }
                     let mut bv = BufferValues::zero();
+                    let mut hpf_bv = hpf_algorithm::BufferValues::zero();
                     for i in 0..=(image.location.max_iter / constants.iter_batch_size) {
                         let parameters = parameters.with_iter(image, i, constants.iter_batch_size);
                         if parameters.chunk_max_iter == 0 {
                             break;
                         }
-                        let new_values = render_func(
-                            Vec2::new(index % image.width, index / image.width),
-                            bv.clone(),
-                            image.get_flags(),
-                            parameters,
-                            bytemuck::cast_slice(probed_data),
-                        );
-                        bv = new_values;
-                        if bv.step != 0 {
-                            break;
+                        if image.algorithm() == Algorithm::DirectFloatCPU {
+                            let new_values = hpf_algorithm::calculate_point(
+                                Vec2::new(index % image.width, index / image.width),
+                                hpf_bv.clone(),
+                                image.get_flags(),
+                                parameters,
+                                image.location.center.clone(),
+                            );
+                            hpf_bv = new_values;
+                            if hpf_bv.step != 0 {
+                                break;
+                            }
+                        } else {
+                            let new_values = render_func(
+                                Vec2::new(index % image.width, index / image.width),
+                                bv.clone(),
+                                image.get_flags(),
+                                parameters,
+                                bytemuck::cast_slice(probed_data),
+                            );
+                            bv = new_values;
+                            if bv.step != 0 {
+                                break;
+                            }
                         }
+                    }
+                    if image.algorithm() == Algorithm::DirectFloatCPU {
+                        bv = hpf_bv.to_f32();
                     }
                     if finished
                         .fetch_add(1, Ordering::Relaxed)

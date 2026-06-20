@@ -184,7 +184,7 @@ pub fn pbr_neutral_tone_mapping(in_color: Vec3f) -> Vec3f {
     if x < 0.08 {
         color -= x - 6.25 * x * x;
     } else {
-        color -= 0.04;
+        color -= 0.04f32;
     }
 
     let max_rg = color.x.max(color.y);

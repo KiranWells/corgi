@@ -3,7 +3,7 @@
 pub mod algorithms;
 pub mod coloring;
 pub mod types;
-mod utils;
+pub mod utils;
 pub mod wgsl_primitives;
 
 use wgsl_primitives::*;

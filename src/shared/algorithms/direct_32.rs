@@ -20,8 +20,8 @@ pub fn calculate_point(
         + (Vec2::new(
             global_id.x as f32 / params.width as f32,
             global_id.y as f32 / params.height as f32,
-        ) - 0.5)
-            * 2.0
+        ) - 0.5f32)
+            * 2.0f32
             * 2.0f32.powf(-params.zoom)
             * aspect_scale
             * rotation_matrix(params.angle);
