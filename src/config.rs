@@ -25,6 +25,7 @@ pub struct Config {
     pub ui_max_shader_batch_iters: u32,
     pub max_shader_batch_iters: u32,
     pub thumbnail_size: u32,
+    pub show_debug_options: bool,
 }
 
 /// Cached values
@@ -77,6 +78,7 @@ impl Default for Config {
             ui_max_shader_batch_iters: 1000,
             max_shader_batch_iters: 5000,
             thumbnail_size: 256,
+            show_debug_options: false,
         }
     }
 }

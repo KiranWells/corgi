@@ -3,8 +3,7 @@ use std::path::{Path, PathBuf};
 
 use corgi_lib::types::{OptLevel, Style as ImgStyle, View, get_precision};
 use directories::BaseDirs;
-use eframe::egui;
-use eframe::egui::{Button, CornerRadius, TextStyle, WidgetText};
+use eframe::egui::{self, Button, CornerRadius, TextStyle, WidgetText};
 use egui_material_icons::icons;
 use egui_taffy::TuiBuilderLogic;
 use taffy::prelude::*;
@@ -21,6 +20,7 @@ pub struct ExploreTabState {
     pub style: ImgStyle,
     pub scaling: f32,
     pub location_presets: PresetLibrary,
+    pub opt_level: OptLevel,
 }
 
 #[derive(Debug)]
@@ -175,6 +175,23 @@ impl super::CorgiUI {
                 egui::DragValue::new(&mut self.root_spec.height).speed(10.0),
             );
         });
+        if context.config().show_debug_options {
+            section(tui, "Debug", true, |tui| {
+                tui.egui_style_mut().spacing.icon_width = tui.egui_ui().spacing().icon_width * 1.5;
+                selection_with_label(
+                    tui,
+                    "Opt Level",
+                    Some("Determines which algorithm to use"),
+                    &mut self.explore_state.opt_level,
+                    vec![
+                        OptLevel::PerformanceOptimized,
+                        OptLevel::CacheOptimized,
+                        OptLevel::CPUOnly,
+                        OptLevel::HighPrecisionFloat,
+                    ],
+                );
+            });
+        }
     }
 
     pub(super) fn style_tab(

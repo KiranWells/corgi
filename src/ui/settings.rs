@@ -1,4 +1,4 @@
-use eframe::egui::DragValue;
+use eframe::egui::{Checkbox, DragValue};
 
 use crate::ui::EditUI;
 use crate::ui::utils::{color32_edit, input_with_label, ui_with_label};
@@ -29,6 +29,14 @@ impl EditUI for crate::Config {
             DragValue::new(&mut self.thumbnail_size)
                 .speed(10)
                 .range(1..=1024),
+        );
+
+        tui.egui_style_mut().spacing.icon_width = tui.egui_ui().spacing().icon_width * 1.5;
+        input_with_label(
+            tui,
+            "Show Debug Options",
+            None,
+            Checkbox::new(&mut self.show_debug_options, ""),
         );
     }
 }

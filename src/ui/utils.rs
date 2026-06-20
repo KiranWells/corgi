@@ -1,6 +1,6 @@
 use std::mem::discriminant;
 
-use corgi_lib::types::{ComplexPoint, FractalKind, Gradient, LayerKind, LightingKind};
+use corgi_lib::types::{ComplexPoint, FractalKind, Gradient, LayerKind, LightingKind, OptLevel};
 use eframe::egui::{self, Color32, RichText, Sense, WidgetText};
 use egui_taffy::{Tui, TuiBuilderLogic, TuiWidget};
 use rug::Float;
@@ -223,6 +223,18 @@ impl ToHelpText for StripeType {
             2 => "rounded effect in the vertical direction",
             3 => "rounded effect in the horizontal direction",
             _ => unreachable!(),
+        }
+    }
+}
+
+impl ToLabel for OptLevel {
+    fn label(&self) -> &'static str {
+        match self {
+            OptLevel::CacheOptimized => "cache validity",
+            OptLevel::AccuracyOptimized => "accuracy",
+            OptLevel::PerformanceOptimized => "performance",
+            OptLevel::HighPrecisionFloat => "debug HPF",
+            OptLevel::CPUOnly => "debug CPU",
         }
     }
 }

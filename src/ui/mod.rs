@@ -125,6 +125,7 @@ impl CorgiUI {
                 location_presets: PresetLibrary::new(
                     base_dirs.iter().map(|p| p.join("locations")).collect(),
                 ),
+                opt_level: OptLevel::PerformanceOptimized,
             },
             style_state: StyleTabState {
                 rendered_view: image.view(),
@@ -646,7 +647,7 @@ impl CorgiUI {
                 active_image.location.zoom -=
                     self.current_view.zoom_offset_from(&self.root_spec.view()) + 0.1;
                 active_image.scale(self.explore_state.scaling);
-                active_image.optimization_level = OptLevel::PerformanceOptimized;
+                active_image.optimization_level = self.explore_state.opt_level;
                 active_image
             }
             UITab::Style => {
