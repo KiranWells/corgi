@@ -1,12 +1,14 @@
 // Perturbed version of the fractal compute step.
 use super::super::types::{BufferValues, ComputeParams};
 use super::super::utils::{
-    DERIVATIVE_ENABLED, ESCAPE_RADIUS, FRACTEXP_SCALE_FACTOR, JULIA, ORBIT_ENABLED,
-    STRIPES_ENABLED, TOTAL_ANGLE_ENABLED, aspect, get_orbit_values, get_stripe_values,
-    length_squared, rotation_matrix, scaled, step_frac,
+    DERIVATIVE_ENABLED, ESCAPE_RADIUS, FRACTEXP_LOWER_BOUND, FRACTEXP_MAX_SCALE_FACTOR,
+    FRACTEXP_MIN_SCALE_FACTOR, FRACTEXP_UPPER_BOUND, JULIA, ORBIT_ENABLED, STRIPES_ENABLED,
+    TOTAL_ANGLE_ENABLED, aspect, get_orbit_values, get_stripe_values, length_squared,
+    rotation_matrix, scaled, step_frac,
 };
 use crate::shared::wgsl_primitives::*;
 
+#[inline]
 fn iter_delta_n(delta_n: Vec2f, zoom: f32, x_n: Vec2f, delta_0: Vec2f, zoom_0: f32) -> Vec2f {
     let scale = 2.0f32.powf(zoom);
     let scale_diff = 2.0f32.powf(zoom_0 - zoom);
@@ -20,6 +22,7 @@ fn iter_delta_n(delta_n: Vec2f, zoom: f32, x_n: Vec2f, delta_0: Vec2f, zoom_0: f
     );
 }
 
+#[inline]
 fn iter_z_n_prime(y_n: Vec2f, z_n_prime: Vec2f, zoom_prime: f32) -> Vec2f {
     return Vec2::new(
         2.0 * (y_n.x * z_n_prime.x - y_n.y * z_n_prime.y) + 1.0 * 2.0f32.powf(-zoom_prime),
@@ -27,20 +30,26 @@ fn iter_z_n_prime(y_n: Vec2f, z_n_prime: Vec2f, zoom_prime: f32) -> Vec2f {
     );
 }
 
+#[inline]
 fn rebase_fractexp(x: &mut Vec2f, exp: &mut f32) {
     let abs = (*x).abs();
-    let lower_bound = Vec2::splat(2.0f32.powf(-FRACTEXP_SCALE_FACTOR));
-    if abs.x < lower_bound.x && abs.y < lower_bound.y {
-        *x *= 2.0f32.powf(FRACTEXP_SCALE_FACTOR);
-        *exp -= FRACTEXP_SCALE_FACTOR;
+    if abs.x < FRACTEXP_LOWER_BOUND && abs.y < FRACTEXP_LOWER_BOUND {
+        let scalea = (abs.x.log2() + abs.y.log2()) / 2.0;
+        let scaleb = scalea.ceil() + 5.0;
+        let scale = -scaleb.clamp(-FRACTEXP_MAX_SCALE_FACTOR, FRACTEXP_MIN_SCALE_FACTOR);
+        *x *= 2.0f32.powf(scale);
+        *exp -= scale;
     }
-    let upper_bound = Vec2::splat(2.0f32.powf(FRACTEXP_SCALE_FACTOR));
-    if abs.x < upper_bound.x && abs.y < upper_bound.y {
-        *x *= 2.0f32.powf(-FRACTEXP_SCALE_FACTOR);
-        *exp += FRACTEXP_SCALE_FACTOR;
+    if abs.x > FRACTEXP_UPPER_BOUND && abs.y > FRACTEXP_UPPER_BOUND {
+        let scalea = (abs.x.log2() + abs.y.log2()) / 2.0;
+        let scaleb = scalea.floor() - 5.0;
+        let scale = -scaleb.clamp(FRACTEXP_MIN_SCALE_FACTOR, FRACTEXP_MAX_SCALE_FACTOR);
+        *x *= 2.0f32.powf(scale);
+        *exp -= scale;
     }
 }
 
+#[inline]
 fn rebase_probe_mandel(
     x_n: &mut Vec2f,
     _x_0: Vec2f,
@@ -49,14 +58,25 @@ fn rebase_probe_mandel(
     ref_iteration: &mut u32,
     probe_len: u32,
 ) {
-    let y_n1 = *x_n * 2.0f32.powf(-*zoom) + *delta_n;
-    if length_squared(y_n1) < length_squared(*delta_n) || *ref_iteration == probe_len {
+    if *zoom > -165.0 {
+        let y_n1 = *x_n * 2.0f32.powf(-*zoom) + *delta_n;
+        if length_squared(y_n1) < length_squared(*delta_n) {
+            *delta_n = y_n1;
+            *ref_iteration = 0;
+            *x_n = Vec2::splat(0.0);
+            return;
+        }
+    }
+    if *ref_iteration == probe_len - 1 {
+        let y_n1 = *x_n + *delta_n * 2.0f32.powf(*zoom);
         *delta_n = y_n1;
+        *zoom = 0.0;
         *ref_iteration = 0;
         *x_n = Vec2::splat(0.0);
     }
 }
 
+#[inline]
 fn rebase_probe_julia(
     x_n: &mut Vec2f,
     x_0: Vec2f,
@@ -237,10 +257,8 @@ pub fn calculate_point(
             z_n_prime = iter_z_n_prime(y_n, z_n_prime, zoom_prime);
         }
         delta_n = iter_delta_n(delta_n, zoom, x_n, delta_0, zoom_0);
-        if step % 32 == 0 {
-            rebase_fractexp(&mut delta_n, &mut zoom);
-            rebase_fractexp(&mut z_n_prime, &mut zoom_prime);
-        }
+        rebase_fractexp(&mut delta_n, &mut zoom);
+        rebase_fractexp(&mut z_n_prime, &mut zoom_prime);
     }
 
     // update the output values
@@ -264,20 +282,14 @@ pub fn calculate_point(
         output.delta_n = y_n;
 
         if internal {
-            // intermediate_step[buffer_index] = -i32(min_iter);
             output.step = -(min_iter as i32);
-            // z_grid_prime[buffer_index] = vec3(total_angle);
             output.z_n_prime = Vec2::splat(total_angle);
-            // stripes_buffer[buffer_index] = stripes / f32(params.iter_offset + step);
             output.stripes = stripes / (params.iter_offset + outer_step) as f32;
         } else {
-            // intermediate_step[buffer_index] = i32(params.iter_offset + step);
             output.step = (params.iter_offset + outer_step) as i32;
-            // z_grid_prime[buffer_index] = vec3(z_n_prime * 2.0.powf( zoom_prime + zoom_0), -zoom_0);
             output.z_n_prime = z_n_prime * 2.0f32.powf(zoom_prime + zoom_0);
             output.zoom_prime = -zoom_0;
             let frac = step_frac(radius_squared, ESCAPE_RADIUS);
-            // stripes_buffer[buffer_index] = stripes / f32(params.iter_offset + step) * frac + prev_stripes / f32(params.iter_offset + step - 1) * (1.0 - frac);
             output.stripes = stripes / (params.iter_offset + outer_step) as f32 * frac
                 + prev_stripes / (params.iter_offset + outer_step - 1) as f32 * (1.0 - frac);
         }

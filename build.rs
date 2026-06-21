@@ -49,6 +49,7 @@ fn gen_shared_wesl() {
             (r"use crate::shared::wgsl_primitives::\*;", ""),
             // remove explicitly host-only lines
             (r"(?m)^.*\#\[host\]\n.*\n", ""),
+            (r"(?m)^.*(\w+)!\([^)]+\);\n", ""),
             // remove attributes and derives
             (r"(?m)^ *#\[[^\]]+\]$", ""),
             // remove impl blocks
@@ -73,6 +74,7 @@ fn gen_shared_wesl() {
             (r"([0-9a-fA-F]+)_?usize", "${1}u"),
             // 1_u32 -> 1u
             (r"([0-9a-fA-F]+)_?u32", "${1}u"),
+            (r"([0-9a-fA-F]+)_?i32", "${1}"),
             // 2.0_f32 -> 2.0f
             (r"(\d+)_?f32", "${1}f"),
             // Vec3::new -> Vec3

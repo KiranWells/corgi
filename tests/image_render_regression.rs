@@ -11,7 +11,10 @@ use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
 };
 
-const TEST_OUTPUT_DIR: &str = "target/test";
+use crate::common::test_output_dir;
+
+mod common;
+
 const TEST_IMAGE_SIZE: u32 = 100;
 static TEST_ENGINE: LazyLock<Mutex<Engine>> = LazyLock::new(|| {
     let (device, queue) = get_device_and_queue().block_on().unwrap();
@@ -30,16 +33,12 @@ static TEST_ENGINE: LazyLock<Mutex<Engine>> = LazyLock::new(|| {
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     ))
 });
-static INIT: std::sync::Once = std::sync::Once::new();
 
 macro_rules! regression_test {
-    ($name:ident) => {
+    ($(#[$ignore:meta])? $name:ident) => {
+        $(#[$ignore])?
         #[test]
         fn $name() {
-            INIT.call_once(|| {
-                let _ = std::fs::remove_dir_all(Path::new(TEST_OUTPUT_DIR));
-                std::fs::create_dir(Path::new(TEST_OUTPUT_DIR)).unwrap();
-            });
             let image_path = Path::new("tests/regression_images")
                 .join(stringify!($name))
                 .with_added_extension("png");
@@ -60,9 +59,11 @@ regression_test!(neon_rainbow);
 regression_test!(rusting_terraces);
 regression_test!(sample_fractal);
 regression_test!(violet_flows);
-// image is too noisy for image comparison
 // TODO: enable after implementing support for multisampling
-// regression_test!(v0_splash);
+regression_test!(
+    #[ignore = "image is too noisy for image comparison"]
+    v0_splash
+);
 
 fn render_img(image_path: &Path, opt_level: OptLevel) -> DynamicImage {
     let mut image = ImgSpec::load(image_path).unwrap();
@@ -120,7 +121,7 @@ fn test_image_error(img: DynamicImage, reference_img: DynamicImage, test_name: &
         combined_buf
             .copy_from(comp_image.as_rgb8().unwrap(), width * 2, 0)
             .unwrap();
-        let path = Path::new(TEST_OUTPUT_DIR).join(format!("{test_name}_test_failure.png"));
+        let path = test_output_dir().join(format!("{test_name}_test_failure.png"));
         image::DynamicImage::ImageRgb8(combined_buf)
             .save(&path)
             .unwrap();

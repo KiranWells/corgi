@@ -10,7 +10,15 @@ use crate::shared::wgsl_primitives::*;
 pub const PI: f32 = 3.1415926535897932384626433832795028841971693993751058209749445923078164062862089986280348253421170679;
 pub const TAU: f32 = 2.0 * PI;
 pub const ESCAPE_RADIUS: f32 = 10000.0;
-pub const FRACTEXP_SCALE_FACTOR: f32 = 10.0;
+/// Minimum/maximum jump in exponent when rebasing a fractexp number
+pub const FRACTEXP_MIN_SCALE_FACTOR: f32 = 0.0;
+pub const FRACTEXP_MAX_SCALE_FACTOR: f32 = 120.0;
+/// Float operations are most accurate when the fractexp
+/// value is in the same rough range as the probe values,
+/// and not excessively small. Min normal float value is
+/// 1.18e-38
+pub const FRACTEXP_LOWER_BOUND: f32 = 1e-19;
+pub const FRACTEXP_UPPER_BOUND: f32 = 2.0;
 // flags
 pub const STRIPES_ENABLED: u32 = 0x1u32;
 pub const TOTAL_ANGLE_ENABLED: u32 = 0x2u32;

@@ -21,12 +21,19 @@ pub struct ComputeParams {
 
 impl ComputeParams {
     pub fn create(image: &crate::types::ImgSpec, probe_len: usize) -> Self {
+        Self::create_with_alg(image, probe_len, image.algorithm())
+    }
+    pub fn create_with_alg(
+        image: &crate::types::ImgSpec,
+        probe_len: usize,
+        algorithm: crate::types::Algorithm,
+    ) -> Self {
         use crate::types::Algorithm::*;
         let julia_point = match &image.location.fractal_kind {
             crate::types::FractalKind::Mandelbrot => emath::Vec2::new(0.0, 0.0),
             crate::types::FractalKind::Julia(pt) => pt.to_vec2(),
         };
-        let (pt, probe_len) = match image.algorithm() {
+        let (pt, probe_len) = match algorithm {
             Directf32 | Directf32CPU | DirectFloatCPU => {
                 (image.location.center.to_vec2(), image.location.max_iter)
             }

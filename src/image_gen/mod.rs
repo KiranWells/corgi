@@ -8,7 +8,7 @@ the main entry point of [`Engine::render_image`]
  */
 
 mod gpu_setup;
-mod hpf_algorithm;
+pub mod hpf_algorithm;
 pub mod probe;
 pub mod shader_types;
 

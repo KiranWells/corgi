@@ -10,7 +10,7 @@ use rug::Float;
 use crate::image_gen::ProgressUpdate;
 use crate::types::{ComplexPoint, get_precision};
 
-pub const ESCAPE_RADIUS: f64 = 1e10;
+pub const ESCAPE_RADIUS_SQUARED: f64 = 4.0;
 
 /// # FromFloat
 /// A trait to convert a `rug::Float` to another type.
@@ -93,7 +93,7 @@ where
 
         let radius_squared = z_squared_real.to_f64() + z_squared_imag.to_f64();
 
-        if radius_squared > ESCAPE_RADIUS {
+        if radius_squared > ESCAPE_RADIUS_SQUARED {
             break;
         }
     }
