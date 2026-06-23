@@ -81,48 +81,63 @@ pub fn logs_ui(ui: &mut egui::Ui, origin_rect: egui::Rect) {
                 for (i, log) in logs.iter().enumerate() {
                     egui::Frame::new()
                         .shadow(egui::Shadow {
-                            offset: [4, 4],
-                            blur: 4,
-                            spread: 4,
+                            offset: [5, 5],
+                            blur: 5,
+                            spread: 0,
                             color: Color32::from_black_alpha(128),
                         })
                         .fill(ui.visuals().window_fill)
-                        .inner_margin(ui.spacing().item_spacing.x * 2.0)
                         .show(ui, |ui| {
                             ui.set_height(
                                 ui.text_style_height(&egui::TextStyle::Button)
                                     + ui.spacing().button_padding.y * 2.0,
                             );
                             ui.set_width(ui.spacing().indent * 10.0);
-                            ui.horizontal_centered(|ui| {
-                                ui.label(
-                                    egui::RichText::new(match log.level {
-                                        tracing::Level::ERROR => {
-                                            format!("{} Error", icons::ICON_ERROR)
-                                        }
-                                        tracing::Level::WARN => {
-                                            format!("{} Warning", icons::ICON_WARNING)
-                                        }
-                                        _ => format!("{} Notice", icons::ICON_INFO),
-                                    })
-                                    .color(match log.level {
-                                        tracing::Level::ERROR => ui.visuals().error_fg_color,
-                                        tracing::Level::WARN => ui.visuals().warn_fg_color,
-                                        _ => ui.visuals().text_color(),
-                                    }),
-                                );
-                                ui.add_space(ui.available_width() - ui.available_height());
-                                if ui
-                                    .add(
-                                        egui::Button::new(icons::ICON_CLOSE)
+                            let log_color = match log.level {
+                                tracing::Level::ERROR => ui.visuals().error_fg_color,
+                                tracing::Level::WARN => ui.visuals().warn_fg_color,
+                                _ => ui.visuals().text_color(),
+                            };
+                            egui::Frame::new().fill(log_color).show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.add_space(ui.spacing().item_spacing.x);
+                                    ui.label(
+                                        egui::RichText::new(match log.level {
+                                            tracing::Level::ERROR => {
+                                                format!("{} Error", icons::ICON_ERROR)
+                                            }
+                                            tracing::Level::WARN => {
+                                                format!("{} Warning", icons::ICON_WARNING)
+                                            }
+                                            _ => format!("{} Notice", icons::ICON_INFO),
+                                        })
+                                        .color(ui.visuals().window_fill),
+                                    );
+                                    ui.add_space(ui.available_width() - ui.available_height());
+                                    if ui
+                                        .add(
+                                            egui::Button::new(
+                                                egui::RichText::new(icons::ICON_CLOSE)
+                                                    .color(ui.visuals().window_fill),
+                                            )
+                                            .fill(
+                                                log_color
+                                                    .lerp_to_gamma(ui.visuals().window_fill, 0.25),
+                                            )
+                                            .corner_radius(0.0)
                                             .frame_when_inactive(false),
-                                    )
-                                    .clicked()
-                                {
-                                    closed = Some(i);
-                                }
+                                        )
+                                        .clicked()
+                                    {
+                                        closed = Some(i);
+                                    }
+                                });
                             });
-                            ui.label(&log.message);
+                            egui::Frame::new()
+                                .inner_margin(ui.spacing().button_padding * 2.0)
+                                .show(ui, |ui| {
+                                    ui.label(&log.message);
+                                });
                         });
                     // not sure why, but `add_space` does nothing here
                     ui.label("");

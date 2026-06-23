@@ -55,6 +55,8 @@ pub struct Theme {
     pub bg_color: Color32,
     pub fg_color: Color32,
     pub accent_color: Color32,
+    pub warn_color: Color32,
+    pub error_color: Color32,
     pub spacing: f32,
     pub base_rem: f32,
 }
@@ -107,6 +109,8 @@ impl Default for Theme {
             bg_color: Color32::from_rgb(30, 30, 46),
             fg_color: Color32::from_rgb(186, 194, 222),
             accent_color: Color32::from_rgb(116, 199, 236),
+            warn_color: Color32::from_rgb(249, 226, 175),
+            error_color: Color32::from_rgb(243, 139, 168),
             spacing: 4.0,
             base_rem: 12.0,
         }
@@ -339,6 +343,8 @@ impl Theme {
                 faint_bg_color: self.mantle(),
                 extreme_bg_color: self.crust(),
                 code_bg_color: self.crust(),
+                warn_fg_color: self.warn_color,
+                error_fg_color: self.error_color,
                 window_corner_radius: eframe::egui::CornerRadius::same(self.spacing as u8),
                 window_fill: self.base(),
                 window_stroke: Default::default(),

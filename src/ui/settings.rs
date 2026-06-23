@@ -52,6 +52,12 @@ impl EditUI for crate::Theme {
         ui_with_label(tui, "Accent Color", None, |tui| {
             color32_edit(tui, &mut self.accent_color)
         });
+        ui_with_label(tui, "Warning Color", None, |tui| {
+            color32_edit(tui, &mut self.warn_color)
+        });
+        ui_with_label(tui, "Error Color", None, |tui| {
+            color32_edit(tui, &mut self.error_color)
+        });
         input_with_label(
             tui,
             "Spacing",
