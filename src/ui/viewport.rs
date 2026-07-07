@@ -17,7 +17,9 @@ impl super::CorgiUI {
         ctx: &egui::Context,
     ) -> Option<ComplexPoint> {
         let mut new_max_rect = ui.max_rect();
-        new_max_rect.set_height(new_max_rect.height() - 20.0);
+        let footer_size =
+            ui.text_style_height(&egui::TextStyle::Body) + ui.spacing().item_spacing.x * 2.0;
+        new_max_rect.set_height(new_max_rect.height() - footer_size);
         let mut hover_pt = None;
         ui.scope_builder(
             UiBuilder::new().sense(Sense::drag()).max_rect(new_max_rect),

@@ -495,11 +495,36 @@ impl CorgiUI {
         hover_pt: Option<ComplexPoint>,
     ) {
         ui.horizontal_centered(|ui| {
+            let margin = ui.spacing().item_spacing.x / 2.0;
+            Frame::new()
+                .inner_margin(margin)
+                .fill(ui.style().visuals.selection.bg_fill)
+                .show(ui, |ui| {
+                    ui.scope_builder(
+                        UiBuilder::new()
+                            .max_rect(egui::Rect::from_min_size(
+                                ui.max_rect().left_top(),
+                                Vec2::splat(ui.max_rect().height()),
+                            ))
+                            .layout(egui::Layout::centered_and_justified(
+                                egui::Direction::TopDown,
+                            )),
+                        |ui| {
+                            ui.add(
+                                egui::Image::new(egui::include_image!(
+                                    "../../assets/logo/icon_mono.svg"
+                                ))
+                                .tint(ui.style().visuals.window_fill),
+                            );
+                        },
+                    );
+                });
+            let progress_start = ui.spacing().item_spacing.x + ui.max_rect().height();
             ui.scope_builder(
                 UiBuilder::new().max_rect(
                     ui.max_rect()
-                        .with_max_x(100.0 + ui.spacing().item_spacing.x)
-                        .with_min_x(ui.spacing().item_spacing.x),
+                        .with_max_x(100.0 + progress_start)
+                        .with_min_x(progress_start),
                 ),
                 |ui| {
                     ui.add_visible(

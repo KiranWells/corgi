@@ -1,10 +1,12 @@
-# Corgi
+<p align="center">
+  <img alt="Corgi Fractal Engine Logo" src="assets/logo/full.svg" height="200" />
+</p>
 
 Corgi is a performance-focused fractal rendering engine capable of ultra-deep zooms and highly flexible styling.
 
-![An example of the UI in use at extreme zoom levels](assets/ui_example_small.avif)
-
 ## Features
+
+![An example of the UI in use at extreme zoom levels](assets/ui_example_small.avif)
 
 ### High precision rendering
 
