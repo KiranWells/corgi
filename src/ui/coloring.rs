@@ -61,10 +61,9 @@ impl EditUI for Coloring {
                 tui,
                 "Gradient offset",
                 None,
-                egui::DragValue::new(&mut self.color_offset)
-                    .speed(0.003)
-                    .range(0.0..=1.0),
+                egui::DragValue::new(&mut self.color_offset).speed(0.003),
             );
+            self.color_offset = (self.color_offset.fract() + 1.0).fract();
         }
         if discriminant(&self.gradient) != discriminant(&Gradient::Flat(Default::default())) {
             self.color_layers.render_edit_ui(ctx, tui);
@@ -193,11 +192,8 @@ impl EditUI for Gradient {
                             let mut stop = colors[i][3].fract() / 0.999;
                             let mut stop_kind = StopKind(colors[i][3].floor() as u8);
                             color_edit(tui, colors[i].first_chunk_mut().unwrap());
-                            let res = tui.ui_add(
-                                egui::DragValue::new(&mut stop)
-                                    .speed(0.001)
-                                    .range(0.0..=1.0),
-                            );
+                            let res = tui.ui_add(egui::DragValue::new(&mut stop).speed(0.001));
+                            stop = (stop.fract() + 1.0).fract();
                             dragged = dragged || res.is_pointer_button_down_on() || res.has_focus();
                             stop_kind.render_edit_ui(ctx, tui);
                             colors[i][3] = stop_kind.0 as f32 + stop * 0.999;

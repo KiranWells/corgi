@@ -11,9 +11,14 @@ use crate::ui::tabs::UITab;
 
 impl super::CorgiUI {
     /// Render the image preview viewport
-    pub(super) fn viewport(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+    pub(super) fn viewport(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+    ) -> Option<ComplexPoint> {
         let mut new_max_rect = ui.max_rect();
         new_max_rect.set_height(new_max_rect.height() - 20.0);
+        let mut hover_pt = None;
         ui.scope_builder(
             UiBuilder::new().sense(Sense::drag()).max_rect(new_max_rect),
             |ui| {
@@ -33,16 +38,18 @@ impl super::CorgiUI {
 
                 let view_image = self.image();
                 // update image settings
+                if pointer_in_rect && let Some(pos) = pointer_pos {
+                    hover_pt = Some(
+                        view_image
+                            .view()
+                            .px_to_complex(pos, self.explore_state.scaling),
+                    );
+                }
                 if self.setting_probe {
                     // probe setting mode, set the probe location to the mouse position
                     // on click
-                    if primary_down
-                        && pointer_in_rect
-                        && let Some(pos) = pointer_pos
-                    {
-                        self.root_spec.location.probe_location = view_image
-                            .view()
-                            .px_to_complex(pos, self.explore_state.scaling);
+                    if primary_down && let Some(hover_pt) = hover_pt.clone() {
+                        self.root_spec.location.probe_location = hover_pt;
                         self.setting_probe = false;
                     }
                 } else {
@@ -69,6 +76,7 @@ impl super::CorgiUI {
                 ui.painter().add(callback);
             },
         );
+        hover_pt
     }
 
     pub(super) fn render_widgets(

@@ -11,7 +11,7 @@ use taffy::prelude::*;
 use super::preset_library::PresetLibrary;
 use super::utils::{collapsible, input_with_label, point_edit, section};
 use crate::ui::EditUI;
-use crate::ui::utils::{StyleExt, selection_with_label};
+use crate::ui::utils::{StyleExt, selection_with_label, ui_with_label};
 use crate::worker::{ImageGenCommand, RendererId};
 
 #[derive(Debug)]
@@ -130,16 +130,33 @@ impl super::CorgiUI {
                     .speed(0.03)
                     .update_while_editing(false),
             );
-            input_with_label(
+            ui_with_label(
                 tui,
                 "Max iteration",
                 Some(
                     "The maximum number of iterations to calculate before assuming a point is inside the set. Not all points will run this many iterations, some will quit early.",
                 ),
-                egui::DragValue::new(&mut self.root_spec.location.max_iter)
-                    .speed(100.0)
-                    .range(100..=u32::MAX)
-                    .update_while_editing(false),
+                |tui| {
+                    if tui.ui_add(egui::Button::new("÷10")).clicked() {
+                        self.root_spec.location.max_iter /= 10;
+                    }
+                    if tui.ui_add(egui::Button::new("÷2")).clicked() {
+                        self.root_spec.location.max_iter /= 2;
+                    }
+                    let res = tui.ui_add(
+                        egui::DragValue::new(&mut self.root_spec.location.max_iter)
+                            .speed(100.0)
+                            .range(100..=u32::MAX)
+                            .update_while_editing(false),
+                    );
+                    if tui.ui_add(egui::Button::new("×2")).clicked() {
+                        self.root_spec.location.max_iter *= 2;
+                    }
+                    if tui.ui_add(egui::Button::new("×10")).clicked() {
+                        self.root_spec.location.max_iter *= 10;
+                    }
+                    res
+                },
             );
             collapsible(tui, "Advanced", |tui| {
                 point_edit(

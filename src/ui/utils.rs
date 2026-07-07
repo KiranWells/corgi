@@ -510,6 +510,7 @@ pub fn ui_with_label(
                 display: Display::Flex,
                 size: percent(1.0),
                 justify_content: Some(AlignContent::End),
+                gap: length(gap),
                 ..Default::default()
             })
             .egui_layout(egui::Layout::top_down(egui::Align::Max))

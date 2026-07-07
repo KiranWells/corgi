@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 
 use corgi_lib::image_gen::CompressionParams;
-use corgi_lib::types::{ImgSpec, OptLevel, Style as ImgStyle, View};
+use corgi_lib::types::{ComplexPoint, ImgSpec, OptLevel, Style as ImgStyle, View};
 use documented::DocumentedFields;
 use eframe::egui::containers::menu::MenuButton;
 use eframe::egui::{
@@ -20,6 +20,7 @@ use eframe::{egui, egui_wgpu};
 use egui_material_icons::icons;
 use egui_taffy::{TuiBuilderLogic, tui};
 use preset_library::PresetLibrary;
+use rug::Float;
 use taffy::prelude::*;
 use utils::{input_with_label, section};
 
@@ -191,9 +192,9 @@ impl CorgiUI {
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 let origin_rect = ui.available_rect_before_wrap();
-                self.viewport(ui, ctx);
+                let hover_pt = self.viewport(ui, ctx);
                 self.render_widgets(ui, ctx, context);
-                self.footer(ui);
+                self.footer(ui, context, hover_pt);
                 crate::app_log::logs_ui(ui, origin_rect);
             });
 
@@ -487,7 +488,12 @@ impl CorgiUI {
         ui.style_mut().spacing.item_spacing.y = y;
     }
 
-    fn footer(&mut self, ui: &mut egui::Ui) {
+    fn footer(
+        &mut self,
+        ui: &mut egui::Ui,
+        context: &crate::Context,
+        hover_pt: Option<ComplexPoint>,
+    ) {
         ui.horizontal_centered(|ui| {
             ui.scope_builder(
                 UiBuilder::new().max_rect(
@@ -504,8 +510,8 @@ impl CorgiUI {
             );
             ui.separator();
             ui.label(&self.status.message);
-            ui.separator();
             if let Some(af) = self.active_file.as_ref() {
+                ui.separator();
                 ui.label(format!(
                     "Editing {}{}",
                     if af.last_saved_spec == self.root_spec {
@@ -515,6 +521,40 @@ impl CorgiUI {
                     },
                     af.path.file_name().unwrap_or_default().to_string_lossy()
                 ));
+            }
+            if let Some(hover_pt) = hover_pt {
+                fn format_float(mut x: Float, zoom: f32) -> String {
+                    x.set_prec(zoom.max(53. - 9.) as u32 + 9);
+                    let mut x = format!("{}", x);
+                    if x.len() > 25 {
+                        let chars: Vec<_> = x.chars().collect();
+                        let start: String = chars[..5].iter().collect();
+                        let end: String = chars[(chars.len() - 10)..].iter().collect();
+                        let digits = chars.len() - 15;
+                        x = format!("{}...[{}]...{}", start, digits, end);
+                    }
+                    x
+                }
+
+                let zoom = self.image().view().zoom;
+                ui.separator();
+                ui.label(format!(
+                    "{} + {}i",
+                    format_float(hover_pt.x.clone(), zoom),
+                    format_float(hover_pt.y.clone(), zoom)
+                ));
+
+                if ui.input(|inp| inp.events.iter().any(|ev| matches!(ev, egui::Event::Copy))) {
+                    let text = if context.config().show_debug_options {
+                        // the format used in tests
+                        format!("(\"{}\", \"{}\")", hover_pt.x, hover_pt.y)
+                    } else {
+                        format!("{} + {}i", hover_pt.x, hover_pt.y)
+                    };
+                    ui.ctx().copy_text(text);
+                    self.status.message = "Copied location to clipboard".into();
+                    self.status.progress = None;
+                }
             }
         });
     }
