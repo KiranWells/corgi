@@ -1,4 +1,7 @@
 /target
 /notes
 *.png
+assets/logo/*.png
+assets/logo/*.ico
+assets/logo/*.icns
 *.blend1

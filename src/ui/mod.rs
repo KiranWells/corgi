@@ -9,6 +9,7 @@ contains the code necessary to update internal state and render the ui.
 use std::path::PathBuf;
 use std::sync::mpsc;
 
+use cargo_packager_resource_resolver::{current_format, resources_dir};
 use corgi_lib::image_gen::CompressionParams;
 use corgi_lib::types::{ComplexPoint, ImgSpec, OptLevel, Style as ImgStyle, View};
 use documented::DocumentedFields;
@@ -22,6 +23,7 @@ use egui_taffy::{TuiBuilderLogic, tui};
 use preset_library::PresetLibrary;
 use rug::Float;
 use taffy::prelude::*;
+use tracing::warn;
 use utils::{input_with_label, section};
 
 use crate::app::Status;
@@ -90,6 +92,20 @@ pub struct CorgiUI {
     confirm: Option<(String, Vec<(String, DynCallback)>)>,
 }
 
+fn resources_directory() -> PathBuf {
+    if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
+        return manifest_dir.into();
+    }
+    match current_format().and_then(resources_dir) {
+        Ok(path) => return path,
+        Err(err) => warn!("Failed to load package path: {err}"),
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .unwrap_or("./".into())
+}
+
 impl CorgiUI {
     /// Create a new state struct; status should be shared with the render thread.
     pub fn new(
@@ -99,17 +115,9 @@ impl CorgiUI {
         command_channel: mpsc::Sender<ImageGenCommand>,
     ) -> Self {
         let dirs = corgi_project_dirs();
-        let install_dir = std::env::var("CARGO_MANIFEST_DIR")
-            .map(PathBuf::from)
-            .unwrap_or(
-                std::env::current_exe()
-                    .ok()
-                    .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-                    .unwrap_or("./".into()),
-            );
         let base_dirs = [
             dirs.config_dir().join("presets"),
-            install_dir.join("presets"),
+            resources_directory().join("presets"),
         ];
 
         let active_file = if let Some(path) = input_path {

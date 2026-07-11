@@ -9,14 +9,6 @@ repository = "https://github.com/KiranWells/corgi"
 license = "Apache-2.0"
 keywords = ["fractals", "mandelbrot", "julia", "graphics"]
 
-[package.metadata.bundle]
-name = "Corgi"
-identifier = "com.kiranwells.corgi"
-# TODO
-# icon
-linux_mime_types = ["application/x-corgi-settings","image/png","image/jpeg","image/webp","image/avif"]
-linux_exec_args = "%f"
-
 [lib]
 name = "corgi_lib"
 path = "src/lib.rs"
@@ -60,13 +52,19 @@ rand = { version = "0.10.1", optional = true }
 rand_seeder = { version = "0.5.0", optional = true }
 derive_more = { version = "2.1.1", features = ["add", "add_assign", "eq", "mul", "mul_assign", "not"] }
 rayon = "1.12.0"
+cargo-packager-resource-resolver = { version = "0.1.2", features = ["auto-detect-format"], optional = true }
+
+[dev-dependencies]
 pastey = "0.2.3"
 
 [features]
-binary-deps = ["clap", "color-eyre", "directories", "eframe", "egui_extras", "egui_material_icons", "egui_taffy", "rfd", "taffy", "tracing-subscriber", "nanoid", "rand", "rand_seeder"]
+binary-deps = ["clap", "color-eyre", "directories", "eframe", "egui_extras", "egui_material_icons", "egui_taffy", "rfd", "taffy", "tracing-subscriber", "nanoid", "rand", "rand_seeder", "cargo-packager-resource-resolver"]
 
 [build-dependencies]
+icns = { version = "0.4.0", features = ["png", "pngio"], default-features = false }
+ico = "0.5.0"
 regex = "1.12.3"
+resvg = "0.47.0"
 wesl = "0.3.2"
 
 [profile.dev.package."*"]
@@ -74,3 +72,41 @@ opt-level = 3
 
 [profile.release]
 lto = true
+
+[package.metadata.packager]
+product-name = "Corgi"
+identifier = "com.kiranwells.corgi"
+homepage = "https://github.com/KiranWells/corgi"
+before-each-package-command = "cargo build --features=\"binary-deps\" --release"
+publisher = "Kiran Wells"
+resources = ["presets"]
+icons = [
+  "assets/logo/icon.svg",
+  "assets/logo/icon_*.png",
+  "assets/logo/icon.ico",
+  "assets/logo/icon.icns",
+]
+out_dir = "target/release/packager"
+
+[[package.metadata.packager.file_associations]]
+extensions = ["corg"]
+mime_type = "application/x-corgi-settings"
+description = "Corgi fractal settings file (JSON)"
+
+[[package.metadata.packager.file_associations]]
+extensions = ["png"]
+mime_type = "image/png"
+[[package.metadata.packager.file_associations]]
+extensions = ["jpeg", "jpg"]
+mime_type = "image/jpeg"
+[[package.metadata.packager.file_associations]]
+extensions = ["webp"]
+mime_type = "image/webp"
+[[package.metadata.packager.file_associations]]
+extensions = ["avif"]
+mime_type = "image/avif"
+
+[package.metadata.packager.deb]
+depends = ["libdav1d7"]
+[package.metadata.packager.pacman]
+depends = ["dav1d"]

@@ -1,6 +1,6 @@
 use std::ffi::OsStr;
-use std::fs::OpenOptions;
-use std::io::Write;
+use std::fs::{File, OpenOptions};
+use std::io::{BufReader, BufWriter, Write};
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 
@@ -23,6 +23,46 @@ fn main() {
         let compiler = wesl::Wesl::new("").set_custom_resolver(router);
         compiler.build_artifact(&format!("package::{package}").parse().unwrap(), package);
     }
+
+    // Generate icon files
+    println!("cargo::rerun-if-changed=assets/logo/icon.svg");
+    let mut icon_dir = ico::IconDir::new(ico::ResourceType::Icon);
+    let mut icon_family = icns::IconFamily::new();
+    for size in [16, 32, 48, 64, 128, 256, 512] {
+        let svg_tree = resvg::usvg::Tree::from_str(
+            include_str!("assets/logo/icon.svg"),
+            &resvg::usvg::Options::default(),
+        )
+        .expect("Svg to parse");
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(size, size).unwrap();
+        let scale = size as f32 / svg_tree.size().width();
+        resvg::render(
+            &svg_tree,
+            resvg::tiny_skia::Transform::identity().pre_scale(scale, scale),
+            &mut pixmap.as_mut(),
+        );
+        let path = format!("assets/logo/icon_{size}.png");
+        pixmap.save_png(&path).expect("icon to save");
+
+        icon_dir.add_entry(
+            ico::IconDirEntry::encode(
+                &ico::IconImage::read_png(File::open(&path).unwrap()).unwrap(),
+            )
+            .unwrap(),
+        );
+
+        icon_family
+            .add_icon(&icns::Image::read_png(BufReader::new(File::open(&path).unwrap())).unwrap())
+            .expect("icon to add to icns");
+    }
+    icon_dir
+        .write(File::create("assets/logo/icon.ico").unwrap())
+        .expect("ico file to save");
+    icon_family
+        .write(BufWriter::new(
+            File::create("assets/logo/icon.icns").unwrap(),
+        ))
+        .expect("icns to save");
 }
 
 fn gen_shared_wesl() {
