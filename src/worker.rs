@@ -1,13 +1,13 @@
 /*!
 # Worker Thread
 */
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, mpsc};
 
 use corgi_lib::image_gen::{CompressionParams, Constants, Engine, ProgressUpdate, SharedState};
 use corgi_lib::types::ImgSpec;
-use eframe::egui::ahash::{HashMap, HashMapExt};
 use eframe::{egui, egui_wgpu, wgpu};
 use parking_lot::RwLock;
 

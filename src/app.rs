@@ -183,7 +183,7 @@ impl CorgiApp {
         let output_image = ImgSpec::default();
         let ctx = &cc.egui_ctx;
 
-        ctx.set_style(context.theme().style());
+        ctx.set_global_style(context.theme().style());
         egui_material_icons::initialize(&cc.egui_ctx);
         ctx.options_mut(|options| {
             options.max_passes = std::num::NonZeroUsize::new(1).unwrap();
@@ -255,7 +255,7 @@ impl CorgiApp {
 }
 
 impl eframe::App for CorgiApp {
-    fn update(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut eframe::egui::Ui, frame: &mut eframe::Frame) {
         for msg in self.status_channel.try_iter() {
             match msg {
                 StatusMessage::Progress(ProgressUpdate { message, progress }) => {
@@ -283,7 +283,7 @@ impl eframe::App for CorgiApp {
                 }
             }
         }
-        self.ui_state.generate_ui(ctx, &mut self.context, || {
+        self.ui_state.generate_ui(ui, &mut self.context, || {
             self.cancel_worker
                 .store(true, std::sync::atomic::Ordering::Relaxed)
         });
@@ -293,7 +293,7 @@ impl eframe::App for CorgiApp {
                 .debouncers
                 .get_mut(&self.ui_state.renderer())
                 .map_or(PollState::Trigger, |d| {
-                    d.poll(image.clone(), ctx.input(|is| is.pointer.any_down()))
+                    d.poll(image.clone(), ui.input(|is| is.pointer.any_down()))
                 }) {
                 PollState::Trigger => {
                     if !self.debouncers.contains_key(&self.ui_state.renderer()) {
@@ -315,7 +315,7 @@ impl eframe::App for CorgiApp {
                         "Waiting for input to finish; render starting soon".into();
                     self.ui_state.status.progress = None;
                     // we need to force a re-check next frame
-                    ctx.request_repaint();
+                    ui.request_repaint();
                 }
                 PollState::Inactive => {}
             }

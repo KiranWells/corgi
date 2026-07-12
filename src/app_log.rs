@@ -104,12 +104,12 @@ pub fn logs_ui(ui: &mut egui::Ui, origin_rect: egui::Rect) {
                                     ui.label(
                                         egui::RichText::new(match log.level {
                                             tracing::Level::ERROR => {
-                                                format!("{} Error", icons::ICON_ERROR)
+                                                format!("{} Error", icons::ICON_ERROR.codepoint)
                                             }
                                             tracing::Level::WARN => {
-                                                format!("{} Warning", icons::ICON_WARNING)
+                                                format!("{} Warning", icons::ICON_WARNING.codepoint)
                                             }
-                                            _ => format!("{} Notice", icons::ICON_INFO),
+                                            _ => format!("{} Notice", icons::ICON_INFO.codepoint),
                                         })
                                         .color(ui.visuals().window_fill),
                                     );

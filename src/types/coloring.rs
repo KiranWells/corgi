@@ -111,11 +111,13 @@ impl LayerKind {
     pub fn icon_text(self) -> String {
         use egui_material_icons::icons;
         match self {
-            LayerKind::Step => format!("{} Step Count", icons::ICON_STAIRS_2),
-            LayerKind::SmoothStep => format!("{} Smooth Step Count", icons::ICON_ELEVATION),
-            LayerKind::Distance => format!("{} Distance Estimate", icons::ICON_TARGET),
-            LayerKind::OrbitTrap => format!("{} Orbit Trap", icons::ICON_ORBIT),
-            LayerKind::Stripe => format!("{} Stripe Average", icons::ICON_AIRWAVE),
+            LayerKind::Step => format!("{} Step Count", icons::ICON_STAIRS_2.codepoint),
+            LayerKind::SmoothStep => {
+                format!("{} Smooth Step Count", icons::ICON_ELEVATION.codepoint)
+            }
+            LayerKind::Distance => format!("{} Distance Estimate", icons::ICON_TARGET.codepoint),
+            LayerKind::OrbitTrap => format!("{} Orbit Trap", icons::ICON_ORBIT.codepoint),
+            LayerKind::Stripe => format!("{} Stripe Average", icons::ICON_AIRWAVE.codepoint),
         }
     }
 }

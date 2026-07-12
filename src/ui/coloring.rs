@@ -28,7 +28,7 @@ pub struct OrbitType(pub u8);
 pub struct StripeType(pub u8);
 
 impl EditUI for Coloring {
-    fn render_edit_ui(&mut self, ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
+    fn render_edit_ui(&mut self, tui: &mut egui_taffy::Tui) {
         input_with_label(
             tui,
             "Brightness",
@@ -49,7 +49,7 @@ impl EditUI for Coloring {
             tui,
             RichText::new("Color").text_style(egui::TextStyle::Name("Subheading".into())),
         );
-        self.gradient.render_edit_ui(ctx, tui);
+        self.gradient.render_edit_ui(tui);
         if discriminant(&self.gradient) != discriminant(&Gradient::Flat(Default::default())) {
             input_with_label(
                 tui,
@@ -66,13 +66,13 @@ impl EditUI for Coloring {
             self.color_offset = (self.color_offset.fract() + 1.0).fract();
         }
         if discriminant(&self.gradient) != discriminant(&Gradient::Flat(Default::default())) {
-            self.color_layers.render_edit_ui(ctx, tui);
+            self.color_layers.render_edit_ui(tui);
         }
         fancy_header_tui(
             tui,
             RichText::new("Lighting").text_style(egui::TextStyle::Name("Subheading".into())),
         );
-        self.lighting_kind.render_edit_ui(ctx, tui);
+        self.lighting_kind.render_edit_ui(tui);
         if self.lighting_kind == LightingKind::Shaded {
             if self.lights.is_empty() {
                 self.lights
@@ -97,7 +97,7 @@ impl EditUI for Coloring {
                     });
                     if !brk {
                         indent_with_line(tui, |tui| {
-                            self.lights[i].render_edit_ui(ctx, tui);
+                            self.lights[i].render_edit_ui(tui);
                         });
                     }
                 });
@@ -108,7 +108,10 @@ impl EditUI for Coloring {
             if tui
                 .style(Style::row())
                 .enabled_ui(self.lights.len() < MAX_LIGHTS)
-                .ui_add(egui::Button::new(format!("{} Add Light", icons::ICON_ADD)))
+                .ui_add(egui::Button::new(format!(
+                    "{} Add Light",
+                    icons::ICON_ADD.codepoint
+                )))
                 .clicked()
             {
                 self.lights
@@ -116,18 +119,18 @@ impl EditUI for Coloring {
             }
         }
         if self.lighting_kind != LightingKind::Flat {
-            self.light_layers.render_edit_ui(ctx, tui);
+            self.light_layers.render_edit_ui(tui);
         }
         fancy_header_tui(
             tui,
             RichText::new("Outlines").text_style(egui::TextStyle::Name("Subheading".into())),
         );
-        self.overlays.render_edit_ui(ctx, tui);
+        self.overlays.render_edit_ui(tui);
     }
 }
 
 impl EditUI for Gradient {
-    fn render_edit_ui(&mut self, ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
+    fn render_edit_ui(&mut self, tui: &mut egui_taffy::Tui) {
         let flat = Gradient::Flat(Default::default());
         let procedural = Gradient::Procedural(Default::default());
         let manual = Gradient::Manual(Default::default());
@@ -183,7 +186,7 @@ impl EditUI for Gradient {
                         grid_template_columns: vec![min_content(); 7],
                         align_items: Some(AlignItems::Center),
                         justify_content: Some(AlignContent::Center),
-                        gap: length(ctx.style().spacing.item_spacing.x),
+                        gap: length(tui.egui_ui().global_style().spacing.item_spacing.x),
                         size: percent(1.0),
                         ..Default::default()
                     })
@@ -195,7 +198,7 @@ impl EditUI for Gradient {
                             let res = tui.ui_add(egui::DragValue::new(&mut stop).speed(0.001));
                             stop = (stop.fract() + 1.0).fract();
                             dragged = dragged || res.is_pointer_button_down_on() || res.has_focus();
-                            stop_kind.render_edit_ui(ctx, tui);
+                            stop_kind.render_edit_ui(tui);
                             colors[i][3] = stop_kind.0 as f32 + stop * 0.999;
                             if tui
                                 .enabled_ui(colors.len() < MAX_GRADIENT_STOPS)
@@ -261,7 +264,7 @@ impl EditUI for Gradient {
                         .enabled_ui(colors.len() < MAX_GRADIENT_STOPS)
                         .ui_add(egui::Button::new(format!(
                             "{} Add Color Stop",
-                            icons::ICON_ADD
+                            icons::ICON_ADD.codepoint
                         )))
                         .clicked()
                     {
@@ -322,7 +325,7 @@ impl EditUI for Gradient {
 }
 
 impl EditUI for StopKind {
-    fn render_edit_ui(&mut self, _ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
+    fn render_edit_ui(&mut self, tui: &mut egui_taffy::Tui) {
         const MAX_STOP_TYPES: u8 = 3;
         let label = match self.0 {
             0 => icons::ICON_STAIRS_2,
@@ -334,7 +337,7 @@ impl EditUI for StopKind {
             0 => "Constant interpolation",
             1 => "Linear interpolation",
             2 => "Smooth interpolation",
-            _ => icons::ICON_QUESTION_MARK,
+            _ => icons::ICON_QUESTION_MARK.codepoint,
         };
         if tui
             .ui_add(egui::Button::new(label))
@@ -348,7 +351,7 @@ impl EditUI for StopKind {
 }
 
 impl EditUI for Layer {
-    fn render_edit_ui(&mut self, _ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
+    fn render_edit_ui(&mut self, tui: &mut egui_taffy::Tui) {
         match self.kind {
             LayerKind::Step => {
                 input_with_label(
@@ -451,7 +454,7 @@ impl EditUI for Layer {
 }
 
 impl EditUI for Overlays {
-    fn render_edit_ui(&mut self, _ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
+    fn render_edit_ui(&mut self, tui: &mut egui_taffy::Tui) {
         let gap = tui.egui_ui().spacing().item_spacing.x;
         if let Some(iteration_outline) = self.iteration_outline.as_mut() {
             tui.style(Style::row().gap(gap)).add(|tui| {
@@ -475,7 +478,10 @@ impl EditUI for Overlays {
             });
             if iteration_outline.color.a() == 0.0
                 || tui
-                    .ui_add(egui::Button::new(format!("{} Remove", icons::ICON_REMOVE)))
+                    .ui_add(egui::Button::new(format!(
+                        "{} Remove",
+                        icons::ICON_REMOVE.codepoint
+                    )))
                     .clicked()
             {
                 self.iteration_outline = None;
@@ -483,7 +489,7 @@ impl EditUI for Overlays {
         } else if tui
             .ui_add(egui::Button::new(format!(
                 "{} Add Iteration Outline",
-                icons::ICON_ADD
+                icons::ICON_ADD.codepoint
             )))
             .clicked()
         {
@@ -512,7 +518,10 @@ impl EditUI for Overlays {
             set_outline.parameter = (scale * 10.0) as u32;
             if set_outline.color.a() == 0.0
                 || tui
-                    .ui_add(egui::Button::new(format!("{} Remove", icons::ICON_REMOVE)))
+                    .ui_add(egui::Button::new(format!(
+                        "{} Remove",
+                        icons::ICON_REMOVE.codepoint
+                    )))
                     .clicked()
             {
                 self.set_outline = None;
@@ -520,7 +529,7 @@ impl EditUI for Overlays {
         } else if tui
             .ui_add(egui::Button::new(format!(
                 "{} Add Set Outline",
-                icons::ICON_ADD
+                icons::ICON_ADD.codepoint
             )))
             .clicked()
         {
@@ -533,7 +542,7 @@ impl EditUI for Overlays {
 }
 
 impl EditUI for LightingKind {
-    fn render_edit_ui(&mut self, _ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
+    fn render_edit_ui(&mut self, tui: &mut egui_taffy::Tui) {
         selection_with_label(
             tui,
             "Lighting Mode",
@@ -550,7 +559,7 @@ impl EditUI for LightingKind {
 }
 
 impl EditUI for Vec<Layer> {
-    fn render_edit_ui(&mut self, ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
+    fn render_edit_ui(&mut self, tui: &mut egui_taffy::Tui) {
         fn background(ui: &mut egui::Ui, container: &egui_taffy::TaffyContainerUi) {
             let rect = container.full_container();
             let full_rect = rect.expand2(egui::Vec2::new(ui.spacing().indent * 2.0, 0.0));
@@ -579,7 +588,10 @@ impl EditUI for Vec<Layer> {
                 );
                 if valid_ct < 8 {
                     add_layer = tui
-                        .ui_add(egui::Button::new(format!("{} Add Layer", icons::ICON_ADD)))
+                        .ui_add(egui::Button::new(format!(
+                            "{} Add Layer",
+                            icons::ICON_ADD.codepoint
+                        )))
                         .clicked();
                 }
             });
@@ -660,7 +672,7 @@ impl EditUI for Vec<Layer> {
                                 style.padding = Rect::zero();
                                 style.padding.left = length(item_spacing.x);
                             })
-                            .add(|tui| layer.render_edit_ui(ctx, tui))
+                            .add(|tui| layer.render_edit_ui(tui))
                     },
                 );
                 if !remove {
@@ -690,7 +702,7 @@ impl EditUI for Vec<Layer> {
 }
 
 impl EditUI for Light {
-    fn render_edit_ui(&mut self, _ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
+    fn render_edit_ui(&mut self, tui: &mut egui_taffy::Tui) {
         tui.style(Style::row()).add(|tui| {
             tui.label("Color");
             let mut color = self.color.into();

@@ -48,7 +48,7 @@ pub use preview_resources::{PreviewRenderResources, ThumbnailRenderResources};
 /// Utility trait for rendering UI
 pub trait EditUI {
     /// Renders the UI to edit `self`, mutating it in response
-    fn render_edit_ui(&mut self, ctx: &egui::Context, tui: &mut egui_taffy::Tui);
+    fn render_edit_ui(&mut self, tui: &mut egui_taffy::Tui);
 }
 
 #[derive(Debug)]
@@ -58,7 +58,7 @@ struct ActiveFile {
 }
 
 #[expect(clippy::type_complexity)]
-struct DynCallback(Box<dyn FnOnce(&mut CorgiUI, &mut crate::Context, &egui::Context)>);
+struct DynCallback(Box<dyn FnOnce(&mut CorgiUI, &mut crate::Context, &egui::Ui)>);
 
 impl std::fmt::Debug for DynCallback {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -173,47 +173,47 @@ impl CorgiUI {
     /// to access shared data
     pub fn generate_ui(
         &mut self,
-        ctx: &egui::Context,
+        ui: &mut egui::Ui,
         context: &mut crate::Context,
         cancel: impl FnOnce(),
     ) {
-        egui::SidePanel::right("settings_panel")
-            .frame(Frame::new().fill(ctx.style().visuals.window_fill))
-            .show(ctx, |ui| {
+        let style = ui.style().clone();
+        egui::Panel::right("settings_panel")
+            .frame(Frame::new().fill(style.visuals.window_fill))
+            .show(ui, |ui| {
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
 
-                self.menu(context, ctx, ui);
+                self.menu(context, ui);
                 ScrollArea::vertical().show(ui, |ui| {
                     tui(ui, ui.id().with("side"))
                         .reserve_available_width()
                         .style(Style::col())
                         .show(|tui| match self.tab {
                             UITab::Explore => self.explore_tab(context, tui),
-                            UITab::Style => self.style_tab(ctx, context, tui),
-                            UITab::Render => self.render_tab(ctx, context, cancel, tui),
+                            UITab::Style => self.style_tab(context, tui),
+                            UITab::Render => self.render_tab(context, cancel, tui),
                         });
                 });
             });
 
         let res = egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(ctx.style().visuals.window_fill))
-            .show(ctx, |ui| {
+            .frame(egui::Frame::new().fill(style.visuals.window_fill))
+            .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 let origin_rect = ui.available_rect_before_wrap();
-                let hover_pt = self.viewport(ui, ctx);
-                self.render_widgets(ui, ctx, context);
+                let hover_pt = self.viewport(ui);
+                self.render_widgets(ui, context);
                 self.footer(ui, context, hover_pt);
                 crate::app_log::logs_ui(ui, origin_rect);
             });
 
-        let style = ctx.style().clone();
         let mut show_settings = self.show_settings;
         egui::Window::new("Settings")
             .open(&mut show_settings)
             .default_pos(res.response.rect.center())
             .pivot(egui::Align2::CENTER_BOTTOM)
-            .show(ctx, |ui| {
-                ui.set_style(style);
+            .show(ui, |ui| {
+                ui.set_style(style.clone());
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
 
                 let previous_config = context.config().clone();
@@ -222,10 +222,10 @@ impl CorgiUI {
                     .style(Style::col())
                     .show(|tui| {
                         section(tui, "Configuration", true, |tui| {
-                            context.config_mut().render_edit_ui(ctx, tui);
+                            context.config_mut().render_edit_ui(tui);
                         });
                         section(tui, "Theme", true, |tui| {
-                            context.theme_mut().render_edit_ui(ctx, tui);
+                            context.theme_mut().render_edit_ui(tui);
                         });
                     });
                 if context.config().ui_max_shader_batch_iters
@@ -256,15 +256,14 @@ impl CorgiUI {
             });
         self.show_settings = show_settings;
 
-        let style = ctx.style().clone();
         let mut open = self.preset_save_active.is_some();
         egui::Window::new("Save Preset")
             .open(&mut open)
             .default_size(Vec2::splat(300.0))
             .default_pos(res.response.rect.center())
             .pivot(egui::Align2::CENTER_BOTTOM)
-            .show(ctx, |ui| {
-                ui.set_style(style);
+            .show(ui, |ui| {
+                ui.set_style(style.clone());
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                 self.save_preset_window(context, ui);
             });
@@ -272,12 +271,11 @@ impl CorgiUI {
             self.preset_save_active = None;
         }
 
-        let style = ctx.style().clone();
         egui::Window::new("New Group")
             .open(&mut self.new_group_active)
             .default_pos(res.response.rect.center())
             .pivot(egui::Align2::CENTER_TOP)
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 ui.set_style(style);
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
 
@@ -307,7 +305,7 @@ impl CorgiUI {
                 });
             });
 
-        if ctx.input(|i| i.viewport().close_requested()) {
+        if ui.input(|i| i.viewport().close_requested()) {
             // check if we need to save
             if self
                 .active_file
@@ -341,29 +339,29 @@ impl CorgiUI {
                         ("Cancel".into(), DynCallback(Box::new(|_, _, _| {}))),
                     ],
                 ));
-                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                ui.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             }
         }
 
-        self.show_confirm_dialog(ctx, context, res);
-        self.handle_shortcuts(context, ctx);
+        self.show_confirm_dialog(ui, context, res);
+        self.handle_shortcuts(context, ui);
 
         self.swap = false;
     }
 
     fn show_confirm_dialog(
         &mut self,
-        ctx: &egui::Context,
+        ui: &egui::Ui,
         context: &mut crate::config::Context,
         res: egui::InnerResponse<()>,
     ) {
         if let Some(mut confirm) = self.confirm.take() {
-            let style = ctx.style().clone();
+            let style = ui.style().clone();
             egui::Window::new(&confirm.0)
                 .collapsible(false)
                 .default_pos(res.response.rect.center())
                 .pivot(egui::Align2::CENTER_TOP)
-                .show(ctx, |ui| {
+                .show(ui, |ui| {
                     ui.set_style(style);
                     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
 
@@ -375,7 +373,7 @@ impl CorgiUI {
                             }
                         }
                         if let Some(selection) = selection {
-                            confirm.1.remove(selection).1.0(self, context, ctx);
+                            confirm.1.remove(selection).1.0(self, context, ui);
                         } else {
                             self.confirm = Some(confirm);
                         }
@@ -384,12 +382,7 @@ impl CorgiUI {
         }
     }
 
-    fn menu(
-        &mut self,
-        context: &mut crate::config::Context,
-        ctx: &egui::Context,
-        ui: &mut egui::Ui,
-    ) {
+    fn menu(&mut self, context: &mut crate::config::Context, ui: &mut egui::Ui) {
         let y = ui.style_mut().spacing.item_spacing.y;
         ui.style_mut().spacing.item_spacing.y = 0.0;
         // Top bar
@@ -472,24 +465,24 @@ impl CorgiUI {
                         )
                         .clicked()
                     {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        ui.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 });
             };
             ui.selectable_value(
                 &mut self.tab,
                 UITab::Explore,
-                format!("{} Explore", icons::ICON_EXPLORE),
+                format!("{} Explore", icons::ICON_EXPLORE.codepoint),
             );
             ui.selectable_value(
                 &mut self.tab,
                 UITab::Style,
-                format!("{} Style", icons::ICON_STYLE),
+                format!("{} Style", icons::ICON_STYLE.codepoint),
             );
             ui.selectable_value(
                 &mut self.tab,
                 UITab::Render,
-                format!("{} Render", icons::ICON_IMAGE),
+                format!("{} Render", icons::ICON_IMAGE.codepoint),
             );
         });
         ui.add(Separator::default().spacing(ui.visuals().widgets.noninteractive.bg_stroke.width));
@@ -804,7 +797,7 @@ impl ActiveFile {
 }
 
 impl EditUI for CompressionParams {
-    fn render_edit_ui(&mut self, _ctx: &egui::Context, tui: &mut egui_taffy::Tui) {
+    fn render_edit_ui(&mut self, tui: &mut egui_taffy::Tui) {
         tui.label("Compression");
         indent_with_line(tui, |tui| {
             input_with_label(

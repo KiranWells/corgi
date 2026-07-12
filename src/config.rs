@@ -288,11 +288,6 @@ impl Theme {
             },
             visuals: eframe::egui::Visuals {
                 dark_mode: self.bg_color.lightness() < 0.5,
-                text_alpha_from_coverage: if self.bg_color.lightness() < 0.5 {
-                    eframe::epaint::AlphaFromCoverage::DARK_MODE_DEFAULT
-                } else {
-                    eframe::epaint::AlphaFromCoverage::LIGHT_MODE_DEFAULT
-                },
                 widgets: eframe::egui::style::Widgets {
                     noninteractive: eframe::egui::style::WidgetVisuals {
                         weak_bg_fill: self.base(),

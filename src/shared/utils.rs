@@ -65,12 +65,12 @@ pub fn aspect(width: u32, height: u32) -> Vec2f {
 
 pub fn get_orbit_values(z_n: Vec2f) -> Vec4f {
     let len = length_squared(z_n);
-    let abs = z_n.abs();
+    let abs_z = z_n.abs();
     return Vec4::new(
         len,
         (len - 2.0).abs(),
-        (abs.x).min(abs.y),
-        (abs.x + abs.y - 2.0).abs(),
+        (abs_z.x).min(abs_z.y),
+        (abs_z.x + abs_z.y - 2.0).abs(),
     );
 }
 

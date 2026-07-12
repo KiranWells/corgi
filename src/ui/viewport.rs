@@ -11,11 +11,7 @@ use crate::ui::tabs::UITab;
 
 impl super::CorgiUI {
     /// Render the image preview viewport
-    pub(super) fn viewport(
-        &mut self,
-        ui: &mut egui::Ui,
-        ctx: &egui::Context,
-    ) -> Option<ComplexPoint> {
+    pub(super) fn viewport(&mut self, ui: &mut egui::Ui) -> Option<ComplexPoint> {
         let mut new_max_rect = ui.max_rect();
         let footer_size =
             ui.text_style_height(&egui::TextStyle::Body) + ui.spacing().item_spacing.x * 2.0;
@@ -31,7 +27,7 @@ impl super::CorgiUI {
 
                 // get input beforehand
                 let pointer_in_rect = ui.rect_contains_pointer(rect);
-                let (primary_down, pointer_pos) = ctx.input(|i| {
+                let (primary_down, pointer_pos) = ui.input(|i| {
                     (
                         i.pointer.button_down(egui::PointerButton::Primary),
                         i.pointer.interact_pos(),
@@ -81,12 +77,7 @@ impl super::CorgiUI {
         hover_pt
     }
 
-    pub(super) fn render_widgets(
-        &self,
-        ui: &mut egui::Ui,
-        ctx: &egui::Context,
-        context: &mut crate::Context,
-    ) {
+    pub(super) fn render_widgets(&self, ui: &mut egui::Ui, context: &mut crate::Context) {
         fn paint_crosshair(
             painter: &egui::Painter,
             center: egui::Pos2,
@@ -110,14 +101,14 @@ impl super::CorgiUI {
         }
         fn rotated_text(
             painter: &egui::Painter,
-            ctx: &egui::Context,
+            ui: &egui::Ui,
             theme: &crate::config::Theme,
             pos: Pos2,
             anchor: egui::Align2,
             text: String,
             angle: f32,
         ) {
-            let (t, r) = ctx.fonts_mut(|f| {
+            let (t, r) = ui.fonts_mut(|f| {
                 let mut t = egui::Shape::text(
                     f,
                     pos,
@@ -200,7 +191,7 @@ impl super::CorgiUI {
             painter.line_segment([center, center + guideline], simple_stroke);
             rotated_text(
                 painter,
-                ctx,
+                ui,
                 theme,
                 center + guideline / 2.0 + Vec2::new(0.0, -theme.spacing).rotated(current_angle),
                 egui::Align2::CENTER_BOTTOM,
@@ -237,7 +228,7 @@ impl super::CorgiUI {
 
             rotated_text(
                 painter,
-                ctx,
+                ui,
                 theme,
                 text_anchor,
                 egui::Align2::CENTER_TOP,

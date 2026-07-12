@@ -32,16 +32,16 @@ fn iter_z_n_prime(y_n: Vec2f, z_n_prime: Vec2f, zoom_prime: f32) -> Vec2f {
 
 #[inline]
 fn rebase_fractexp(x: &mut Vec2f, exp: &mut f32) {
-    let abs = (*x).abs();
-    if abs.x < FRACTEXP_LOWER_BOUND && abs.y < FRACTEXP_LOWER_BOUND {
-        let scalea = (abs.x.log2() + abs.y.log2()) / 2.0;
+    let abs_x = (*x).abs();
+    if abs_x.x < FRACTEXP_LOWER_BOUND && abs_x.y < FRACTEXP_LOWER_BOUND {
+        let scalea = (abs_x.x.log2() + abs_x.y.log2()) / 2.0;
         let scaleb = scalea.ceil() + 5.0;
         let scale = -scaleb.clamp(-FRACTEXP_MAX_SCALE_FACTOR, FRACTEXP_MIN_SCALE_FACTOR);
         *x *= 2.0f32.powf(scale);
         *exp -= scale;
     }
-    if abs.x > FRACTEXP_UPPER_BOUND && abs.y > FRACTEXP_UPPER_BOUND {
-        let scalea = (abs.x.log2() + abs.y.log2()) / 2.0;
+    if abs_x.x > FRACTEXP_UPPER_BOUND && abs_x.y > FRACTEXP_UPPER_BOUND {
+        let scalea = (abs_x.x.log2() + abs_x.y.log2()) / 2.0;
         let scaleb = scalea.floor() - 5.0;
         let scale = -scaleb.clamp(FRACTEXP_MIN_SCALE_FACTOR, FRACTEXP_MAX_SCALE_FACTOR);
         *x *= 2.0f32.powf(scale);

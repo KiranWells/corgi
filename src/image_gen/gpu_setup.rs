@@ -127,9 +127,9 @@ pub enum RequestError {
 
 /// Selects a device and queue suitable for non-UI rendering.
 pub async fn get_device_and_queue() -> Result<(Device, Queue), RequestError> {
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::PRIMARY,
-        ..Default::default()
+        ..wgpu::InstanceDescriptor::new_without_display_handle_from_env()
     });
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
@@ -693,19 +693,19 @@ impl BindGroups {
         let compute_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: None,
-                bind_group_layouts: &[&bind_group_layout, &params_bind_group_layout],
-                push_constant_ranges: &[],
+                bind_group_layouts: &[Some(&bind_group_layout), Some(&params_bind_group_layout)],
+                immediate_size: 0,
             });
 
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
                 bind_group_layouts: &[
-                    &render_buffers_layout,
-                    &texture_bind_group_layout,
-                    &render_params_bind_group_layout,
+                    Some(&render_buffers_layout),
+                    Some(&texture_bind_group_layout),
+                    Some(&render_params_bind_group_layout),
                 ],
-                push_constant_ranges: &[],
+                immediate_size: 0,
             });
 
         (

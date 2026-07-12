@@ -17,7 +17,7 @@ use corgi_lib::image_gen::{
 };
 use corgi_lib::types::serde::SafeSaveLoad;
 use corgi_lib::types::{ImgSpec, OptLevel};
-use eframe::{egui, egui_wgpu, wgpu};
+use eframe::{egui, egui_wgpu};
 use pollster::FutureExt;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{EnvFilter, fmt};
@@ -54,15 +54,16 @@ fn main() -> Result<()> {
     // start app
     let eframe_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_title("Corgi Fractal Renderer"),
-        vsync: true,
-        hardware_acceleration: eframe::HardwareAcceleration::Preferred,
         renderer: eframe::Renderer::Wgpu,
         multisampling: 4,
         wgpu_options: egui_wgpu::WgpuConfiguration {
-            present_mode: wgpu::PresentMode::AutoVsync,
-            desired_maximum_frame_latency: None,
+            surface: eframe::SurfaceConfig::LOW_LATENCY,
+            wgpu_setup: eframe::egui_wgpu::WgpuSetup::without_display_handle(),
             ..Default::default()
         },
+        dithering: false,
+        centered: true,
+        run_and_return: true,
         ..Default::default()
     };
     eframe::run_native(

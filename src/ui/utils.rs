@@ -693,7 +693,7 @@ pub fn pseudo_color_edit(tui: &mut egui_taffy::Tui, color: &mut [f32; 3]) {
 
 pub fn custom_colored_collapse<T>(
     tui: &mut egui_taffy::Tui,
-    salt: impl std::hash::Hash,
+    salt: impl eframe::egui::AsIdSalt,
     data: &mut T,
     add_header: impl FnOnce(&mut egui_taffy::Tui, &mut T),
     add_contents: impl FnOnce(&mut egui_taffy::Tui, &mut T),

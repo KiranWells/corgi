@@ -4,7 +4,7 @@ use crate::ui::EditUI;
 use crate::ui::utils::{color32_edit, input_with_label, ui_with_label};
 
 impl EditUI for crate::Config {
-    fn render_edit_ui(&mut self, _ctx: &eframe::egui::Context, tui: &mut egui_taffy::Tui) {
+    fn render_edit_ui(&mut self, tui: &mut egui_taffy::Tui) {
         input_with_label(
             tui,
             "Max Steps per Shader Batch in UI",
@@ -42,7 +42,7 @@ impl EditUI for crate::Config {
 }
 
 impl EditUI for crate::Theme {
-    fn render_edit_ui(&mut self, ctx: &eframe::egui::Context, tui: &mut egui_taffy::Tui) {
+    fn render_edit_ui(&mut self, tui: &mut egui_taffy::Tui) {
         ui_with_label(tui, "Background Color", None, |tui| {
             color32_edit(tui, &mut self.bg_color)
         });
@@ -70,6 +70,6 @@ impl EditUI for crate::Theme {
             Some("The measurement in logical pixels of the normal font"),
             DragValue::new(&mut self.base_rem).speed(0.03),
         );
-        ctx.set_style(self.style());
+        tui.egui_ctx().set_global_style(self.style());
     }
 }

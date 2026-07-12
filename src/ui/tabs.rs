@@ -170,7 +170,7 @@ impl super::CorgiUI {
                 );
                 tui.ui_add(Button::new(format!(
                     "{} Pick new probe point",
-                    icons::ICON_POINT_SCAN
+                    icons::ICON_POINT_SCAN.codepoint
                 )))
                 .clicked()
                 .then(|| self.setting_probe = !self.setting_probe);
@@ -213,7 +213,6 @@ impl super::CorgiUI {
 
     pub(super) fn style_tab(
         &mut self,
-        ctx: &egui::Context,
         context: &mut crate::config::Context,
         tui: &mut egui_taffy::Tui,
     ) {
@@ -243,22 +242,15 @@ impl super::CorgiUI {
             ));
         }
         section(tui, "External", true, |tui| {
-            self.root_spec
-                .style
-                .external_coloring
-                .render_edit_ui(ctx, tui);
+            self.root_spec.style.external_coloring.render_edit_ui(tui);
         });
         section(tui, "Internal", true, |tui| {
-            self.root_spec
-                .style
-                .internal_coloring
-                .render_edit_ui(ctx, tui);
+            self.root_spec.style.internal_coloring.render_edit_ui(tui);
         });
     }
 
     pub(super) fn render_tab(
         &mut self,
-        ctx: &egui::Context,
         context: &mut crate::config::Context,
         cancel: impl FnOnce(),
         tui: &mut egui_taffy::Tui,
@@ -328,14 +320,15 @@ impl super::CorgiUI {
                 {
                     str_path = str_path.replacen(home_dir, "~", 1);
                 }
-                let text_size = WidgetText::Text(icons::ICON_FOLDER_OPEN.to_owned())
-                    .into_galley(
-                        tui.egui_ui(),
-                        None,
-                        tui.egui_ui().available_width(),
-                        TextStyle::Button,
-                    )
-                    .size();
+                let text_size =
+                    WidgetText::RichText(std::sync::Arc::new(icons::ICON_FOLDER_OPEN.rich_text()))
+                        .into_galley(
+                            tui.egui_ui(),
+                            None,
+                            tui.egui_ui().available_width(),
+                            TextStyle::Button,
+                        )
+                        .size();
                 let spacing = tui.egui_ui().spacing().clone();
                 let available_width = tui.egui_ui().available_width();
                 tui.style(Style::grow()).ui_add(
@@ -368,7 +361,7 @@ impl super::CorgiUI {
                 // TODO: add layer selection
             } else {
                 let mut compression_params = context.cache().compression_params;
-                compression_params.render_edit_ui(ctx, tui);
+                compression_params.render_edit_ui(tui);
                 if context.cache().compression_params != compression_params {
                     context.cache_mut().compression_params = compression_params;
                 }
