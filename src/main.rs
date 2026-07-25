@@ -49,7 +49,14 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let context = Context::load()?;
+    let mut context = Context::load()?;
+
+    if let Some(input_path) = cli_options.settings_file.as_ref()
+        && input_path.exists()
+        && let Ok(_) = ImgSpec::load(input_path)
+    {
+        context.cache_mut().previous_files.push(input_path.clone());
+    }
 
     // start app
     let eframe_options = eframe::NativeOptions {

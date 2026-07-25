@@ -90,7 +90,7 @@ identifier = "com.kiranwells.corgi"
 homepage = "https://github.com/KiranWells/corgi"
 before-each-package-command = "cargo build --features=\"binary-deps\" --release"
 publisher = "Kiran Wells"
-resources = ["presets"]
+resources = ["presets", "assets/splash.avif"]
 icons = [
   "assets/logo/icon.svg",
   "assets/logo/icon_*.png",

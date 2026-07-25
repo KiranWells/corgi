@@ -39,6 +39,7 @@ mod preset_library;
 mod preview_resources;
 mod settings;
 mod shortcuts;
+mod splash;
 mod tabs;
 mod utils;
 mod viewport;
@@ -90,8 +91,8 @@ pub struct CorgiUI {
     new_group_active: bool,
     active_file: Option<ActiveFile>,
     confirm: Option<(String, Vec<(String, DynCallback)>)>,
+    show_splash: bool,
 }
-
 fn resources_directory() -> PathBuf {
     if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
         return manifest_dir.into();
@@ -125,6 +126,7 @@ impl CorgiUI {
         } else {
             None
         };
+        let default_image = image == ImgSpec::default();
         Self {
             tab: UITab::Explore,
             explore_state: ExploreTabState {
@@ -166,6 +168,7 @@ impl CorgiUI {
             command_channel,
             active_file,
             confirm: None,
+            show_splash: context.config().show_splash_on_start && default_image,
         }
     }
 
@@ -178,6 +181,7 @@ impl CorgiUI {
         cancel: impl FnOnce(),
     ) {
         let style = ui.style().clone();
+        let start_show_splash = self.show_splash;
         egui::Panel::right("settings_panel")
             .frame(Frame::new().fill(style.visuals.window_fill))
             .show(ui, |ui| {
@@ -206,6 +210,35 @@ impl CorgiUI {
                 self.footer(ui, context, hover_pt);
                 crate::app_log::logs_ui(ui, origin_rect);
             });
+
+        let size = Vec2::new(600.0, 360.0);
+        let mut show_splash = self.show_splash;
+        let splash_res = egui::Window::new("Splash")
+            .open(&mut show_splash)
+            .title_bar(false)
+            .collapsible(false)
+            .fixed_size(size)
+            .pivot(egui::Align2::CENTER_CENTER)
+            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+            .frame(Frame::new().shadow(egui::Shadow {
+                offset: [-10, 10],
+                blur: 100,
+                spread: 20,
+                color: egui::Color32::BLACK,
+            }))
+            .show(ui, |ui| {
+                ui.set_style(style.clone());
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+
+                self.splash_screen(context, ui, size);
+            });
+        self.show_splash = show_splash;
+        if start_show_splash
+            && let Some(res) = splash_res
+            && res.response.clicked_elsewhere()
+        {
+            self.show_splash = false;
+        }
 
         let mut show_settings = self.show_settings;
         egui::Window::new("Settings")
@@ -441,6 +474,10 @@ impl CorgiUI {
                         .clicked()
                     {
                         self.open(context);
+                    }
+                    ui.separator();
+                    if ui.add(Button::new("Show Splash")).clicked() {
+                        self.show_splash = true;
                     }
                     ui.separator();
                     if ui.add(Button::new("Settings")).clicked() {

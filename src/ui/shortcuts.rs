@@ -117,7 +117,7 @@ impl super::CorgiUI {
         self.status.progress = None;
     }
 
-    pub(super) fn open(&mut self, context: &mut crate::Context) {
+    pub(super) fn open(&mut self, context: &mut crate::Context) -> bool {
         let (starting_path, _starting_filename) = if let Some(af) = &self.active_file
             && let Some(parent) = af
                 .path
@@ -143,28 +143,35 @@ impl super::CorgiUI {
             )
             .pick_file()
         {
-            if let Some(dir) = path.parent() {
-                context.cache_mut().previous_paths.settings = dir.to_owned();
-            }
-            match ImgSpec::load(&path) {
-                Ok(image) => {
-                    self.status.message = format!(
-                        "Opened {}",
-                        path.file_name().unwrap_or_default().to_string_lossy()
-                    );
-                    self.status.progress = None;
-                    self.root_spec = image.clone();
-                    self.active_file = ActiveFile::try_new(image, path);
-                }
-                Err(err) => {
-                    tracing::error!("Failed to load image settings `{path:?}`: {err}");
-                    self.status.message = format!("Failed to load image settings: {err:?}");
-                    self.status.progress = None;
-                }
-            }
+            self.open_file(context, path);
+            true
         } else {
             self.status.message = "Open cancelled".into();
             self.status.progress = None;
+            false
+        }
+    }
+
+    pub(super) fn open_file(&mut self, context: &mut crate::config::Context, path: PathBuf) {
+        if let Some(dir) = path.parent() {
+            context.cache_mut().previous_paths.settings = dir.to_owned();
+        }
+        match ImgSpec::load(&path) {
+            Ok(image) => {
+                self.status.message = format!(
+                    "Opened {}",
+                    path.file_name().unwrap_or_default().to_string_lossy()
+                );
+                self.status.progress = None;
+                self.root_spec = image.clone();
+                self.active_file = ActiveFile::try_new(image, path.clone());
+                context.cache_mut().previous_files.push(path);
+            }
+            Err(err) => {
+                tracing::error!("Failed to load image settings `{path:?}`: {err}");
+                self.status.message = format!("Failed to load image settings: {err:?}");
+                self.status.progress = None;
+            }
         }
     }
 

@@ -5,6 +5,25 @@ use crate::ui::utils::{color32_edit, input_with_label, ui_with_label};
 
 impl EditUI for crate::Config {
     fn render_edit_ui(&mut self, tui: &mut egui_taffy::Tui) {
+        tui.egui_style_mut().spacing.icon_width = tui.egui_ui().spacing().icon_width * 1.5;
+
+        // Common Options
+        input_with_label(
+            tui,
+            "Show Splash Screen on startup",
+            Some("Whether to show a screen with the most recent files when starting the app."),
+            Checkbox::new(&mut self.show_splash_on_start, ""),
+        );
+        input_with_label(
+            tui,
+            "Thumbnail Image Size",
+            Some("The width and height of thumbnail images used to preview locations or styles."),
+            DragValue::new(&mut self.thumbnail_size)
+                .speed(10)
+                .range(1..=1024),
+        );
+
+        // Advanced Options
         input_with_label(
             tui,
             "Max Steps per Shader Batch in UI",
@@ -21,17 +40,6 @@ impl EditUI for crate::Config {
             ),
             DragValue::new(&mut self.max_shader_batch_iters).speed(10),
         );
-
-        input_with_label(
-            tui,
-            "Thumbnail Image Size",
-            Some("The width and height of thumbnail images used to preview locations or styles."),
-            DragValue::new(&mut self.thumbnail_size)
-                .speed(10)
-                .range(1..=1024),
-        );
-
-        tui.egui_style_mut().spacing.icon_width = tui.egui_ui().spacing().icon_width * 1.5;
         input_with_label(
             tui,
             "Show Debug Options",

@@ -3,9 +3,9 @@
 This module contains various configuration types for persisting
 application state on disk.
 */
-use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
+use std::{fs, mem};
 
 use color_eyre::Result;
 use corgi_lib::image_gen::CompressionParams;
@@ -26,6 +26,7 @@ pub struct Config {
     pub max_shader_batch_iters: u32,
     pub thumbnail_size: u32,
     pub show_debug_options: bool,
+    pub show_splash_on_start: bool,
 }
 
 /// Cached values
@@ -38,6 +39,7 @@ pub struct Cache {
     pub previous_paths: PreviousPaths,
     pub default_image_type: String,
     pub compression_params: CompressionParams,
+    pub previous_files: Vec<PathBuf>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -81,6 +83,7 @@ impl Default for Config {
             max_shader_batch_iters: 5000,
             thumbnail_size: 256,
             show_debug_options: false,
+            show_splash_on_start: true,
         }
     }
 }
@@ -99,6 +102,7 @@ impl Default for Cache {
             },
             default_image_type: "avif".into(),
             compression_params: CompressionParams::default(),
+            previous_files: vec![],
         }
     }
 }
@@ -174,6 +178,19 @@ impl Context {
                 tracing::error!("Failed to get project dirs");
                 return;
             };
+
+            const MAX_PREVIOUS_FILES: usize = 25;
+            let mut set = std::collections::HashSet::new();
+            let prev_files = mem::take(&mut self.cache.previous_files);
+            for file in prev_files.into_iter().rev() {
+                if set.contains(&file) {
+                    continue;
+                }
+                set.insert(file.clone());
+                self.cache.previous_files.push(file);
+            }
+            self.cache.previous_files.truncate(MAX_PREVIOUS_FILES);
+            self.cache.previous_files.reverse();
 
             save_to_toml(&self.config, &proj_dirs.config_dir().join("config.toml"));
             save_to_toml(&self.cache, &proj_dirs.cache_dir().join("cache.toml"));
@@ -363,7 +380,7 @@ impl Theme {
         self.fg_color
     }
     fn subtext(&self) -> Color32 {
-        self.fg_color.extreme(0.075)
+        self.fg_color.extreme(0.1)
     }
     fn overlay2(&self) -> Color32 {
         self.bg_color.lerp_to_gamma(self.fg_color, 0.7)
