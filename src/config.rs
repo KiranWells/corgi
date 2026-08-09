@@ -53,14 +53,42 @@ pub struct PreviousPaths {
 /// Contains the colors, spacing, and font size
 /// for the UI.
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Theme {
+    #[serde(with = "hex_color")]
     pub bg_color: Color32,
+    #[serde(with = "hex_color")]
     pub fg_color: Color32,
+    #[serde(with = "hex_color")]
     pub accent_color: Color32,
+    #[serde(with = "hex_color")]
     pub warn_color: Color32,
+    #[serde(with = "hex_color")]
     pub error_color: Color32,
     pub spacing: f32,
     pub base_rem: f32,
+}
+
+mod hex_color {
+    use ecolor::Color32;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub(super) fn serialize<S>(c: &Color32, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        s.serialize_str(&c.to_hex())
+    }
+
+    pub(super) fn deserialize<'de, D, E>(d: D) -> Result<Color32, E>
+    where
+        D: Deserializer<'de, Error = E>,
+        E: serde::de::Error,
+    {
+        <&str>::deserialize(d).and_then(|s| {
+            Color32::from_hex(s).map_err(|e| E::custom(format!("Failed to parse hex color: {e:?}")))
+        })
+    }
 }
 
 /// Persistent application context.
@@ -110,11 +138,11 @@ impl Default for Cache {
 impl Default for Theme {
     fn default() -> Self {
         Self {
-            bg_color: Color32::from_rgb(30, 30, 46),
-            fg_color: Color32::from_rgb(186, 194, 222),
-            accent_color: Color32::from_rgb(116, 199, 236),
-            warn_color: Color32::from_rgb(249, 226, 175),
-            error_color: Color32::from_rgb(243, 139, 168),
+            bg_color: Color32::from_hex("#141414").unwrap(),
+            fg_color: Color32::from_hex("#F0F3E9").unwrap(),
+            accent_color: Color32::from_hex("#CEED99").unwrap(),
+            warn_color: Color32::from_hex("#FDE786").unwrap(),
+            error_color: Color32::from_hex("#F99B97").unwrap(),
             spacing: 4.0,
             base_rem: 12.0,
         }
@@ -202,8 +230,18 @@ impl Context {
 
 fn load_from_toml<T: for<'a> Deserialize<'a> + Default>(path: &PathBuf) -> T {
     if path.exists()
-        && let Ok(text) = std::fs::read_to_string(path)
-        && let Ok(value) = toml::from_str(&text)
+        && let Ok(text) = std::fs::read_to_string(path).map_err(|err| {
+            tracing::warn!(
+                "Failed to read {}, using default: {err}",
+                path.to_string_lossy()
+            )
+        })
+        && let Ok(value) = toml::from_str(&text).map_err(|err| {
+            tracing::warn!(
+                "Failed to parse {}, using default: {err}",
+                path.to_string_lossy()
+            )
+        })
     {
         value
     } else {

@@ -63,7 +63,7 @@ impl CorgiUI {
                     egui::Color32::from_white_alpha(80)
                 },
             };
-            let text_color = ui.visuals().text_color();
+            let text_color = ui.visuals().widgets.inactive.text_color();
             ui.place(
                 emath::Rect::from_min_size(
                     image_box.min,

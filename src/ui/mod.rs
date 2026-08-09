@@ -6,8 +6,8 @@ This module contains the main UI state struct and its implementation, which
 contains the code necessary to update internal state and render the ui.
  */
 
-use std::path::PathBuf;
-use std::sync::mpsc;
+use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, mpsc};
 
 use cargo_packager_resource_resolver::{current_format, resources_dir};
 use corgi_lib::image_gen::CompressionParams;
@@ -93,7 +93,8 @@ pub struct CorgiUI {
     confirm: Option<(String, Vec<(String, DynCallback)>)>,
     show_splash: bool,
 }
-fn resources_directory() -> PathBuf {
+
+static RESOURCE_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
     if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
         return manifest_dir.into();
     }
@@ -105,6 +106,10 @@ fn resources_directory() -> PathBuf {
         .ok()
         .and_then(|p| p.parent().map(|p| p.to_path_buf()))
         .unwrap_or("./".into())
+});
+
+fn resources_directory() -> &'static Path {
+    &RESOURCE_DIR
 }
 
 impl CorgiUI {
