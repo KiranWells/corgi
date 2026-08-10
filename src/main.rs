@@ -37,6 +37,19 @@ fn main() -> Result<()> {
     color_eyre::install()?;
 
     if let Some(path) = cli_options.output_file {
+        if path
+            .extension()
+            .is_some_and(|ext| ext == "corg" || ext == "crg" || ext == "json")
+        {
+            // read in file and re-serialize to output (migrate to newest version)
+            let Some(input_path) = cli_options.settings_file else {
+                return Err(eyre!(
+                    "Settings file must be provided when upgrading settings",
+                ));
+            };
+            ImgSpec::load(&input_path)?.save(path.as_path())?;
+            return Ok(());
+        }
         headless_render(
             cli_options.settings_file.as_ref(),
             &path,

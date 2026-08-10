@@ -21,6 +21,8 @@ pub enum SaveLoadError {
     MetadataLoad(#[from] std::io::Error),
     #[error("Failed to parse spec as a valid type")]
     SerdeParse(#[from] serde_json::Error),
+    #[error("Failed to parse spec as a valid type")]
+    PostcardParse(#[from] postcard::Error),
     #[error("Missing description image metadata tag")]
     MissingDescription,
     #[error("Error reading file")]
@@ -92,6 +94,15 @@ impl From<SavedImgSpec> for ImgSpec {
     }
 }
 
+static ZSTD_DICT: std::sync::LazyLock<Vec<u8>> = std::sync::LazyLock::new(|| {
+    zstd::bulk::decompress(include_bytes!("../../assets/zstd_dicts/crg.dict.zst"), 4096)
+        .expect("to be able to decompress dictionary")
+});
+
+fn is_crg(path: &Path) -> bool {
+    path.extension().is_some_and(|ext| ext == "crg")
+}
+
 pub fn is_metadata_supported(path: &Path) -> bool {
     matches!(path.extension(), Some(x) if x == "jpg" || x == "jpeg" || x == "png" || x == "webp" || x == "avif")
 }
@@ -106,31 +117,41 @@ pub trait SafeSaveLoad: Sized + Clone {
             .truncate(true)
             .write(true)
             .open(path)?;
-        let serialized = self.stringify()?;
-        match file.write(serialized.as_bytes()) {
-            Ok(written_amt) => {
-                if written_amt < serialized.len() {
-                    Err(SaveLoadError::PartialFileWrite)
-                } else {
-                    Ok(())
-                }
-            }
-            Err(err) => Err(SaveLoadError::FileWrite(err)),
-        }
+
+        let serialized = if is_crg(path) {
+            self.stringify_compact()?
+        } else {
+            self.stringify()?.into_bytes()
+        };
+
+        file.write_all(&serialized)?;
+        Ok(())
     }
 
     fn load(path: &Path) -> Result<Self, SaveLoadError>
     where
         for<'de> Self::Proxy: Deserialize<'de>,
     {
-        std::fs::read_to_string(path)
-            .map_err(SaveLoadError::FileRead)
-            .and_then(|s| Self::from_str(&s))
+        if is_crg(path) {
+            std::fs::read(path)
+                .map_err(SaveLoadError::FileRead)
+                .and_then(|s| Self::from_bytes(&s))
+        } else {
+            std::fs::read_to_string(path)
+                .map_err(SaveLoadError::FileRead)
+                .and_then(|s| Self::from_str(&s))
+        }
     }
 
     fn stringify(&self) -> Result<String, SaveLoadError> {
         let proxy: Self::Proxy = self.clone().into();
         serde_json::to_string(&proxy).map_err(SaveLoadError::SerdeParse)
+    }
+
+    fn stringify_compact(&self) -> Result<Vec<u8>, SaveLoadError> {
+        let proxy: Self::Proxy = self.clone().into();
+        let mut comp = zstd::bulk::Compressor::with_dictionary(19, &ZSTD_DICT)?;
+        Ok(comp.compress(&postcard::to_stdvec(&proxy).map_err(SaveLoadError::PostcardParse)?)?)
     }
 
     fn from_str(string: &str) -> Result<Self, SaveLoadError>
@@ -140,6 +161,22 @@ pub trait SafeSaveLoad: Sized + Clone {
         serde_json::from_str(string)
             .map_err(SaveLoadError::SerdeParse)
             .map(Self::Proxy::into)
+            .map(Self::post_parse)
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Result<Self, SaveLoadError>
+    where
+        for<'de> Self::Proxy: Deserialize<'de>,
+    {
+        let mut decomp = zstd::bulk::Decompressor::with_dictionary(&ZSTD_DICT)?;
+        postcard::from_bytes(&decomp.decompress(bytes, 1024 * 1024)?)
+            .map_err(SaveLoadError::PostcardParse)
+            .map(Self::Proxy::into)
+            .map(Self::post_parse)
+    }
+
+    fn post_parse(self) -> Self {
+        self
     }
 }
 
@@ -166,7 +203,7 @@ impl From<_ProxyShim> for ImgSpec {
 impl SafeSaveLoad for ImgSpec {
     type Proxy = _ProxyShim;
     fn load(path: &Path) -> Result<Self, SaveLoadError> {
-        let mut image: ImgSpec = if is_metadata_supported(path) {
+        let image: ImgSpec = if is_metadata_supported(path) {
             let meta = Metadata::new_from_path(path)?;
             let tag = meta
                 .get_tag(&little_exif::exif_tag::ExifTag::ImageDescription(
@@ -178,20 +215,29 @@ impl SafeSaveLoad for ImgSpec {
                 return Err(SaveLoadError::MissingDescription);
             };
             Self::from_str(desc)?
+        } else if is_crg(path) {
+            std::fs::read(path)
+                .map_err(SaveLoadError::FileRead)
+                .and_then(|s| Self::from_bytes(&s))?
         } else {
             std::fs::read_to_string(path)
                 .map_err(SaveLoadError::FileRead)
                 .and_then(|s| Self::from_str(&s))?
         };
+
+        Ok(image)
+    }
+
+    fn post_parse(mut self) -> Self {
         fn update_ids(layers: &mut [Layer]) {
             for layer in layers {
                 layer.id = next_layer_id();
             }
         }
-        update_ids(&mut image.style.internal_coloring.color_layers);
-        update_ids(&mut image.style.internal_coloring.light_layers);
-        update_ids(&mut image.style.external_coloring.color_layers);
-        update_ids(&mut image.style.external_coloring.light_layers);
-        Ok(image)
+        update_ids(&mut self.style.internal_coloring.color_layers);
+        update_ids(&mut self.style.internal_coloring.light_layers);
+        update_ids(&mut self.style.external_coloring.color_layers);
+        update_ids(&mut self.style.external_coloring.light_layers);
+        self
     }
 }
