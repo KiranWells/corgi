@@ -20,7 +20,7 @@ impl<S: Subscriber> Layer<S> for AppSubscriber {
         event: &tracing::Event<'_>,
         _ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
-        if *event.metadata().level() <= tracing::Level::WARN
+        if *event.metadata().level() <= tracing::Level::INFO
             && event
                 .metadata()
                 .module_path()
@@ -96,6 +96,7 @@ pub fn logs_ui(ui: &mut egui::Ui, origin_rect: egui::Rect) {
                             let log_color = match log.level {
                                 tracing::Level::ERROR => ui.visuals().error_fg_color,
                                 tracing::Level::WARN => ui.visuals().warn_fg_color,
+                                tracing::Level::INFO => ui.visuals().selection.bg_fill,
                                 _ => ui.visuals().text_color(),
                             };
                             egui::Frame::new().fill(log_color).show(ui, |ui| {
@@ -108,6 +109,9 @@ pub fn logs_ui(ui: &mut egui::Ui, origin_rect: egui::Rect) {
                                             }
                                             tracing::Level::WARN => {
                                                 format!("{} Warning", icons::ICON_WARNING.codepoint)
+                                            }
+                                            tracing::Level::INFO => {
+                                                format!("{} Info", icons::ICON_INFO.codepoint)
                                             }
                                             _ => format!("{} Notice", icons::ICON_INFO.codepoint),
                                         })
