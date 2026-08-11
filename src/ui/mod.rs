@@ -92,6 +92,7 @@ pub struct CorgiUI {
     preset_name: String,
     preset_group: String,
     new_group_active: bool,
+    share_active: bool,
     active_file: Option<ActiveFile>,
     confirm: Option<(String, Vec<(String, DynCallback)>)>,
     show_splash: bool,
@@ -172,6 +173,7 @@ impl CorgiUI {
             preset_name: "New Preset".into(),
             preset_group: "New Group".into(),
             new_group_active: false,
+            share_active: false,
             status: Status::default(),
             command_channel,
             active_file,
@@ -317,7 +319,7 @@ impl CorgiUI {
             .default_pos(res.response.rect.center())
             .pivot(egui::Align2::CENTER_TOP)
             .show(ui, |ui| {
-                ui.set_style(style);
+                ui.set_style(style.clone());
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
 
                 ui.add(
@@ -344,6 +346,33 @@ impl CorgiUI {
                         ui.close_kind(egui::UiKind::Window);
                     }
                 });
+            });
+
+        egui::Window::new("Share Text")
+            .open(&mut self.share_active)
+            .default_pos(res.response.rect.center())
+            .pivot(egui::Align2::CENTER_BOTTOM)
+            .show(ui, |ui| {
+                ui.set_style(style.clone());
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+
+                let text = self
+                    .root_spec
+                    .stringify_compact()
+                    .map(|bytes| create_share_string(&bytes))
+                    .unwrap_or("Failed to create share string".into());
+
+                let gap = ui.spacing().item_spacing.y * 3.0;
+                tui(ui, "share")
+                    .reserve_available_width()
+                    .style(Style::col().center().gap(gap))
+                    .show(|tui| {
+                        tui.label("Share or save this text, then paste it anywhere in the viewport to load the settings");
+                        tui.ui_add_manual(|ui| ui.code(text), |res, _ui| res);
+                        if tui.ui_add(Button::new("Close")).clicked() {
+                            tui.egui_ui().close_kind(egui::UiKind::Window);
+                        }
+                    });
             });
 
         if ui.input(|i| i.viewport().close_requested()) {
@@ -484,6 +513,9 @@ impl CorgiUI {
                         self.open(context);
                     }
                     ui.separator();
+                    if ui.add(Button::new("Share")).clicked() {
+                        self.share_active = true;
+                    }
                     if ui.add(Button::new("Show Splash")).clicked() {
                         self.show_splash = true;
                     }
