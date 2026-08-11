@@ -4,6 +4,7 @@ pub mod app_log;
 pub mod config;
 pub mod ui;
 pub mod worker;
+pub mod share;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};

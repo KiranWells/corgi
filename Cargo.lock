@@ -887,6 +887,7 @@ dependencies = [
 name = "corgi-fractal-engine"
 version = "0.3.1"
 dependencies = [
+ "base64",
  "bytemuck",
  "cargo-packager-resource-resolver",
  "clap",

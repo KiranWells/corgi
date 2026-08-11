@@ -11,7 +11,8 @@ use std::sync::{LazyLock, mpsc};
 
 use cargo_packager_resource_resolver::{current_format, resources_dir};
 use corgi_lib::image_gen::CompressionParams;
-use corgi_lib::types::{ComplexPoint, ImgSpec, OptLevel, Style as ImgStyle, View};
+use corgi_lib::types::serde::SafeSaveLoad;
+use corgi_lib::types::{ComplexPoint, ImgSpec, OptLevel, Style as ImgStyle, View, get_precision};
 use documented::DocumentedFields;
 use eframe::egui::containers::menu::MenuButton;
 use eframe::egui::{
@@ -22,12 +23,14 @@ use egui_material_icons::icons;
 use egui_taffy::{TuiBuilderLogic, tui};
 use preset_library::PresetLibrary;
 use rug::Float;
+use rug::ops::CompleteRound;
 use taffy::prelude::*;
 use tracing::warn;
 use utils::{input_with_label, section};
 
 use crate::app::Status;
 use crate::config::corgi_project_dirs;
+use crate::share::{create_share_string, parse_share_string};
 use crate::ui::preview_resources::ThumbPaintCallback;
 use crate::ui::tabs::{ExploreTabState, RenderState, RenderTabState, StyleTabState, UITab};
 use crate::ui::utils::{StyleExt, indent_with_line, raw_selection, ui_with_label};
@@ -613,15 +616,61 @@ impl CorgiUI {
                 ));
 
                 if ui.input(|inp| inp.events.iter().any(|ev| matches!(ev, egui::Event::Copy))) {
-                    let text = if context.config().show_debug_options {
-                        // the format used in tests
-                        format!("(\"{}\", \"{}\")", hover_pt.x, hover_pt.y)
+                    let text = if self.tab == UITab::Explore {
+                        if context.config().show_debug_options {
+                            // the format used in tests
+                            format!("(\"{}\", \"{}\")", hover_pt.x, hover_pt.y)
+                        } else {
+                            format!("{} + {}i", hover_pt.x, hover_pt.y)
+                        }
                     } else {
-                        format!("{} + {}i", hover_pt.x, hover_pt.y)
+                        match self.root_spec.stringify_compact() {
+                            Ok(bytes) => create_share_string(&bytes),
+                            Err(err) => {
+                                tracing::error!("Could not copy image: {err}");
+                                return;
+                            }
+                        }
                     };
+
                     ui.ctx().copy_text(text);
-                    self.status.message = "Copied location to clipboard".into();
+                    if self.tab == UITab::Explore {
+                        self.status.message = "Copied location to clipboard".into();
+                    } else {
+                        self.status.message = "Copied share string to clipboard".into();
+                    }
                     self.status.progress = None;
+                }
+
+                if let Some(paste_text) = ui.input(|inp| {
+                    inp.events.iter().find_map(|ev| match ev {
+                        egui::Event::Paste(t) => Some(t.clone()),
+                        _ => None,
+                    })
+                }) {
+                    if let Some(img) = parse_share_string(&paste_text)
+                        .ok()
+                        .and_then(|b| ImgSpec::from_bytes(&b).ok())
+                    {
+                        self.root_spec = img;
+                        tracing::info!("Loaded image settings from clipboard");
+                        self.status.message = "Loaded image settings from clipboard".into();
+                        self.status.progress = None;
+                    } else if let Some((Ok(x), Ok(y))) = paste_text
+                        .strip_suffix('i')
+                        .and_then(|t| t.split_once(" + "))
+                        .map(|(x_str, y_str)| {
+                            let prec = get_precision(self.root_spec.location.zoom);
+                            (
+                                Float::parse(x_str).map(|val| val.complete(prec)),
+                                Float::parse(y_str).map(|val| val.complete(prec)),
+                            )
+                        })
+                    {
+                        self.root_spec.location.center = ComplexPoint::new(x, y)
+                    } else {
+                        tracing::warn!("Clipboard content is not valid");
+                    }
                 }
             }
         });
