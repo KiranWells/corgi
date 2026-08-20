@@ -47,9 +47,11 @@ clap = { version = "4.5.43", features = ["derive"], optional = true }
 color-eyre = { version = "0.6", optional = true }
 directories = { version = "6.0.0", optional = true }
 eframe = { version = "0.35", default-features = false, features = ["default_fonts","wayland","wgpu","x11"] , optional=true}
+egui_commonmark = { version = "0.24.0", features = ["macros"], optional = true }
 egui_extras = { version = "0.35", optional = true, features = ["file", "image", "svg"] }
 egui_material_icons = { version = "0.7.0", optional = true }
 egui_taffy = { version = "0.13.0", optional = true }
+regex = { version = "1.12.3", optional = true }
 rfd = { version = "0.17", features = ["xdg-portal"], optional = true }
 taffy = { version = "0.9.2", optional = true }
 tracing-subscriber = { version = "0.3", optional = true, features = ["env-filter"] }
@@ -61,7 +63,7 @@ rand_seeder = { version = "0.5.0", optional = true }
 pastey = "0.2.3"
 
 [features]
-binary-deps = ["base64", "cargo-packager-resource-resolver", "clap", "color-eyre", "directories", "eframe", "egui_extras", "egui_material_icons", "egui_taffy", "rfd", "taffy", "tracing-subscriber", "nanoid", "rand", "rand_seeder"]
+binary-deps = ["base64", "cargo-packager-resource-resolver", "clap", "color-eyre", "directories", "eframe", "egui_commonmark", "egui_extras", "egui_material_icons", "egui_taffy", "regex", "rfd", "taffy", "tracing-subscriber", "nanoid", "rand", "rand_seeder"]
 
 [build-dependencies]
 icns = { version = "0.4.0", features = ["png", "pngio"], default-features = false }
@@ -93,7 +95,14 @@ identifier = "com.kiranwells.corgi"
 homepage = "https://github.com/KiranWells/corgi"
 before-each-package-command = "cargo build --features=\"binary-deps\" --release"
 publisher = "Kiran Wells"
-resources = ["presets", "assets/splash.avif"]
+resources = [
+  {
+    src = "assets/splash.avif",
+    target = "assets/splash.avif"
+  },
+  "presets",
+  "docs"
+]
 icons = [
   "assets/logo/icon.svg",
   "assets/logo/icon_*.png",

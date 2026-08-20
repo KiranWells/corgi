@@ -168,7 +168,7 @@ impl super::CorgiUI {
                 context.cache_mut().previous_files.push(path);
             }
             Err(err) => {
-                tracing::error!("Failed to load image settings `{path:?}`: {err}");
+                tracing::error!("Failed to load image settings {path:?}: {err}");
                 self.status.message = format!("Failed to load image settings: {err:?}");
                 self.status.progress = None;
             }

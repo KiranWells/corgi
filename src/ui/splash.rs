@@ -6,32 +6,7 @@ use emath::Vec2;
 use taffy::prelude::*;
 
 use crate::ui::utils::StyleExt;
-use crate::ui::{CorgiUI, resources_directory};
-
-fn _recolor_svg<const N: usize>(
-    data: &'static [u8; N],
-    accent_pattern: &str,
-    bg_pattern: &str,
-    accent: egui::Color32,
-    bg: egui::Color32,
-) -> std::sync::Arc<[u8]> {
-    let string = String::from_utf8_lossy(data)
-        .replace(accent_pattern, &accent.to_hex())
-        .replace(bg_pattern, &bg.to_hex());
-    string.as_bytes().to_vec().into()
-}
-
-macro_rules! recolor_svg {
-    ($path:literal, $accent_pattern:literal => $accent:expr, $bg_pattern:literal => $bg:expr) => {
-        egui::ImageSource::Bytes {
-            uri: ::std::borrow::Cow::Borrowed(concat!("bytes://", $path)),
-            bytes: egui::load::Bytes::Shared(_recolor_svg(include_bytes!($path), $accent_pattern, $bg_pattern, $accent, $bg)),
-        }
-    };
-    ($path:literal, $pattern:literal => $color:expr) => {
-        recolor_svg!($path, $pattern => $color, "$000" => egui::Color32::BLACK)
-    };
-}
+use crate::ui::{CorgiUI, recolor_svg, resources_directory};
 
 impl CorgiUI {
     pub(super) fn splash_screen(
@@ -136,43 +111,67 @@ impl CorgiUI {
                             ..Default::default()
                         })
                         .show(|tui| {
-                            tui.heading(format!("{} Recent Files", icons::ICON_FOLDER.codepoint));
-                            tui.style(Style {
-                                display: Display::Flex,
-                                flex_direction: FlexDirection::Column,
-                                align_items: Some(AlignItems::Stretch),
-                                gap: length(margin / 2.0),
-                                padding: length(margin),
-                                size: Size {
-                                    width: length(size.x - size.y - margin * 2.0),
-                                    height: percent(1.0),
-                                },
-                                overflow: taffy::Point {
-                                    x: taffy::Overflow::Clip,
-                                    y: taffy::Overflow::Scroll,
-                                },
-                                ..Default::default()
-                            })
-                            .bg_add(TuiBackground::new(), |tui| {
-                                for path in context.cache().previous_files.iter().rev() {
-                                    if tui
-                                        .ui_add(
-                                            Button::new(
-                                                path.file_name()
-                                                    .unwrap_or(path.as_os_str())
-                                                    .to_string_lossy(),
-                                            )
-                                            .frame(false)
-                                            .right_text(""),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.open_file(context, path.clone());
+                            tui.heading(format!("{} Resources", icons::ICON_HELP_CENTER.codepoint));
+                            tui.style(Style::col().pad2(0.0, margin).gap(margin))
+                                .add(|tui| {
+                                    if tui.clickable(|tui| tui.label("• Quick Start")).clicked() {
+                                        self.docs_state.active = true;
+                                        self.docs_state.goto(crate::ui::docs::DocsPage::QuickStart);
                                         tui.egui_ui().close_kind(egui::UiKind::Window);
-                                        break;
                                     }
-                                }
-                            });
+                                    if tui.clickable(|tui| tui.label("• Documentation")).clicked()
+                                    {
+                                        self.docs_state.active = true;
+                                        tui.egui_ui().close_kind(egui::UiKind::Window);
+                                    }
+                                });
+                            if !context.cache().previous_files.is_empty() {
+                                tui.heading(format!(
+                                    "{} Recent Files",
+                                    icons::ICON_FOLDER.codepoint
+                                ));
+                                tui.style(Style {
+                                    display: Display::Flex,
+                                    flex_direction: FlexDirection::Column,
+                                    align_items: Some(AlignItems::Stretch),
+                                    gap: length(margin / 2.0),
+                                    padding: length(margin),
+                                    size: Size {
+                                        width: length(size.x - size.y - margin * 2.0),
+                                        height: percent(1.0),
+                                    },
+                                    overflow: taffy::Point {
+                                        x: taffy::Overflow::Clip,
+                                        y: taffy::Overflow::Scroll,
+                                    },
+                                    ..Default::default()
+                                })
+                                .bg_add(
+                                    TuiBackground::new(),
+                                    |tui| {
+                                        for path in context.cache().previous_files.iter().rev() {
+                                            if tui
+                                                .ui_add(
+                                                    Button::new(
+                                                        path.file_name()
+                                                            .unwrap_or(path.as_os_str())
+                                                            .to_string_lossy(),
+                                                    )
+                                                    .frame(false)
+                                                    .right_text(""),
+                                                )
+                                                .clicked()
+                                            {
+                                                self.open_file(context, path.clone());
+                                                tui.egui_ui().close_kind(egui::UiKind::Window);
+                                                break;
+                                            }
+                                        }
+                                    },
+                                );
+                            } else {
+                                tui.style(Style::grow()).add(|tui| tui.label(""));
+                            }
                             tui.separator();
 
                             if tui.style(Style::row()).ui_add(Button::new("New")).clicked() {

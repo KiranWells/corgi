@@ -1,4 +1,5 @@
-use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
+use base64::Engine;
+use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 
 const SAFE_CHARS: &str = "@#%*";
 const TEMPLATES: [&str; 4] = [

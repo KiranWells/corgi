@@ -38,6 +38,7 @@ use crate::worker::{ImageGenCommand, RendererId};
 
 mod coloring;
 pub mod debouncer;
+mod docs;
 mod preset_library;
 mod preview_resources;
 mod settings;
@@ -54,6 +55,32 @@ pub trait EditUI {
     /// Renders the UI to edit `self`, mutating it in response
     fn render_edit_ui(&mut self, tui: &mut egui_taffy::Tui);
 }
+
+fn _recolor_svg<const N: usize>(
+    data: &'static [u8; N],
+    accent_pattern: &str,
+    bg_pattern: &str,
+    accent: egui::Color32,
+    bg: egui::Color32,
+) -> std::sync::Arc<[u8]> {
+    let string = String::from_utf8_lossy(data)
+        .replace(accent_pattern, &accent.to_hex())
+        .replace(bg_pattern, &bg.to_hex());
+    string.as_bytes().to_vec().into()
+}
+
+macro_rules! recolor_svg {
+    ($path:literal, $accent_pattern:literal => $accent:expr, $bg_pattern:literal => $bg:expr) => {
+        egui::ImageSource::Bytes {
+            uri: ::std::borrow::Cow::Borrowed(concat!("bytes://", $path)),
+            bytes: egui::load::Bytes::Shared(crate::ui::_recolor_svg(include_bytes!($path), $accent_pattern, $bg_pattern, $accent, $bg)),
+        }
+    };
+    ($path:literal, $pattern:literal => $color:expr) => {
+        recolor_svg!($path, $pattern => $color, "$000" => egui::Color32::BLACK)
+    };
+}
+use recolor_svg;
 
 #[derive(Debug)]
 struct ActiveFile {
@@ -93,6 +120,7 @@ pub struct CorgiUI {
     preset_group: String,
     new_group_active: bool,
     share_active: bool,
+    docs_state: docs::DocsState,
     active_file: Option<ActiveFile>,
     confirm: Option<(String, Vec<(String, DynCallback)>)>,
     show_splash: bool,
@@ -174,6 +202,7 @@ impl CorgiUI {
             preset_group: "New Group".into(),
             new_group_active: false,
             share_active: false,
+            docs_state: docs::DocsState::default(),
             status: Status::default(),
             command_channel,
             active_file,
@@ -192,6 +221,8 @@ impl CorgiUI {
     ) {
         let style = ui.style().clone();
         let start_show_splash = self.show_splash;
+        let window_rect = ui.available_rect_before_wrap();
+
         egui::Panel::right("settings_panel")
             .frame(Frame::new().fill(style.visuals.window_fill))
             .show(ui, |ui| {
@@ -375,6 +406,18 @@ impl CorgiUI {
                     });
             });
 
+        let mut open = self.docs_state.active;
+        egui::Window::new("Documentation")
+            .open(&mut open)
+            .default_size(window_rect.size() / 2.0)
+            .default_pos(window_rect.center() - window_rect.size() / 4.0)
+            .pivot(egui::Align2::LEFT_TOP)
+            .show(ui, |ui| {
+                ui.set_style(style.clone());
+                self.docs_state.render_docs(ui);
+            });
+        self.docs_state.active = open;
+
         if ui.input(|i| i.viewport().close_requested()) {
             // check if we need to save
             if self
@@ -513,11 +556,14 @@ impl CorgiUI {
                         self.open(context);
                     }
                     ui.separator();
-                    if ui.add(Button::new("Share")).clicked() {
+                    if ui.add(Button::new("Share…")).clicked() {
                         self.share_active = true;
                     }
                     if ui.add(Button::new("Show Splash")).clicked() {
                         self.show_splash = true;
+                    }
+                    if ui.add(Button::new("Show Docs")).clicked() {
+                        self.docs_state.active = true;
                     }
                     ui.separator();
                     if ui.add(Button::new("Settings")).clicked() {

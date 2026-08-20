@@ -1,12 +1,12 @@
 <p align="center">
-  <img alt="Corgi Fractal Engine Logo" src="assets/logo/full.svg" height="200" />
+  <img alt="Corgi Fractal Engine Logo" src="assets/logo/full.svg" width="690" height="200" />
 </p>
 
 Corgi is a performance-focused fractal rendering engine capable of ultra-deep zooms and highly flexible styling.
 
 ## Features
 
-![An example of the UI in use at extreme zoom levels](assets/ui_example_small.avif)
+![An example of the UI with the splash image loaded](assets/ui_example.avif)
 
 ### High precision rendering
 
@@ -22,7 +22,7 @@ Corgi uses optimized algorithms and efficient hardware utilization to render ima
 
 ### Highly Customizable Image Styling
 
-Corgi includes several coloring algorithms and a layer-based compositing system to allow an incredible amout of variation even for the same fractal locations.
+Corgi includes several coloring algorithms and a layer-based compositing system to allow an incredible amount of variation even for the same fractal locations.
 
 ![A collage of several different styles applied to the same fractal location](assets/style_collage.avif)
 
@@ -32,11 +32,11 @@ Corgi is still in alpha, so there are many more features I still plan to add. Un
 
 ### Know Issues
 
-Above about $10^{90}$ times zoom, some visual artifacts appear around some Mini-brots. In Julia mode, artifacts appear much sooner. This seems to be due to a rounding issue in the iteration algorithm.
-
-Internal coloring algorithms are unstable at high zoom levels, and internal distance estimation is not implemented yet.
+Iternal coloring algorithms are unstable at certain zoom levels, and internal distance estimation is not implemented yet.
 
 ## Usage
+
+### Installation
 
 Currently, binary releases are not being created. However, you can install Corgi by cloning the repository and running:
 
@@ -50,7 +50,11 @@ Basic CLI options can be viewed with `--help`:
 
 ```bash
 corgi --help
-````
+```
+
+### Documentation
+
+See [docs/](docs/).
 
 ## Troubleshooting
 
