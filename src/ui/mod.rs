@@ -420,10 +420,11 @@ impl CorgiUI {
 
         if ui.input(|i| i.viewport().close_requested()) {
             // check if we need to save
-            if self
-                .active_file
-                .as_ref()
-                .is_none_or(|af| af.last_saved_spec != self.root_spec)
+            if context.config().show_save_prompt
+                && self
+                    .active_file
+                    .as_ref()
+                    .is_none_or(|af| af.last_saved_spec != self.root_spec)
                 && self.root_spec != ImgSpec::default()
             {
                 self.confirm = Some((

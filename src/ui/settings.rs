@@ -16,6 +16,12 @@ impl EditUI for crate::Config {
         );
         input_with_label(
             tui,
+            "Show Save Prompt",
+            Some("Whether to prompt to save unsaved settings before closing the app."),
+            Checkbox::new(&mut self.show_save_prompt, ""),
+        );
+        input_with_label(
+            tui,
             "Thumbnail Image Size",
             Some("The width and height of thumbnail images used to preview locations or styles."),
             DragValue::new(&mut self.thumbnail_size)

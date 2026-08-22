@@ -291,6 +291,42 @@ impl super::CorgiUI {
             }
         });
         section(tui, "Image Settings", true, |tui| {
+            let mut size = (self.root_spec.width, self.root_spec.height);
+            fn format(size: (u32, u32)) -> String {
+                format!("{}×{}", size.0, size.1)
+            }
+
+            ui_with_label(tui, "Preset", None, |tui| {
+                let options = vec![
+                    (3840, 2160),
+                    (2160, 3840),
+                    (2560, 1440),
+                    (1440, 2560),
+                    (1920, 1080),
+                    (1080, 1920),
+                    (1280, 720),
+                    (720, 1280),
+                    (1024, 1024),
+                    (512, 512),
+                ];
+                tui.ui_add_manual(
+                    |ui| {
+                        egui::ComboBox::from_id_salt("Preset")
+                            .selected_text(format(size))
+                            .show_ui(ui, |ui| {
+                                for selected_value in options {
+                                    let text = format(selected_value);
+                                    ui.selectable_value(&mut size, selected_value, text);
+                                }
+                            })
+                            .response
+                    },
+                    |res, _ui| res,
+                )
+            });
+            self.root_spec.width = size.0;
+            self.root_spec.height = size.1;
+
             input_with_label(
                 tui,
                 "Image width",

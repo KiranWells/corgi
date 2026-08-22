@@ -21,12 +21,14 @@ pub const PROJECT_QUALIFIERS: [&str; 3] = ["com", "kiranwells", "corgi"];
 /// Contains values that are user-configurable in the
 /// main settings menu, except for the theme.
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Config {
     pub ui_max_shader_batch_iters: u32,
     pub max_shader_batch_iters: u32,
     pub thumbnail_size: u32,
     pub show_debug_options: bool,
     pub show_splash_on_start: bool,
+    pub show_save_prompt: bool,
 }
 
 /// Cached values
@@ -35,6 +37,7 @@ pub struct Config {
 /// in the settings menu, but are necessary to persist
 /// between executions.
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Cache {
     pub previous_paths: PreviousPaths,
     pub default_image_type: String,
@@ -112,6 +115,7 @@ impl Default for Config {
             thumbnail_size: 256,
             show_debug_options: false,
             show_splash_on_start: true,
+            show_save_prompt: true,
         }
     }
 }
