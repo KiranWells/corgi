@@ -18,7 +18,6 @@ pub struct WorkerState {
     renderers: HashMap<RendererId, Engine>,
     command_channel: mpsc::Receiver<ImageGenCommand>,
     status_channel: mpsc::Sender<StatusMessage>,
-    cancelled: Arc<AtomicBool>,
     ctx: egui::Context,
 }
 
@@ -52,7 +51,7 @@ impl WorkerState {
         output_settings: ImgSpec,
         recv: mpsc::Receiver<ImageGenCommand>,
         send: mpsc::Sender<StatusMessage>,
-        cancelled: Arc<AtomicBool>,
+        mut cancelled: HashMap<RendererId, Arc<AtomicBool>>,
         ctx: egui::Context,
         context: &crate::Context,
     ) -> Self {
@@ -70,7 +69,7 @@ impl WorkerState {
                         corgi_lib::image_gen::Constants {
                             iter_batch_size: context.config().ui_max_shader_batch_iters,
                         },
-                        cancelled.clone(),
+                        cancelled.remove(&RendererId::Explore).unwrap(),
                     ),
                 ),
                 (
@@ -83,7 +82,7 @@ impl WorkerState {
                         corgi_lib::image_gen::Constants {
                             iter_batch_size: context.config().ui_max_shader_batch_iters,
                         },
-                        cancelled.clone(),
+                        cancelled.remove(&RendererId::Style).unwrap(),
                     ),
                 ),
                 (
@@ -96,7 +95,7 @@ impl WorkerState {
                         corgi_lib::image_gen::Constants {
                             iter_batch_size: context.config().max_shader_batch_iters,
                         },
-                        cancelled.clone(),
+                        cancelled.remove(&RendererId::Render).unwrap(),
                     ),
                 ),
                 (
@@ -113,7 +112,7 @@ impl WorkerState {
                         corgi_lib::image_gen::Constants {
                             iter_batch_size: context.config().max_shader_batch_iters,
                         },
-                        cancelled.clone(),
+                        cancelled.remove(&RendererId::Thumbnail).unwrap(),
                     ),
                 ),
             ]
@@ -121,7 +120,6 @@ impl WorkerState {
             .collect(),
             command_channel: recv,
             status_channel: send,
-            cancelled,
             ctx,
         }
     }
@@ -131,8 +129,6 @@ impl WorkerState {
     /// current status of the render process to the main thread.
     pub fn run(&mut self) {
         'outer: while let Ok(msg) = self.command_channel.recv() {
-            self.cancelled
-                .store(false, std::sync::atomic::Ordering::Release);
             let mut render_commands = HashMap::new();
             let mut save_commands = HashMap::new();
             match msg {
@@ -214,7 +210,7 @@ impl WorkerState {
                     Ok(timings) => {
                         if self
                             .status_channel
-                            .send(StatusMessage::RenderFinished(id, timings, image.view()))
+                            .send(StatusMessage::RenderFinished(id, timings, image))
                             .is_err()
                         {
                             break 'outer;

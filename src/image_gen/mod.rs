@@ -785,7 +785,8 @@ impl Engine {
     }
 
     fn is_cancelled(&mut self, status_callback: &mut impl FnMut(ProgressUpdate)) -> bool {
-        if self.cancelled.load(Ordering::Relaxed) {
+        if self.cancelled.load(Ordering::Acquire) {
+            self.cancelled.store(false, Ordering::Release);
             status_callback(ProgressUpdate::partial("Cancelled", 1.0));
             true
         } else {

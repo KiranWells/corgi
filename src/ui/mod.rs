@@ -112,7 +112,7 @@ pub struct CorgiUI {
     show_settings: bool,
     /// Whether the viewport should load the current image from
     /// the rendering thread into the UI view.
-    pub swap: bool,
+    pub swap: Option<RendererId>,
     pub status: Status,
     command_channel: mpsc::Sender<ImageGenCommand>,
     preset_save_active: Option<UITab>,
@@ -195,7 +195,7 @@ impl CorgiUI {
             },
             show_camera: false,
             setting_probe: false,
-            swap: false,
+            swap: None,
             show_settings: false,
             preset_save_active: None,
             preset_name: "New Preset".into(),
@@ -217,7 +217,7 @@ impl CorgiUI {
         &mut self,
         ui: &mut egui::Ui,
         context: &mut crate::Context,
-        cancel: impl FnOnce(),
+        cancel: impl FnOnce(RendererId),
     ) {
         let style = ui.style().clone();
         let start_show_splash = self.show_splash;
@@ -236,7 +236,7 @@ impl CorgiUI {
                         .show(|tui| match self.tab {
                             UITab::Explore => self.explore_tab(context, tui),
                             UITab::Style => self.style_tab(context, tui),
-                            UITab::Render => self.render_tab(context, cancel, tui),
+                            UITab::Render(_) => self.render_tab(context, cancel, tui),
                         });
                 });
             });
@@ -460,7 +460,7 @@ impl CorgiUI {
         self.show_confirm_dialog(ui, context, res);
         self.handle_shortcuts(context, ui);
 
-        self.swap = false;
+        self.swap = None;
     }
 
     fn show_confirm_dialog(
@@ -603,11 +603,15 @@ impl CorgiUI {
                 UITab::Style,
                 format!("{} Style", icons::ICON_STYLE.codepoint),
             );
+            let mut is_render = matches!(self.tab, UITab::Render(_));
             ui.selectable_value(
-                &mut self.tab,
-                UITab::Render,
+                &mut is_render,
+                true,
                 format!("{} Render", icons::ICON_IMAGE.codepoint),
             );
+            if is_render && !matches!(self.tab, UITab::Render(_)) {
+                self.tab = UITab::Render(false);
+            }
         });
         ui.add(Separator::default().spacing(ui.visuals().widgets.noninteractive.bg_stroke.width));
         ui.style_mut().spacing.item_spacing.y = y;
@@ -777,7 +781,9 @@ impl CorgiUI {
                                             context.config().thumbnail_size,
                                             context.config().thumbnail_size,
                                         ),
-                                        swap: self.swap,
+                                        swap: self
+                                            .swap
+                                            .is_some_and(|id| id == RendererId::Thumbnail),
                                     },
                                 ));
                                 ui.allocate_rect(ui.available_rect_before_wrap(), Sense::empty());
@@ -874,9 +880,27 @@ impl CorgiUI {
 
     /// Get the image settings
     pub fn image(&self) -> ImgSpec {
-        let mut active_image = self.root_spec.clone();
         match self.tab {
-            UITab::Explore => {
+            UITab::Explore => self.image_to_render(RendererId::Explore),
+            UITab::Style => self.image_to_render(RendererId::Style),
+            UITab::Render(false) => {
+                let mut active_image = self.root_spec.clone();
+                active_image.set_view(self.style_state.rendered_view.clone());
+                active_image.scale(self.style_state.scaling);
+                active_image
+            }
+            UITab::Render(true) => {
+                let mut active_image = self.root_spec.clone();
+                active_image.set_view(self.current_view.clone());
+                active_image
+            }
+        }
+    }
+
+    pub fn image_to_render(&self, id: RendererId) -> ImgSpec {
+        let mut active_image = self.root_spec.clone();
+        match id {
+            RendererId::Explore => {
                 active_image.style = self.explore_state.style.clone();
                 active_image.width = self.current_view.width;
                 active_image.height = self.current_view.height;
@@ -886,7 +910,7 @@ impl CorgiUI {
                 active_image.optimization_level = self.explore_state.opt_level;
                 active_image
             }
-            UITab::Style => {
+            RendererId::Style => {
                 active_image.width = self.current_view.width;
                 active_image.height = self.current_view.height;
                 active_image.location.zoom -=
@@ -895,28 +919,36 @@ impl CorgiUI {
                 active_image.optimization_level = OptLevel::CacheOptimized;
                 active_image
             }
-            UITab::Render => {
-                active_image.set_view(self.current_view.clone());
-                active_image
+            RendererId::Render => {
+                let mut image = self.root_spec.clone();
+                if self.render_state.exr_mode {
+                    image.optimization_level = OptLevel::CacheOptimized;
+                }
+                image
             }
+            // Intentionally not implemented since this requires knowing
+            // the configured thumbnail size
+            RendererId::Thumbnail => unimplemented!(),
         }
     }
 
     /// Returns whether the current tab has a viewport that needs
     /// automatic updates when the image settings change.
     pub fn has_active_viewport(&self) -> bool {
-        self.tab != UITab::Render
+        self.tab != UITab::Render(true)
     }
 
     /// Sends a render command for the current tab to the worker thread
     pub fn send_render(&self) -> color_eyre::Result<()> {
+        let renderer_id = match self.tab {
+            UITab::Explore => RendererId::Explore,
+            UITab::Style => RendererId::Style,
+            UITab::Render(false) => RendererId::Style,
+            UITab::Render(true) => RendererId::Render,
+        };
         Ok(self.command_channel.send(ImageGenCommand::Render(
-            match self.tab {
-                UITab::Explore => RendererId::Explore,
-                UITab::Style => RendererId::Style,
-                UITab::Render => unreachable!(),
-            },
-            Box::new(self.image()),
+            renderer_id,
+            Box::new(self.image_to_render(renderer_id)),
         ))?)
     }
 

@@ -12,6 +12,7 @@ use parking_lot::RwLock;
 use wgpu::{Extent3d, Queue};
 
 use crate::ui::UITab;
+use crate::worker::RendererId;
 
 /// Resources necessary for rendering the preview image
 struct SubResources {
@@ -285,7 +286,7 @@ impl SubResources {
 pub struct PaintCallback {
     pub rendered_viewport: View,
     pub view: View,
-    pub swap: bool,
+    pub swap: Option<RendererId>,
     pub tab: UITab,
 }
 
@@ -303,18 +304,22 @@ impl CallbackTrait for PaintCallback {
             .expect("to get render resources");
         let texture = match self.tab {
             UITab::Explore => res.explore_texture.read(),
-            UITab::Style => res.style_texture.read(),
-            UITab::Render => res.output_texture.read(),
+            UITab::Style | UITab::Render(false) => res.style_texture.read(),
+            UITab::Render(true) => res.output_texture.read(),
         };
-        let res = if self.tab == UITab::Render {
+        if let Some(id) = self.swap {
+            match id {
+                RendererId::Explore => res.preview.swap(device, queue, &res.explore_texture.read()),
+                RendererId::Style => res.preview.swap(device, queue, &res.style_texture.read()),
+                RendererId::Render => res.output.swap(device, queue, &res.output_texture.read()),
+                RendererId::Thumbnail => {}
+            }
+        }
+        let res = if self.tab == UITab::Render(true) {
             &mut res.output
         } else {
             &mut res.preview
         };
-        if self.swap {
-            // copy the preview texture to the used texture
-            res.swap(device, queue, &texture);
-        }
 
         let extents = self.rendered_viewport.extents();
         let size = (extents.width, extents.height);
@@ -337,7 +342,7 @@ impl CallbackTrait for PaintCallback {
         let res = callback_resources
             .get::<PreviewRenderResources>()
             .expect("to get render resources");
-        let res = if self.tab == UITab::Render {
+        let res = if self.tab == UITab::Render(true) {
             &res.output
         } else {
             &res.preview

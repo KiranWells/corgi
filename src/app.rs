@@ -14,7 +14,7 @@ use clap::Parser;
 use color_eyre::eyre::eyre;
 use corgi_lib::image_gen::{ImageTimings, ProgressUpdate};
 use corgi_lib::types::serde::SafeSaveLoad;
-use corgi_lib::types::{ImgSpec, OptLevel, View};
+use corgi_lib::types::{ImgSpec, OptLevel};
 
 use crate::config::Context;
 use crate::ui::debouncer::Debouncer;
@@ -67,7 +67,7 @@ pub struct CorgiApp {
     command_channel: mpsc::Sender<ImageGenCommand>,
     status_channel: mpsc::Receiver<StatusMessage>,
     debouncers: HashMap<RendererId, ImgDebouncer>,
-    cancel_worker: std::sync::Arc<AtomicBool>,
+    cancel_worker: HashMap<RendererId, std::sync::Arc<AtomicBool>>,
     worker_handle: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -100,7 +100,7 @@ enum PollState {
 #[derive(Debug)]
 pub enum StatusMessage {
     Progress(ProgressUpdate),
-    RenderFinished(RendererId, ImageTimings, View),
+    RenderFinished(RendererId, ImageTimings, Box<ImgSpec>),
     Error(color_eyre::Report),
 }
 
@@ -178,7 +178,14 @@ impl CorgiApp {
             .expect("Eframe must be launched with the wgpu backend");
         let (ui_send, worker_recv) = mpsc::channel::<ImageGenCommand>();
         let (worker_send, ui_recv) = mpsc::channel::<StatusMessage>();
-        let cancelled = Arc::new(AtomicBool::new(false));
+        let cancelled: HashMap<RendererId, Arc<AtomicBool>> = [
+            (RendererId::Explore, Arc::new(AtomicBool::new(false))),
+            (RendererId::Style, Arc::new(AtomicBool::new(false))),
+            (RendererId::Render, Arc::new(AtomicBool::new(false))),
+            (RendererId::Thumbnail, Arc::new(AtomicBool::new(false))),
+        ]
+        .into_iter()
+        .collect();
         let mut initial_image = ImgSpec::default();
         let output_image = ImgSpec::default();
         let ctx = &cc.egui_ctx;
@@ -262,19 +269,16 @@ impl eframe::App for CorgiApp {
                     self.ui_state.status.message = message.into();
                     self.ui_state.status.progress = progress;
                 }
-                StatusMessage::RenderFinished(id, timings, viewport) => {
+                StatusMessage::RenderFinished(id, timings, img) => {
                     tracing::debug!("Image finished. {timings}");
                     self.ui_state.status.message = "Finished rendering".into();
                     self.ui_state.status.progress = None;
-                    self.ui_state.swap = true;
+                    self.ui_state.swap = Some(id);
                     self.debouncers
                         .entry(id)
-                        .or_insert(ImgDebouncer::new(
-                            Duration::from_millis(300),
-                            self.ui_state.image().clone(),
-                        ))
+                        .or_insert(ImgDebouncer::new(Duration::from_millis(300), *img.clone()))
                         .update_timings(&timings);
-                    self.ui_state.update_rendered_view(id, viewport);
+                    self.ui_state.update_rendered_view(id, img.view());
                 }
                 StatusMessage::Error(report) => {
                     tracing::warn!("Error in worker: {report}");
@@ -283,10 +287,13 @@ impl eframe::App for CorgiApp {
                 }
             }
         }
-        self.ui_state.generate_ui(ui, &mut self.context, || {
-            self.cancel_worker
-                .store(true, std::sync::atomic::Ordering::Relaxed)
-        });
+        self.ui_state
+            .generate_ui(ui, &mut self.context, |id: RendererId| {
+                self.cancel_worker
+                    .get(&id)
+                    .unwrap()
+                    .store(true, std::sync::atomic::Ordering::Relaxed)
+            });
         if self.ui_state.has_active_viewport() && self.worker_handle.is_some() {
             let image = self.ui_state.image();
             match self
@@ -303,7 +310,9 @@ impl eframe::App for CorgiApp {
                         );
                     }
                     self.cancel_worker
-                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                        .get(&self.ui_state.renderer())
+                        .unwrap()
+                        .store(false, std::sync::atomic::Ordering::Relaxed);
 
                     if self.ui_state.send_render().is_err() {
                         tracing::error!("Worker thread has stopped; please restart the app.");

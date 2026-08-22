@@ -3,11 +3,14 @@ use std::f32::consts::PI;
 use corgi_lib::types::{ComplexPoint, ImgSpec, Rotate, get_precision};
 use eframe::egui::{Color32, Pos2, Sense, Stroke, UiBuilder, Vec2};
 use eframe::{egui, egui_wgpu};
+use egui_taffy::{TuiBuilderLogic, tui};
 use rug::Float;
 use rug::ops::PowAssign;
+use taffy::Style;
 
 use crate::ui::preview_resources::PaintCallback;
 use crate::ui::tabs::UITab;
+use crate::ui::utils::StyleExt;
 
 impl super::CorgiUI {
     /// Render the image preview viewport
@@ -59,9 +62,11 @@ impl super::CorgiUI {
 
                 let cb = PaintCallback {
                     rendered_viewport: match self.tab {
-                        UITab::Render => self.render_state.rendered_view.clone(),
+                        UITab::Render(true) => self.render_state.rendered_view.clone(),
                         UITab::Explore => self.explore_state.rendered_view.clone(),
-                        UITab::Style => self.style_state.rendered_view.clone(),
+                        UITab::Style | UITab::Render(false) => {
+                            self.style_state.rendered_view.clone()
+                        }
                     },
                     view: view_image.view(),
                     swap: self.swap,
@@ -70,8 +75,46 @@ impl super::CorgiUI {
 
                 let callback = egui_wgpu::Callback::new_paint_callback(rect, cb);
 
-                // this paint call must be before others for some reason
                 ui.painter().add(callback);
+
+                if let UITab::Render(_) = self.tab {
+                    ui.place(
+                        new_max_rect.shrink(ui.spacing().indent),
+                        |ui: &mut egui::Ui| {
+                            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                            ui.visuals_mut().widgets.noninteractive.bg_stroke.color =
+                                ui.visuals_mut().widgets.noninteractive.bg_fill;
+                            tui(ui, "Render buttons")
+                                .style(Style::row().center())
+                                .reserve_available_width()
+                                .show(|tui| {
+                                    tui.ui_add_manual(
+                                        |ui| {
+                                            ui.horizontal(|ui| {
+                                                egui::Frame::new()
+                                                    .fill(ui.visuals().window_fill)
+                                                    .corner_radius(ui.spacing().item_spacing.x)
+                                                    .show(ui, |ui| {
+                                                        ui.selectable_value(
+                                                            &mut self.tab,
+                                                            UITab::Render(false),
+                                                            "Viewport",
+                                                        );
+                                                        ui.selectable_value(
+                                                            &mut self.tab,
+                                                            UITab::Render(true),
+                                                            "Output",
+                                                        );
+                                                    });
+                                            })
+                                            .response
+                                        },
+                                        |res, _| res,
+                                    )
+                                })
+                        },
+                    );
+                }
             },
         );
         hover_pt
@@ -148,10 +191,10 @@ impl super::CorgiUI {
             painter.add(t);
         }
         let view_image = self.image();
-        let camera_view = if self.tab == UITab::Render {
-            self.render_state.rendered_view.clone()
-        } else {
-            self.root_spec.view()
+        let camera_view = match self.tab {
+            UITab::Render(true) => self.render_state.rendered_view.clone(),
+            // UITab::Render(false) => self.style_state.rendered_view.clone(),
+            _ => self.root_spec.view(),
         };
         let rect =
             egui::Rect::from_min_size(Pos2::ZERO, view_image.size() / self.viewport_scaling());
@@ -167,11 +210,17 @@ impl super::CorgiUI {
         render_rect = render_rect.scale_from_center2(camera_view.aspect_scale());
         let painter = ui.painter();
         let simple_stroke = Stroke::new(2.0, Color32::WHITE);
-        let center = egui::Pos2::ZERO + self.current_view.size() / 2.0;
-        let current_angle = if self.tab == UITab::Render {
-            self.current_view.angle - self.render_state.rendered_view.angle
+        let center = if self.tab == UITab::Render(false) {
+            render_rect.center()
         } else {
-            self.root_spec.location.angle
+            egui::Pos2::ZERO + self.current_view.size() / 2.0
+        };
+        let current_angle = match self.tab {
+            UITab::Render(true) => self.current_view.angle - self.render_state.rendered_view.angle,
+            UITab::Render(false) => {
+                self.style_state.rendered_view.angle - self.root_spec.location.angle
+            }
+            _ => self.root_spec.location.angle,
         };
         let (pointer, modifiers, scroll) =
             ui.input(|i| (i.pointer.clone(), i.modifiers, i.smooth_scroll_delta));
@@ -205,22 +254,30 @@ impl super::CorgiUI {
         if (scroll.length() > 0.0 || self.setting_probe)
             && let Some(pos) = pointer.latest_pos()
         {
+            let pos = if self.tab == UITab::Render(false) {
+                center
+            } else {
+                pos
+            };
             paint_crosshair(painter, pos, 10.0, simple_stroke);
         }
-        if self.show_camera || self.tab == UITab::Render {
-            if self.tab != UITab::Render {
-                painter.rect_stroke(
-                    render_rect.intersect(rect),
-                    0.0,
-                    simple_stroke,
-                    egui::StrokeKind::Outside,
-                );
-            }
-            let current_angle = if self.tab == UITab::Render {
+        if self.show_camera || matches!(self.tab, UITab::Render(_)) {
+            let current_angle = if matches!(self.tab, UITab::Render(_)) {
                 current_angle
             } else {
                 0.0
             };
+            if self.tab != UITab::Render(true) {
+                painter.add(
+                    egui::epaint::RectShape::stroke(
+                        render_rect.intersect(rect),
+                        0.0,
+                        simple_stroke,
+                        egui::StrokeKind::Outside,
+                    )
+                    .with_angle(current_angle),
+                );
+            }
             let text_anchor = render_rect.center()
                 + (render_rect.center_bottom() - render_rect.center()
                     + Vec2::new(0.0, theme.spacing))
@@ -300,7 +357,7 @@ impl super::CorgiUI {
         }
 
         // apply deltas to relevant view or location
-        if self.tab == UITab::Render {
+        if self.tab == UITab::Render(true) {
             self.current_view.zoom += scroll_zoom;
             if scroll.y != 0.0
                 && let Some(pos) = mouse.latest_pos()
@@ -339,13 +396,18 @@ impl super::CorgiUI {
                 self.root_spec.location.center.x -= zoomed_real.x - unzoomed_real.x;
                 self.root_spec.location.center.y -= zoomed_real.y - unzoomed_real.y;
             }
+            let inverse = if self.tab == UITab::Render(false) {
+                -1.0
+            } else {
+                1.0
+            };
             // including "none" down to support touch
             if mouse.primary_down() || !mouse.any_down() {
-                self.root_spec.location.center.x -= x_offset;
-                self.root_spec.location.center.y -= y_offset;
+                self.root_spec.location.center.x -= inverse * x_offset;
+                self.root_spec.location.center.y -= inverse * y_offset;
             }
             if mouse.secondary_down() {
-                self.root_spec.location.angle += drag_rotation;
+                self.root_spec.location.angle += inverse * drag_rotation;
                 self.root_spec.location.angle %= PI * 2.0;
             }
             if mouse.middle_down() {

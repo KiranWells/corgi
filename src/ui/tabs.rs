@@ -50,7 +50,7 @@ pub enum RenderState {
 pub enum UITab {
     Explore,
     Style,
-    Render,
+    Render(bool),
 }
 
 impl super::CorgiUI {
@@ -252,7 +252,7 @@ impl super::CorgiUI {
     pub(super) fn render_tab(
         &mut self,
         context: &mut crate::config::Context,
-        cancel: impl FnOnce(),
+        cancel: impl FnOnce(RendererId),
         tui: &mut egui_taffy::Tui,
     ) {
         tui.style(Style::row()).add(|tui| {
@@ -412,16 +412,15 @@ impl super::CorgiUI {
         .add(|tui| {
             if self.render_state.state != RenderState::Rendering {
                 if tui.ui_add(Button::new("Render")).clicked() {
-                    let mut image = self.root_spec.clone();
-                    if self.render_state.exr_mode {
-                        image.optimization_level = OptLevel::CacheOptimized;
+                    self.tab = UITab::Render(true);
+                    if self.send_render().is_err() {
+                        tracing::error!("Worker thread has stopped; please restart the app.");
                     }
-                    self.send(ImageGenCommand::Render(RendererId::Render, Box::new(image)));
                     self.render_state.state = RenderState::Rendering;
                 }
             } else if tui.ui_add(Button::new("Cancel Render")).clicked() {
                 self.render_state.state = RenderState::Cancelled;
-                cancel();
+                cancel(RendererId::Render);
             }
             if tui
                 .enabled_ui(self.render_state.state == RenderState::Rendered)
@@ -471,16 +470,16 @@ impl super::CorgiUI {
     pub(super) fn viewport_scaling(&self) -> f32 {
         match self.tab {
             UITab::Explore => self.explore_state.scaling,
-            UITab::Style => self.style_state.scaling,
-            UITab::Render => 1.0,
+            UITab::Style | UITab::Render(false) => self.style_state.scaling,
+            UITab::Render(true) => 1.0,
         }
     }
 
     pub fn renderer(&self) -> RendererId {
         match self.tab {
             UITab::Explore => RendererId::Explore,
-            UITab::Style => RendererId::Style,
-            UITab::Render => RendererId::Render,
+            UITab::Style | UITab::Render(false) => RendererId::Style,
+            UITab::Render(true) => RendererId::Render,
         }
     }
 }
