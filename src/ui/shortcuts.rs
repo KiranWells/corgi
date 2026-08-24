@@ -7,6 +7,7 @@ use eframe::egui::Key::*;
 use eframe::egui::{self, KeyboardShortcut, Modifiers};
 
 use crate::ui::ActiveFile;
+use crate::worker::RendererId;
 
 const CTRL_SHIFT: Modifiers = Modifiers {
     ctrl: true,
@@ -36,10 +37,26 @@ pub const FORCE_CLOSE: KeyboardShortcut = KeyboardShortcut {
     modifiers: CTRL_SHIFT,
     logical_key: Q,
 };
+pub const CANCEL_ESC: KeyboardShortcut = KeyboardShortcut {
+    modifiers: Modifiers::NONE,
+    logical_key: Escape,
+};
+pub const CANCEL_CTRLC: KeyboardShortcut = KeyboardShortcut {
+    modifiers: Modifiers::CTRL,
+    logical_key: C,
+};
 
 // Note: These must be in order of most specific to least specific;
 // if Ctrl-S is before Ctrl-Shift-S, it will consume the shortcut first.
-pub const ALL: &[KeyboardShortcut] = &[SAVE_AS, SAVE, OPEN, FORCE_CLOSE, CLOSE];
+pub const ALL: &[KeyboardShortcut] = &[
+    SAVE_AS,
+    SAVE,
+    OPEN,
+    FORCE_CLOSE,
+    CLOSE,
+    CANCEL_CTRLC,
+    CANCEL_ESC,
+];
 
 impl super::CorgiUI {
     pub(super) fn save(&mut self, context: &mut crate::Context) -> bool {
@@ -187,6 +204,7 @@ impl super::CorgiUI {
         &mut self,
         context: &mut crate::Context,
         ctx: &eframe::egui::Context,
+        cancel: impl Fn(RendererId),
     ) {
         // We collect the pressed shortcut here to avoid running the action within input_mut -
         // calling ctx within will lead to a deadlock as it is already locked by input_mut.
@@ -214,6 +232,12 @@ impl super::CorgiUI {
             }
             Some(x) if x == FORCE_CLOSE => {
                 self.force_close(ctx);
+            }
+            Some(x) if x == CANCEL_CTRLC || x == CANCEL_ESC => {
+                tracing::debug!("cancelling");
+                for id in RendererId::ALL {
+                    cancel(*id);
+                }
             }
             Some(_) => unreachable!(),
             None => {}

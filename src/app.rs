@@ -178,14 +178,10 @@ impl CorgiApp {
             .expect("Eframe must be launched with the wgpu backend");
         let (ui_send, worker_recv) = mpsc::channel::<ImageGenCommand>();
         let (worker_send, ui_recv) = mpsc::channel::<StatusMessage>();
-        let cancelled: HashMap<RendererId, Arc<AtomicBool>> = [
-            (RendererId::Explore, Arc::new(AtomicBool::new(false))),
-            (RendererId::Style, Arc::new(AtomicBool::new(false))),
-            (RendererId::Render, Arc::new(AtomicBool::new(false))),
-            (RendererId::Thumbnail, Arc::new(AtomicBool::new(false))),
-        ]
-        .into_iter()
-        .collect();
+        let cancelled: HashMap<RendererId, Arc<AtomicBool>> = RendererId::ALL
+            .iter()
+            .map(|id| (*id, Arc::new(AtomicBool::new(false))))
+            .collect();
         let mut initial_image = ImgSpec::default();
         let output_image = ImgSpec::default();
         let ctx = &cc.egui_ctx;
@@ -335,11 +331,29 @@ impl eframe::App for CorgiApp {
         }
         if let Some(rs) = frame.wgpu_render_state() {
             // Force a device wait before finishing the frame to prevent rendering errors
-            let _ = rs.device.poll(wgpu::PollType::wait_indefinitely());
+            match rs.device.poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: Some(Duration::from_millis(30)),
+            }) {
+                Ok(wgpu::PollStatus::QueueEmpty) | Ok(wgpu::PollStatus::WaitSucceeded) => {}
+                Ok(wgpu::PollStatus::Poll) | Err(wgpu::PollError::WrongSubmissionIndex(_, _)) => {
+                    unreachable!()
+                }
+                Err(wgpu::PollError::Timeout) => {
+                    tracing::debug!("wait timed out");
+                    ui.request_discard("GPU wait timed out");
+                    if !ui.will_discard() {
+                        let _ = rs.device.poll(wgpu::wgt::PollType::wait_indefinitely());
+                    }
+                }
+            }
         }
     }
 
     fn on_exit(&mut self) {
+        for c in self.cancel_worker.values() {
+            c.store(true, std::sync::atomic::Ordering::Release);
+        }
         self.context.save();
         if self
             .command_channel

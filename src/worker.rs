@@ -42,6 +42,15 @@ pub enum RendererId {
     Thumbnail,
 }
 
+impl RendererId {
+    pub const ALL: &[RendererId] = &[
+        RendererId::Explore,
+        RendererId::Style,
+        RendererId::Render,
+        RendererId::Thumbnail,
+    ];
+}
+
 impl WorkerState {
     /// Create state for a new worker thread to render images.
     #[expect(clippy::too_many_arguments)]

@@ -217,7 +217,7 @@ impl CorgiUI {
         &mut self,
         ui: &mut egui::Ui,
         context: &mut crate::Context,
-        cancel: impl FnOnce(RendererId),
+        cancel: impl Fn(RendererId),
     ) {
         let style = ui.style().clone();
         let start_show_splash = self.show_splash;
@@ -236,7 +236,7 @@ impl CorgiUI {
                         .show(|tui| match self.tab {
                             UITab::Explore => self.explore_tab(context, tui),
                             UITab::Style => self.style_tab(context, tui),
-                            UITab::Render(_) => self.render_tab(context, cancel, tui),
+                            UITab::Render(_) => self.render_tab(context, &cancel, tui),
                         });
                 });
             });
@@ -458,7 +458,7 @@ impl CorgiUI {
         }
 
         self.show_confirm_dialog(ui, context, res);
-        self.handle_shortcuts(context, ui);
+        self.handle_shortcuts(context, ui, cancel);
 
         self.swap = None;
     }
@@ -935,7 +935,7 @@ impl CorgiUI {
     /// Returns whether the current tab has a viewport that needs
     /// automatic updates when the image settings change.
     pub fn has_active_viewport(&self) -> bool {
-        self.tab != UITab::Render(true)
+        !matches!(self.tab, UITab::Render(_))
     }
 
     /// Sends a render command for the current tab to the worker thread
