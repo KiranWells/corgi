@@ -283,6 +283,7 @@ impl eframe::App for CorgiApp {
                 }
             }
         }
+        let current_tab = self.ui_state.tab();
         self.ui_state
             .generate_ui(ui, &mut self.context, |id: RendererId| {
                 self.cancel_worker
@@ -290,23 +291,25 @@ impl eframe::App for CorgiApp {
                     .unwrap()
                     .store(true, std::sync::atomic::Ordering::Relaxed)
             });
-        if self.ui_state.has_active_viewport() && self.worker_handle.is_some() {
-            let image = self.ui_state.image();
+        if (self.ui_state.has_active_viewport()
+            || std::mem::discriminant(&self.ui_state.tab()) != std::mem::discriminant(&current_tab)
+                && self.ui_state.renderer() != RendererId::Render)
+            && self.worker_handle.is_some()
+        {
+            let id = self.ui_state.renderer();
+            let image = self.ui_state.image_to_render(id);
             match self
                 .debouncers
-                .get_mut(&self.ui_state.renderer())
+                .get_mut(&id)
                 .map_or(PollState::Trigger, |d| {
                     d.poll(image.clone(), ui.input(|is| is.pointer.any_down()))
                 }) {
                 PollState::Trigger => {
-                    if !self.debouncers.contains_key(&self.ui_state.renderer()) {
-                        self.debouncers.insert(
-                            self.ui_state.renderer(),
-                            ImgDebouncer::new(Duration::from_millis(300), image.clone()),
-                        );
-                    }
+                    self.debouncers.entry(id).or_insert_with(|| {
+                        ImgDebouncer::new(Duration::from_millis(300), image.clone())
+                    });
                     self.cancel_worker
-                        .get(&self.ui_state.renderer())
+                        .get(&id)
                         .unwrap()
                         .store(false, std::sync::atomic::Ordering::Relaxed);
 

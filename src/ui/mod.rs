@@ -978,6 +978,10 @@ impl CorgiUI {
             tracing::error!("Worker thread has stopped; please restart the app.");
         }
     }
+
+    pub fn tab(&self) -> UITab {
+        self.tab
+    }
 }
 
 impl ActiveFile {
