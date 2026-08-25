@@ -466,7 +466,9 @@ impl CorgiUI {
         self.show_confirm_dialog(ui, context, res);
         self.handle_shortcuts(context, ui, cancel);
 
-        self.swap = None;
+        if !ui.will_discard() {
+            self.swap = None;
+        }
         self.history.update(&self.root_spec);
     }
 

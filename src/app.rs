@@ -189,7 +189,7 @@ impl CorgiApp {
         ctx.set_global_style(context.theme().style());
         egui_material_icons::initialize(&cc.egui_ctx);
         ctx.options_mut(|options| {
-            options.max_passes = std::num::NonZeroUsize::new(1).unwrap();
+            options.max_passes = std::num::NonZeroUsize::new(5).unwrap();
         });
         egui_extras::install_image_loaders(ctx);
 
@@ -333,7 +333,7 @@ impl eframe::App for CorgiApp {
             // Force a device wait before finishing the frame to prevent rendering errors
             match rs.device.poll(wgpu::PollType::Wait {
                 submission_index: None,
-                timeout: Some(Duration::from_millis(30)),
+                timeout: Some(Duration::from_millis(300)),
             }) {
                 Ok(wgpu::PollStatus::QueueEmpty) | Ok(wgpu::PollStatus::WaitSucceeded) => {}
                 Ok(wgpu::PollStatus::Poll) | Err(wgpu::PollError::WrongSubmissionIndex(_, _)) => {

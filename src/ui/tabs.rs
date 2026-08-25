@@ -348,7 +348,16 @@ impl super::CorgiUI {
                 }
                 self.render_state.save_path = str_path.into();
 
-                if tui.ui_add(Button::new(icons::ICON_FOLDER_OPEN)).clicked()
+                if tui
+                    .style(Style {
+                        size: Size {
+                            width: length(text_size.x + spacing.button_padding.x * 4.0),
+                            height: auto(),
+                        },
+                        ..Default::default()
+                    })
+                    .ui_add(Button::new(icons::ICON_FOLDER_OPEN))
+                    .clicked()
                     && let Some(path) = rfd::FileDialog::new()
                         .set_directory(&self.render_state.save_path)
                         .pick_folder()

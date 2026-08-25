@@ -300,6 +300,7 @@ impl Engine {
         image: &ImgSpec,
         status_callback: &mut impl FnMut(ProgressUpdate),
     ) -> Result<ImageTimings, RenderingError> {
+        self.cancelled.store(false, Ordering::Relaxed);
         let mut timings = ImageTimings::default();
         self.cache_validity.update(self.diff(image));
         self.last_image = Some(image.clone());
