@@ -1,7 +1,7 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-use corgi_lib::types::{OptLevel, Style as ImgStyle, View, get_precision};
+use corgi_lib::types::{ImgSpec, OptLevel, Style as ImgStyle, View, get_precision};
 use directories::BaseDirs;
 use eframe::egui::{self, Button, CornerRadius, TextStyle, WidgetText};
 use egui_material_icons::icons;
@@ -25,7 +25,7 @@ pub struct ExploreTabState {
 
 #[derive(Debug)]
 pub struct StyleTabState {
-    pub rendered_view: View,
+    pub rendered_spec: ImgSpec,
     pub scaling: f32,
     pub style_presets: PresetLibrary,
 }

@@ -184,6 +184,19 @@ impl Default for ComplexPoint {
 }
 
 impl ImgSpec {
+    /// Represents some arbitrary image that is significantly different from
+    /// any reasonably desired image.
+    pub fn invalid() -> Self {
+        // Use a location of 1000 + 1000i as a proxy for "not rendered yet" to
+        // avoid the complexity of needing an Option
+        let mut img = Self::default();
+        img.location.center = ComplexPoint {
+            x: Float::with_val(53, 1000.0),
+            y: Float::with_val(53, 1000.0),
+        };
+        img
+    }
+
     pub fn algorithm(&self) -> Algorithm {
         if self.optimization_level == OptLevel::HighPrecisionFloat {
             Algorithm::DirectFloatCPU

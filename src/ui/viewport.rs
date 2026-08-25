@@ -65,7 +65,7 @@ impl super::CorgiUI {
                         UITab::Render(true) => self.render_state.rendered_view.clone(),
                         UITab::Explore => self.explore_state.rendered_view.clone(),
                         UITab::Style | UITab::Render(false) => {
-                            self.style_state.rendered_view.clone()
+                            self.style_state.rendered_spec.view()
                         }
                     },
                     view: view_image.view(),
@@ -218,7 +218,7 @@ impl super::CorgiUI {
         let current_angle = match self.tab {
             UITab::Render(true) => self.current_view.angle - self.render_state.rendered_view.angle,
             UITab::Render(false) => {
-                self.style_state.rendered_view.angle - self.root_spec.location.angle
+                self.style_state.rendered_spec.location.angle - self.root_spec.location.angle
             }
             _ => self.root_spec.location.angle,
         };

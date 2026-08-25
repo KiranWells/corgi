@@ -8,6 +8,7 @@ contains the code necessary to update internal state and render the ui.
 
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, mpsc};
+use std::time::Duration;
 
 use cargo_packager_resource_resolver::{current_format, resources_dir};
 use corgi_lib::image_gen::CompressionParams;
@@ -33,6 +34,7 @@ use crate::config::corgi_project_dirs;
 use crate::share::{create_share_string, parse_share_string};
 use crate::ui::preview_resources::ThumbPaintCallback;
 use crate::ui::tabs::{ExploreTabState, RenderState, RenderTabState, StyleTabState, UITab};
+use crate::ui::undo::EditHistory;
 use crate::ui::utils::{StyleExt, indent_with_line, raw_selection, ui_with_label};
 use crate::worker::{ImageGenCommand, RendererId};
 
@@ -45,6 +47,7 @@ mod settings;
 mod shortcuts;
 mod splash;
 mod tabs;
+mod undo;
 mod utils;
 mod viewport;
 
@@ -124,6 +127,7 @@ pub struct CorgiUI {
     active_file: Option<ActiveFile>,
     confirm: Option<(String, Vec<(String, DynCallback)>)>,
     show_splash: bool,
+    history: EditHistory<ImgSpec>,
 }
 
 static RESOURCE_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
@@ -164,10 +168,14 @@ impl CorgiUI {
             None
         };
         let default_image = image == ImgSpec::default();
+        let root_spec = ImgSpec {
+            optimization_level: OptLevel::AccuracyOptimized,
+            ..image.clone()
+        };
         Self {
             tab: UITab::Explore,
             explore_state: ExploreTabState {
-                rendered_view: image.view(),
+                rendered_view: ImgSpec::invalid().view(),
                 style: ImgStyle::opt_default(),
                 scaling: 0.5,
                 location_presets: PresetLibrary::new(
@@ -176,7 +184,7 @@ impl CorgiUI {
                 opt_level: OptLevel::PerformanceOptimized,
             },
             style_state: StyleTabState {
-                rendered_view: image.view(),
+                rendered_spec: ImgSpec::invalid(),
                 scaling: 1.0,
                 style_presets: PresetLibrary::new(
                     base_dirs.iter().map(|p| p.join("styles")).collect(),
@@ -189,10 +197,8 @@ impl CorgiUI {
                 save_path: context.cache().previous_paths.image.clone(),
             },
             current_view: image.view(),
-            root_spec: ImgSpec {
-                optimization_level: OptLevel::AccuracyOptimized,
-                ..image
-            },
+            history: EditHistory::new(root_spec.clone(), Duration::from_millis(300)),
+            root_spec,
             show_camera: false,
             setting_probe: false,
             swap: None,
@@ -461,6 +467,7 @@ impl CorgiUI {
         self.handle_shortcuts(context, ui, cancel);
 
         self.swap = None;
+        self.history.update(&self.root_spec);
     }
 
     fn show_confirm_dialog(
@@ -555,6 +562,26 @@ impl CorgiUI {
                         .clicked()
                     {
                         self.open(context);
+                    }
+                    if ui
+                        .add_enabled(
+                            self.history.has_history(),
+                            Button::new("Undo")
+                                .shortcut_text(ui.ctx().format_shortcut(&shortcuts::UNDO)),
+                        )
+                        .clicked()
+                    {
+                        self.undo();
+                    }
+                    if ui
+                        .add_enabled(
+                            self.history.has_future(),
+                            Button::new("Redo")
+                                .shortcut_text(ui.ctx().format_shortcut(&shortcuts::REDO)),
+                        )
+                        .clicked()
+                    {
+                        self.redo();
                     }
                     ui.separator();
                     if ui.add(Button::new("Share…")).clicked() {
@@ -883,12 +910,7 @@ impl CorgiUI {
         match self.tab {
             UITab::Explore => self.image_to_render(RendererId::Explore),
             UITab::Style => self.image_to_render(RendererId::Style),
-            UITab::Render(false) => {
-                let mut active_image = self.root_spec.clone();
-                active_image.set_view(self.style_state.rendered_view.clone());
-                active_image.scale(self.style_state.scaling);
-                active_image
-            }
+            UITab::Render(false) => self.style_state.rendered_spec.clone(),
             UITab::Render(true) => {
                 let mut active_image = self.root_spec.clone();
                 active_image.set_view(self.current_view.clone());
@@ -934,8 +956,37 @@ impl CorgiUI {
 
     /// Returns whether the current tab has a viewport that needs
     /// automatic updates when the image settings change.
-    pub fn has_active_viewport(&self) -> bool {
-        !matches!(self.tab, UITab::Render(_))
+    pub fn needs_viewport_refresh(&self) -> bool {
+        match self.tab {
+            UITab::Explore | UITab::Style => true,
+            UITab::Render(false) => {
+                // render tab preview only needs to change if the camera changed to somewhere
+                // outside of the style viewport or the style changed
+                let current_img = self.image();
+                let new_img = self.image_to_render(RendererId::Style);
+
+                if current_img.style != new_img.style {
+                    return true;
+                }
+
+                let offset = current_img
+                    .view()
+                    .complex_to_px_delta(&new_img.location.center);
+                let zoom_diff = current_img.location.zoom - new_img.location.zoom;
+                let valid_range = -6.0f32..=1.0;
+                let buffer = 2.0f32.powf(zoom_diff.clamp(-6.0, 1.0)) * 100.0;
+
+                if offset.x.abs() > current_img.width as f32 * 0.5 + buffer
+                    || offset.y.abs() > current_img.height as f32 * 0.5 + buffer
+                    || !valid_range.contains(&zoom_diff)
+                {
+                    return true;
+                }
+
+                false
+            }
+            UITab::Render(true) => false,
+        }
     }
 
     /// Sends a render command for the current tab to the worker thread
@@ -952,21 +1003,21 @@ impl CorgiUI {
         ))?)
     }
 
-    pub fn update_rendered_view(&mut self, id: RendererId, viewport: View) {
+    pub fn update_rendered_view(&mut self, id: RendererId, spec: ImgSpec) {
         match id {
             RendererId::Explore => {
-                self.explore_state.rendered_view = viewport;
+                self.explore_state.rendered_view = spec.view();
             }
             RendererId::Style => {
-                self.style_state.rendered_view = viewport;
+                self.style_state.rendered_spec = spec;
             }
             RendererId::Render => {
-                self.render_state.rendered_view = viewport.clone();
-                let mut view = viewport.clone();
+                self.render_state.rendered_view = spec.view();
+                let mut view = spec.view();
                 view.width = self.current_view.width;
                 view.height = self.current_view.height;
                 self.current_view = view;
-                self.current_view.zoom_to_fit(&viewport);
+                self.current_view.zoom_to_fit(&spec.view());
                 self.render_state.state = RenderState::Rendered;
             }
             RendererId::Thumbnail => {}

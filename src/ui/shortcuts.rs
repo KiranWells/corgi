@@ -45,6 +45,18 @@ pub const CANCEL_CTRLC: KeyboardShortcut = KeyboardShortcut {
     modifiers: Modifiers::CTRL,
     logical_key: C,
 };
+pub const UNDO: KeyboardShortcut = KeyboardShortcut {
+    modifiers: Modifiers::CTRL,
+    logical_key: Z,
+};
+pub const REDO: KeyboardShortcut = KeyboardShortcut {
+    modifiers: CTRL_SHIFT,
+    logical_key: Z,
+};
+pub const REDO_Y: KeyboardShortcut = KeyboardShortcut {
+    modifiers: Modifiers::CTRL,
+    logical_key: Y,
+};
 
 // Note: These must be in order of most specific to least specific;
 // if Ctrl-S is before Ctrl-Shift-S, it will consume the shortcut first.
@@ -56,6 +68,9 @@ pub const ALL: &[KeyboardShortcut] = &[
     CLOSE,
     CANCEL_CTRLC,
     CANCEL_ESC,
+    REDO,
+    REDO_Y,
+    UNDO,
 ];
 
 impl super::CorgiUI {
@@ -200,6 +215,24 @@ impl super::CorgiUI {
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
 
+    pub(super) fn undo(&mut self) {
+        if let Some(old) = self.history.undo() {
+            self.root_spec = old.clone();
+        } else {
+            self.status.message = "Already at oldest change".into();
+            self.status.progress = None;
+        }
+    }
+
+    pub(super) fn redo(&mut self) {
+        if let Some(old) = self.history.redo() {
+            self.root_spec = old.clone();
+        } else {
+            self.status.message = "Already at latest change".into();
+            self.status.progress = None;
+        }
+    }
+
     pub(super) fn handle_shortcuts(
         &mut self,
         context: &mut crate::Context,
@@ -238,6 +271,12 @@ impl super::CorgiUI {
                 for id in RendererId::ALL {
                     cancel(*id);
                 }
+            }
+            Some(x) if x == UNDO => {
+                self.undo();
+            }
+            Some(x) if x == REDO || x == REDO_Y => {
+                self.redo();
             }
             Some(_) => unreachable!(),
             None => {}

@@ -274,7 +274,7 @@ impl eframe::App for CorgiApp {
                         .entry(id)
                         .or_insert(ImgDebouncer::new(Duration::from_millis(300), *img.clone()))
                         .update_timings(&timings);
-                    self.ui_state.update_rendered_view(id, img.view());
+                    self.ui_state.update_rendered_view(id, *img);
                 }
                 StatusMessage::Error(report) => {
                     tracing::warn!("Error in worker: {report}");
@@ -283,7 +283,7 @@ impl eframe::App for CorgiApp {
                 }
             }
         }
-        let current_tab = self.ui_state.tab();
+
         self.ui_state
             .generate_ui(ui, &mut self.context, |id: RendererId| {
                 self.cancel_worker
@@ -291,11 +291,8 @@ impl eframe::App for CorgiApp {
                     .unwrap()
                     .store(true, std::sync::atomic::Ordering::Relaxed)
             });
-        if (self.ui_state.has_active_viewport()
-            || std::mem::discriminant(&self.ui_state.tab()) != std::mem::discriminant(&current_tab)
-                && self.ui_state.renderer() != RendererId::Render)
-            && self.worker_handle.is_some()
-        {
+
+        if self.ui_state.needs_viewport_refresh() && self.worker_handle.is_some() {
             let id = self.ui_state.renderer();
             let image = self.ui_state.image_to_render(id);
             match self
