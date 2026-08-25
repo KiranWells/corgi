@@ -9,7 +9,7 @@ use egui_taffy::TuiBuilderLogic;
 use taffy::prelude::*;
 
 use super::preset_library::PresetLibrary;
-use super::utils::{collapsible, input_with_label, point_edit, section};
+use super::utils::{input_with_label, point_edit, section};
 use crate::ui::EditUI;
 use crate::ui::utils::{StyleExt, selection_with_label, ui_with_label};
 use crate::worker::{ImageGenCommand, RendererId};
@@ -56,7 +56,6 @@ pub enum UITab {
 impl super::CorgiUI {
     pub(super) fn explore_tab(&mut self, context: &crate::Context, tui: &mut egui_taffy::Tui) {
         let img = self.image();
-        let item_spacing = tui.egui_ui().spacing().item_spacing;
 
         let mut activate_preset = false;
         self.explore_state.location_presets.render_ui(
@@ -83,12 +82,13 @@ impl super::CorgiUI {
                 Box::new(img),
             ));
         }
-        tui.style(Style::col().top(item_spacing.y * 3.0).side(item_spacing.y * 3.0).gap(item_spacing.y * 2.0))
-        .add(|tui| {
+        section(tui, "Fractal", true, |tui| {
             selection_with_label(
                 tui,
                 "Fractal Mode",
-                Some("Which fractal algorithm to use. Switching from Mandelbrot to Julia will set the Julia parameter to the current view center."),
+                Some(
+                    "Which fractal algorithm to use. Switching from Mandelbrot to Julia will set the Julia parameter to the current view center.",
+                ),
                 &mut self.root_spec.location.fractal_kind,
                 vec![
                     corgi_lib::types::FractalKind::Mandelbrot,
@@ -98,21 +98,17 @@ impl super::CorgiUI {
             match &mut self.root_spec.location.fractal_kind {
                 corgi_lib::types::FractalKind::Mandelbrot => {}
                 corgi_lib::types::FractalKind::Julia(pt) => {
-                    point_edit(tui, "Julia parameter", Some("The C value used in the Julia equation. picking values from interesting locations in the Mandelbrot set tend to be interesting in the Julia Set."), get_precision(img.location.zoom), pt);
+                    point_edit(
+                        tui,
+                        "Julia parameter",
+                        Some(
+                            "The C value used in the Julia equation. picking values from interesting locations in the Mandelbrot set tend to be interesting in the Julia Set.",
+                        ),
+                        get_precision(img.location.zoom),
+                        pt,
+                    );
                 }
             }
-            input_with_label(
-                tui,
-                "Preview Scaling",
-                Some("Scales the resolution of the preview image to improve performance."),
-                egui::DragValue::new(&mut self.explore_state.scaling)
-                    .speed(0.01)
-                    .range(0.1..=1.0)
-                    .max_decimals(2)
-                    .update_while_editing(false),
-            );
-        });
-        section(tui, "Viewport", true, |tui| {
             point_edit(
                 tui,
                 "Image Center",
@@ -158,7 +154,38 @@ impl super::CorgiUI {
                     res
                 },
             );
-            collapsible(tui, "Advanced", |tui| {
+        });
+        section(tui, "Viewport", true, |tui| {
+            input_with_label(
+                tui,
+                "Preview Scaling",
+                Some("Scales the resolution of the preview image to improve performance."),
+                egui::DragValue::new(&mut self.explore_state.scaling)
+                    .speed(0.01)
+                    .range(0.1..=1.0)
+                    .max_decimals(2)
+                    .update_while_editing(false),
+            );
+            tui.egui_style_mut().spacing.icon_width = tui.egui_ui().spacing().icon_width * 1.5;
+            tui.ui_add(egui::Checkbox::new(&mut self.show_camera, "Show Camera"));
+            if self.show_camera {
+                self.image_size_edit(tui);
+            }
+        });
+        if context.config().show_debug_options {
+            section(tui, "Debug", true, |tui| {
+                selection_with_label(
+                    tui,
+                    "Opt Level",
+                    Some("Determines which algorithm to use"),
+                    &mut self.explore_state.opt_level,
+                    vec![
+                        OptLevel::PerformanceOptimized,
+                        OptLevel::CacheOptimized,
+                        OptLevel::CPUOnly,
+                        OptLevel::HighPrecisionFloat,
+                    ],
+                );
                 point_edit(
                     tui,
                     "Probe Point",
@@ -174,39 +201,6 @@ impl super::CorgiUI {
                 )))
                 .clicked()
                 .then(|| self.setting_probe = !self.setting_probe);
-            });
-        });
-        section(tui, "Camera", true, |tui| {
-            tui.egui_style_mut().spacing.icon_width = tui.egui_ui().spacing().icon_width * 1.5;
-            tui.ui_add(egui::Checkbox::new(&mut self.show_camera, "Show Camera"));
-            input_with_label(
-                tui,
-                "Image width",
-                None,
-                egui::DragValue::new(&mut self.root_spec.width).speed(10.0),
-            );
-            input_with_label(
-                tui,
-                "Image height",
-                None,
-                egui::DragValue::new(&mut self.root_spec.height).speed(10.0),
-            );
-        });
-        if context.config().show_debug_options {
-            section(tui, "Debug", true, |tui| {
-                tui.egui_style_mut().spacing.icon_width = tui.egui_ui().spacing().icon_width * 1.5;
-                selection_with_label(
-                    tui,
-                    "Opt Level",
-                    Some("Determines which algorithm to use"),
-                    &mut self.explore_state.opt_level,
-                    vec![
-                        OptLevel::PerformanceOptimized,
-                        OptLevel::CacheOptimized,
-                        OptLevel::CPUOnly,
-                        OptLevel::HighPrecisionFloat,
-                    ],
-                );
             });
         }
     }
@@ -246,6 +240,23 @@ impl super::CorgiUI {
         });
         section(tui, "Internal", true, |tui| {
             self.root_spec.style.internal_coloring.render_edit_ui(tui);
+        });
+        section(tui, "Viewport", true, |tui| {
+            input_with_label(
+                tui,
+                "Preview Scaling",
+                Some("Scales the resolution of the preview image to improve performance."),
+                egui::DragValue::new(&mut self.style_state.scaling)
+                    .speed(0.01)
+                    .range(0.1..=1.0)
+                    .max_decimals(2)
+                    .update_while_editing(false),
+            );
+            tui.egui_style_mut().spacing.icon_width = tui.egui_ui().spacing().icon_width * 1.5;
+            tui.ui_add(egui::Checkbox::new(&mut self.show_camera, "Show Camera"));
+            if self.show_camera {
+                self.image_size_edit(tui);
+            }
         });
     }
 
@@ -291,54 +302,7 @@ impl super::CorgiUI {
             }
         });
         section(tui, "Image Settings", true, |tui| {
-            let mut size = (self.root_spec.width, self.root_spec.height);
-            fn format(size: (u32, u32)) -> String {
-                format!("{}×{}", size.0, size.1)
-            }
-
-            ui_with_label(tui, "Preset", None, |tui| {
-                let options = vec![
-                    (3840, 2160),
-                    (2160, 3840),
-                    (2560, 1440),
-                    (1440, 2560),
-                    (1920, 1080),
-                    (1080, 1920),
-                    (1280, 720),
-                    (720, 1280),
-                    (1024, 1024),
-                    (512, 512),
-                ];
-                tui.ui_add_manual(
-                    |ui| {
-                        egui::ComboBox::from_id_salt("Preset")
-                            .selected_text(format(size))
-                            .show_ui(ui, |ui| {
-                                for selected_value in options {
-                                    let text = format(selected_value);
-                                    ui.selectable_value(&mut size, selected_value, text);
-                                }
-                            })
-                            .response
-                    },
-                    |res, _ui| res,
-                )
-            });
-            self.root_spec.width = size.0;
-            self.root_spec.height = size.1;
-
-            input_with_label(
-                tui,
-                "Image width",
-                None,
-                egui::DragValue::new(&mut self.root_spec.width).speed(10.0),
-            );
-            input_with_label(
-                tui,
-                "Image height",
-                None,
-                egui::DragValue::new(&mut self.root_spec.height).speed(10.0),
-            );
+            self.image_size_edit(tui);
             tui.style(Style::row()).add(|tui| {
                 let mut str_path = self
                     .render_state
@@ -465,6 +429,57 @@ impl super::CorgiUI {
                 }
             }
         });
+    }
+
+    fn image_size_edit(&mut self, tui: &mut egui_taffy::Tui) {
+        let mut size = (self.root_spec.width, self.root_spec.height);
+        fn format(size: (u32, u32)) -> String {
+            format!("{}×{}", size.0, size.1)
+        }
+
+        ui_with_label(tui, "Preset", None, |tui| {
+            let options = vec![
+                (3840, 2160),
+                (2160, 3840),
+                (2560, 1440),
+                (1440, 2560),
+                (1920, 1080),
+                (1080, 1920),
+                (1280, 720),
+                (720, 1280),
+                (1024, 1024),
+                (512, 512),
+            ];
+            tui.ui_add_manual(
+                |ui| {
+                    egui::ComboBox::from_id_salt("Preset")
+                        .selected_text(format(size))
+                        .show_ui(ui, |ui| {
+                            for selected_value in options {
+                                let text = format(selected_value);
+                                ui.selectable_value(&mut size, selected_value, text);
+                            }
+                        })
+                        .response
+                },
+                |res, _ui| res,
+            )
+        });
+        self.root_spec.width = size.0;
+        self.root_spec.height = size.1;
+
+        input_with_label(
+            tui,
+            "Image width",
+            None,
+            egui::DragValue::new(&mut self.root_spec.width).speed(10.0),
+        );
+        input_with_label(
+            tui,
+            "Image height",
+            None,
+            egui::DragValue::new(&mut self.root_spec.height).speed(10.0),
+        );
     }
 
     pub(super) fn viewport_scaling(&self) -> f32 {

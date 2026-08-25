@@ -270,7 +270,7 @@ impl super::CorgiUI {
             if self.tab != UITab::Render(true) {
                 painter.add(
                     egui::epaint::RectShape::stroke(
-                        render_rect.intersect(rect),
+                        render_rect,
                         0.0,
                         simple_stroke,
                         egui::StrokeKind::Outside,

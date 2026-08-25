@@ -240,6 +240,7 @@ impl ToLabel for OptLevel {
 }
 
 /// Adds a CollapsingHeader in a Tui context
+#[expect(dead_code)]
 pub fn collapsible(tui: &mut egui_taffy::Tui, summary: &str, add_contents: impl FnOnce(&mut Tui)) {
     tui.ui_add_manual(
         |ui| {
