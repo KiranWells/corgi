@@ -64,6 +64,10 @@ impl PresetLibrary {
         for root in library_roots.iter() {
             let editable =
                 std::env::var("CORGI_OVERRIDE_EDITABLE").is_ok() || root == &library_roots[0];
+            if !root.exists() {
+                tracing::debug!("Library root does not exist: {root:?}");
+                continue;
+            }
             if !root.is_dir() {
                 tracing::warn!("Invalid library root - not a folder: {root:?}");
                 continue;

@@ -16,14 +16,16 @@ pub(super) enum DocsPage {
     QuickStart,
     Styling,
     DataExport,
+    Keybinds,
 }
 
 impl DocsPage {
-    const ALL: [DocsPage; 4] = [
+    const ALL: [DocsPage; 5] = [
         DocsPage::Home,
         DocsPage::QuickStart,
         DocsPage::Styling,
         DocsPage::DataExport,
+        DocsPage::Keybinds,
     ];
     fn link(self) -> &'static str {
         match self {
@@ -31,6 +33,7 @@ impl DocsPage {
             DocsPage::QuickStart => "docs/quick_start.md",
             DocsPage::Styling => "docs/styling.md",
             DocsPage::DataExport => "docs/data_export.md",
+            DocsPage::Keybinds => "docs/keybinds.md",
         }
     }
 }

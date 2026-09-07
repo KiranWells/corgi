@@ -31,31 +31,35 @@ After dialing in the look you want, select the "Render" tab.
 
 ## Render Mode
 
-In this tab you can decide on the size, format, and save location of your final image. On the left is a preview that shows you what image has currently been rendered and is ready to save, along with its resolution -- this will be blank until "Render" is pressed.
+In this tab you can preview and adjust the camera, render the final image, and save it as a file. When you first switch to the tab, a camera preview will show. From here, you can adjust the size, location, and orientation of the final image without re-rendering it every time.
 
-![The render page, showing a rendered image and highlighting the Render and Save Image buttons](./images/render.avif)
+![The render page, showing the camera preview during an edit](./images/camera.avif)
 
-Adjust the image resolution, then press "Render" to calculate the final image. Once complete, the final image will be shown in the viewport on the left. Finally, select "Save Image", pick a folder to save the image file in, and you're done!
+Once you are happy with the framing, click "Render" to calculate the final image. Once complete, the final image will be shown in the viewport on the left.
+
+![The render page, showing a rendered image](./images/render.avif)
+
+Finally, select "Save Image", pick a folder to save the image file in, and you're done!
 
 ## Sharing Image Settings
 
 The final saved image has the settings used to make it stored within the file metadata, so you can open it directly in Corgi to load the exact location and style. However, this metadata is often stripped when sharing the image through online platforms. If you want to share the settings with someone, you can save them directly as a `.corg` file, or just send them the share text, like this:
 
 ```
-                           /
-                         <#@#>
-                    \     %@K.
-                     LUv_WMBTYIHd+.
-           \  :.   =ABlAwAEBAAwMTA5:
-            +NDc3= MDUWLTIuNzY3NjM2^
-         \|MDkzNTI+4MjMjQXpEkqgjPw+
- ~~~~|~~~BA5r_KPujcdD4XoA89AgS4Hu<
-         /|V56aY-g+B7wEAER_OO3r9eL+
-            +OikB= CSb0hs6nxKEqH93h.
-           /  :^   =y3WwVXZqbsjKj4-:
-                     JTFAeSnlJya8+^
-                    /     %@%^
-                         <#@#>
+                           /          
+                         <#@#>        
+                    \     %KL.        
+                     Uv_WMBTYIHdA+.   
+           \  :.   =B1AwDzBBCxx9sBO:  
+            +wijr= sJJaqdZKtq0Tj4hQ^  
+         \|jdRwwuM+RvICgY4H0fftWCz+   
+ ~~~~|~~~WaWS4NA10jWADUKPoSkp_1pn<    
+         /|tpC7vrR+lffOnDEPy9BxB3I+   
+            +qhL8= Pl2qJ_X2_9h5NvY0.  
+           /  :^   =6uuyA7QbbroV1YM:  
+                     Bv4P5Z_yjKmu+^   
+                    /     AQ%^        
+                         <#@#>        
                            \
 ```
 
