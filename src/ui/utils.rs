@@ -26,7 +26,7 @@ impl StyleExt for Style {
             display: Display::Flex,
             flex_direction: FlexDirection::Row,
             size: Size {
-                width: percent(1.0),
+                width: percent(1.0_f32),
                 height: auto(),
             },
             justify_content: Some(AlignContent::SpaceBetween),
@@ -39,7 +39,7 @@ impl StyleExt for Style {
             display: Display::Flex,
             flex_direction: FlexDirection::Column,
             size: Size {
-                width: percent(1.0),
+                width: percent(1.0_f32),
                 height: auto(),
             },
             ..Default::default()
@@ -509,7 +509,7 @@ pub fn ui_with_label(
         res.union(
             tui.style(Style {
                 display: Display::Flex,
-                size: percent(1.0),
+                size: percent(1.0_f32),
                 justify_content: Some(AlignContent::End),
                 gap: length(gap),
                 ..Default::default()
@@ -560,7 +560,7 @@ pub fn point_edit(
             indent_with_line(tui, |tui| {
                 tui.style(taffy::Style {
                     size: Size {
-                        width: percent(1.0),
+                        width: percent(1.0_f32),
                         height: auto(),
                     },
                     display: taffy::Display::Grid,

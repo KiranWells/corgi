@@ -187,7 +187,7 @@ impl EditUI for Gradient {
                         align_items: Some(AlignItems::Center),
                         justify_content: Some(AlignContent::Center),
                         gap: length(tui.egui_ui().global_style().spacing.item_spacing.x),
-                        size: percent(1.0),
+                        size: percent(1.0_f32),
                         ..Default::default()
                     })
                     .add(|tui| {

@@ -332,12 +332,12 @@ impl PresetGroup {
             |tui, thumbnails| {
                 tui.style(taffy::Style {
                     size: taffy::Size {
-                        width: percent(1.0),
+                        width: percent(1.0_f32),
                         height: auto(),
                     },
                     display: taffy::Display::Grid,
                     grid_template_rows: vec![min_content(); thumbnails.len().div_ceil(2)],
-                    grid_template_columns: vec![fr(0.5); 2],
+                    grid_template_columns: vec![fr(0.5_f32); 2],
                     padding: Rect::length(item_spacing.y),
                     gap: length(item_spacing.y),
                     ..Default::default()

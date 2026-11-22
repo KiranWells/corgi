@@ -104,7 +104,7 @@ impl CorgiUI {
                         .style(Style {
                             display: Display::Flex,
                             flex_direction: FlexDirection::Column,
-                            size: percent(1.0),
+                            size: percent(1.0_f32),
                             align_items: Some(AlignItems::Start),
                             gap: length(margin),
                             padding: length(margin),
@@ -138,7 +138,7 @@ impl CorgiUI {
                                     padding: length(margin),
                                     size: Size {
                                         width: length(size.x - size.y - margin * 2.0),
-                                        height: percent(1.0),
+                                        height: percent(1.0_f32),
                                     },
                                     overflow: taffy::Point {
                                         x: taffy::Overflow::Clip,
